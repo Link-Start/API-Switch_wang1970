@@ -1,13 +1,20 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Power } from 'lucide-react';
-import { ApiPoolPage } from '@/pages/ApiPoolPage';
 import { ChannelPage } from '@/pages/ChannelPage';
-import { DashboardPage } from '@/pages/DashboardPage';
-import { LogPage } from '@/pages/LogPage';
 import { SettingsPage } from '@/pages/SettingsPage';
-import { TokenPage } from '@/pages/TokenPage';
 import { MainShell, type MainPage } from '@/features/shell/MainShell';
-import { clearToken, getHealth, getStatus, getToken, login, setToken, type AdminHttpError, type AdminStatus, type HealthResponse } from './api';
+import type { VersionedAppSettings } from '@/types';
+import { clearToken, getHealth, getSettings, getStatus, getToken, login, setToken, type AdminHttpError, type AdminStatus, type HealthResponse } from './api';
+
+/** Placeholder for pages not available in Web Admin (Tauri-only features). */
+function ComingSoonPlaceholder() {
+  return (
+    <div className="flex h-64 items-center justify-center text-muted-foreground">
+      开发中
+    </div>
+  );
+}
 
 const GUIDE_BASE = 'https://github.com/wang1970/API-Switch/blob/master/';
 
@@ -21,6 +28,12 @@ function getErrorMessage(error: unknown, fallback: string): string {
   if (!error || !(error instanceof Error)) return fallback;
   const adminError = error as AdminHttpError;
   if (adminError.isRateLimitError) return `登录尝试过于频繁，请在 ${formatSeconds(adminError.retryAfterSeconds)}。`;
+  if (adminError.code === 'INVALID_CREDENTIALS') {
+    if (typeof adminError.remainingAttempts === 'number') {
+      return `用户名或密码错误，还可尝试 ${adminError.remainingAttempts} 次。`;
+    }
+    return '用户名或密码错误。';
+  }
   if (adminError.isAuthError) return '登录已失效，请重新登录。';
   return adminError.message || fallback;
 }
@@ -92,16 +105,19 @@ function LoginView({ onAuthenticated }: { onAuthenticated: () => void }) {
 }
 
 function WebMain() {
-  const [currentPage, setCurrentPage] = useState<MainPage>('apiPool');
+  const { i18n } = useTranslation();
+  const [currentPage, setCurrentPage] = useState<MainPage>('channels');
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [status, setStatus] = useState<AdminStatus | null>(null);
+  const [settings, setSettings] = useState<VersionedAppSettings | undefined>(undefined);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getHealth(), getStatus()])
-      .then(([healthResult, statusResult]) => {
+    Promise.all([getHealth(), getStatus(), getSettings()])
+      .then(([healthResult, statusResult, settingsResult]) => {
         setHealth(healthResult);
         setStatus(statusResult);
+        setSettings(settingsResult.data);
       })
       .catch((err) => {
         if (err instanceof Error && (err as AdminHttpError).isAuthError) {
@@ -113,22 +129,44 @@ function WebMain() {
       });
   }, []);
 
+  // Apply locale and theme
+  useEffect(() => {
+    if (!settings) return;
+
+    // Apply locale from DB
+    const saved = localStorage.getItem('api-switch-locale');
+    if (!saved && settings.locale) {
+      i18n.changeLanguage(settings.locale);
+    }
+
+    // Apply theme
+    const root = document.documentElement;
+    if (settings.theme === 'dark') {
+      root.classList.add('dark');
+    } else if (settings.theme === 'light') {
+      root.classList.remove('dark');
+    } else {
+      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        root.classList.add('dark');
+      } else {
+        root.classList.remove('dark');
+      }
+    }
+  }, [settings]);
+
   const renderPage = () => {
     switch (currentPage) {
-      case 'apiPool':
-        return <ApiPoolPage />;
       case 'channels':
         return <ChannelPage />;
-      case 'tokens':
-        return <TokenPage />;
-      case 'logs':
-        return <LogPage />;
-      case 'dashboard':
-        return <DashboardPage />;
       case 'settings':
         return <SettingsPage />;
+      // Pages not available in Web Admin (Tauri-only features)
+      case 'apiPool':
+      case 'tokens':
+      case 'logs':
+      case 'dashboard':
       default:
-        return <ApiPoolPage />;
+        return <ComingSoonPlaceholder />;
     }
   };
 
@@ -150,6 +188,7 @@ function WebMain() {
     <MainShell
       currentPage={currentPage}
       proxyStatus={{ running: health?.ok ?? false, address: '127.0.0.1', port: status?.port ?? 0 }}
+      settings={settings}
       onNavigate={setCurrentPage}
       onOpenGuide={(path) => window.open(GUIDE_BASE + path, '_blank', 'noopener,noreferrer')}
       renderPage={renderPage}

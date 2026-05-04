@@ -1,11 +1,9 @@
 use crate::database::ApiEntry;
 use crate::error::AppError;
 use crate::AppState;
-use crate::proxy::protocol::get_adapter;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use std::time::Instant;
 use tauri::State;
+use crate::services::pool_service;
 
 #[derive(Serialize)]
 pub struct TestResult {
@@ -37,22 +35,28 @@ pub struct EntryCatalogMetaUpdate {
     pub model_meta_en: String,
 }
 
+impl From<CreateEntryParams> for pool_service::CreateEntryParams {
+    fn from(p: CreateEntryParams) -> Self {
+        Self {
+            channel_id: p.channel_id,
+            model: p.model,
+            display_name: p.display_name,
+            provider_logo: p.provider_logo,
+            release_date: p.release_date,
+            model_meta_zh: p.model_meta_zh,
+            model_meta_en: p.model_meta_en,
+        }
+    }
+}
+
 #[tauri::command]
 pub fn list_entries(state: State<'_, AppState>) -> Result<Vec<ApiEntry>, AppError> {
-    state.db.list_entries()
+    pool_service::list_entries(&state.db)
 }
 
 #[tauri::command]
 pub fn toggle_entry(app: tauri::AppHandle, state: State<'_, AppState>, id: String, enabled: bool) -> Result<(), AppError> {
-    state.db.toggle_entry(&id, enabled)?;
-    // When user manually enables, clear cooldown and failure count for a fresh start
-    if enabled {
-        let _ = state.db.set_entry_cooldown(&id, None);
-        // failure_counts is async RwLock; use try_write to avoid blocking Tauri command
-        if let Ok(mut counts) = state.failure_counts.try_write() {
-            counts.remove(&id);
-        }
-    }
+    pool_service::toggle_entry(&state.db, &state.failure_counts, &id, enabled)?;
     crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
@@ -63,7 +67,7 @@ pub fn reorder_entries(
     state: State<'_, AppState>,
     ordered_ids: Vec<String>,
 ) -> Result<(), AppError> {
-    state.db.reorder_entries(&ordered_ids)?;
+    pool_service::reorder_entries(&state.db, &ordered_ids)?;
     crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
@@ -74,7 +78,7 @@ pub fn delete_entry(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), AppError> {
-    state.db.delete_entry(&id)?;
+    pool_service::delete_entry(&state.db, &id)?;
     crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
@@ -85,19 +89,7 @@ pub fn create_entry(
     state: State<'_, AppState>,
     params: CreateEntryParams,
 ) -> Result<ApiEntry, AppError> {
-    let display_name = params.display_name.as_deref().unwrap_or(&params.model);
-    let entry = state
-        .db
-        .create_entry_auto(
-            &params.channel_id,
-            &params.model,
-            display_name,
-            &params.provider_logo,
-            &params.release_date,
-            &params.model_meta_zh,
-            &params.model_meta_en,
-        )?;
-    let _ = state.db.add_channel_model_if_missing(&params.channel_id, &params.model, entry.owned_by.as_deref());
+    let entry = pool_service::create_entry(&state.db, params.into())?;
     crate::refresh_tray_if_enabled(&app);
     Ok(entry)
 }
@@ -108,9 +100,9 @@ pub fn backfill_entry_catalog_meta(
     state: State<'_, AppState>,
     items: Vec<EntryCatalogMetaUpdate>,
 ) -> Result<(), AppError> {
-    let items: Vec<crate::database::EntryCatalogMetaInput> = items
+    let items: Vec<pool_service::CatalogMetaUpdate> = items
         .into_iter()
-        .map(|item| crate::database::EntryCatalogMetaInput {
+        .map(|item| pool_service::CatalogMetaUpdate {
             id: item.id,
             provider_logo: item.provider_logo,
             release_date: item.release_date,
@@ -118,8 +110,8 @@ pub fn backfill_entry_catalog_meta(
             model_meta_en: item.model_meta_en,
         })
         .collect();
-    state.db.backfill_entry_catalog_meta(&items)?;
-    rebuild_tray(&app);
+    pool_service::backfill_entry_catalog_meta(&state.db, items)?;
+    crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
 
@@ -130,82 +122,12 @@ pub async fn test_entry_latency(
     entry_id: String,
 ) -> Result<TestResult, AppError> {
     let db = state.db.clone();
-
-    let entries = db.get_entries_for_routing_all()?;
-    let entry = entries
-        .iter()
-        .find(|e| e.id == entry_id)
-        .ok_or_else(|| AppError::NotFound(format!("Entry {entry_id} not found")))?
-        .clone();
-
-    let channel = db.get_channel(&entry.channel_id)?;
-    if !entry.enabled || !channel.enabled {
-        return Ok(TestResult {
-            status: "disabled".to_string(),
-            response_ms: entry.response_ms.unwrap_or_else(|| "X".to_string()),
-        });
-    }
-    let adapter = get_adapter(&channel.api_type);
-    let url = adapter.build_chat_url(&channel.base_url, &entry.model);
-
-    let mut upstream_body = json!({
-        "model": entry.model,
-        "messages": [{"role": "user", "content": "hi"}],
-        "stream": false,
-    });
-    adapter.transform_request(&mut upstream_body, &entry.model);
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| AppError::Network(format!("HTTP client: {e}")))?;
-
-    let request = adapter
-        .apply_auth(client.post(&url), &channel.api_key)
-        .json(&upstream_body);
-
-    let start = Instant::now();
-    let response = match request.send().await {
-        Ok(response) => response,
-        Err(_) => {
-            let _ = db.update_entry_response_ms(&entry_id, "X");
-            rebuild_tray(&app);
-            return Ok(TestResult {
-                status: "failed".to_string(),
-                response_ms: "X".to_string(),
-            });
-        }
-    };
-
-    let latency_ms = start.elapsed().as_millis() as u64;
-
-    if !response.status().is_success() {
-        let _error_body = response.text().await.unwrap_or_default();
-        let _ = db.update_entry_response_ms(&entry_id, "X");
-        rebuild_tray(&app);
-        return Ok(TestResult {
-            status: "failed".to_string(),
-            response_ms: "X".to_string(),
-        });
-    }
-
-    // Consume body to ensure complete response
-    let _ = response.bytes().await;
-
-    let response_ms = latency_ms.to_string();
-
-    db.update_entry_response_ms(&entry_id, &response_ms)?;
-    rebuild_tray(&app);
-
+    let result = pool_service::test_entry_latency(&db, &entry_id).await?;
+    crate::refresh_tray_if_enabled(&app);
     Ok(TestResult {
-        status: "ok".to_string(),
-        response_ms,
+        status: result.status,
+        response_ms: result.response_ms,
     })
-}
-
-fn rebuild_tray(app: &tauri::AppHandle) {
-    crate::refresh_tray_if_enabled(app);
 }
 
 #[tauri::command]
@@ -215,7 +137,7 @@ pub fn update_entry_response_ms(
     entry_id: String,
     response_ms: String,
 ) -> Result<(), AppError> {
-    state.db.update_entry_response_ms(&entry_id, &response_ms)?;
-    rebuild_tray(&app);
+    pool_service::update_entry_response_ms(&state.db, &entry_id, &response_ms)?;
+    crate::refresh_tray_if_enabled(&app);
     Ok(())
 }

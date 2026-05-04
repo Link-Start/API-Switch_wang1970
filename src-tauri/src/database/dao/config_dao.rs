@@ -20,6 +20,12 @@ pub struct AppSettings {
     pub start_minimized: bool,
     pub show_guide: bool,
     pub default_sort_mode: String,
+    pub web_admin_enabled: bool,
+    pub web_admin_username: String,
+    pub web_admin_password: String,
+    pub web_admin_port: i32,
+    #[serde(skip_serializing, skip_deserializing, default)]
+    pub updated_at: i64,
 }
 
 impl Default for AppSettings {
@@ -40,6 +46,11 @@ impl Default for AppSettings {
             start_minimized: false,
             show_guide: true,
             default_sort_mode: "custom".to_string(),
+            web_admin_enabled: false,
+            web_admin_username: String::new(),
+            web_admin_password: String::new(),
+            web_admin_port: 9099,
+            updated_at: 0,
         }
     }
 }
@@ -103,12 +114,28 @@ impl Database {
         if let Some(v) = kv.get("default_sort_mode") {
             settings.default_sort_mode = v.clone();
         }
+        if let Some(v) = kv.get("web_admin_enabled") {
+            settings.web_admin_enabled = v == "1";
+        }
+        if let Some(v) = kv.get("web_admin_username") {
+            settings.web_admin_username = v.clone();
+        }
+        if let Some(v) = kv.get("web_admin_password") {
+            settings.web_admin_password = v.clone();
+        }
+        if let Some(v) = kv.get("web_admin_port") {
+            settings.web_admin_port = v.parse().unwrap_or(9099);
+        }
+        if let Some(v) = kv.get("updated_at") {
+            settings.updated_at = v.parse().unwrap_or(0);
+        }
 
         Ok(settings)
     }
 
     pub fn update_settings(&self, updates: &AppSettings) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
+        let updated_at = chrono::Utc::now().timestamp_millis();
 
         let kv = [
             (
@@ -148,6 +175,14 @@ impl Database {
             ),
             ("show_guide", if updates.show_guide { "1" } else { "0" }),
             ("default_sort_mode", &updates.default_sort_mode),
+            (
+                "web_admin_enabled",
+                if updates.web_admin_enabled { "1" } else { "0" },
+            ),
+            ("web_admin_username", &updates.web_admin_username),
+            ("web_admin_password", &updates.web_admin_password),
+            ("web_admin_port", &updates.web_admin_port.to_string()),
+            ("updated_at", &updated_at.to_string()),
         ];
 
         for (key, value) in kv {

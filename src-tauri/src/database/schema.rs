@@ -121,6 +121,17 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
     )
     .map_err(|e| AppError::Database(e.to_string()))?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT NOT NULL,
+            detail TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| AppError::Database(e.to_string()))?;
+
     // 5. Config
     conn.execute(
         "CREATE TABLE IF NOT EXISTS config (
@@ -148,6 +159,10 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
         ("autostart", "0"),
         ("start_minimized", "0"),
         ("default_sort_mode", "custom"),
+        ("web_admin_enabled", "0"),
+        ("web_admin_username", ""),
+        ("web_admin_password", ""),
+        ("web_admin_port", "9099"),
     ];
 
     for (key, value) in defaults {

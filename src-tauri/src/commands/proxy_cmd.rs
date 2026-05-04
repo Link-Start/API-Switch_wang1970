@@ -2,20 +2,19 @@ use crate::commands::config::refresh_settings_l1;
 use crate::error::AppError;
 use crate::proxy::ProxyStatus;
 use crate::AppState;
-use crate::TRAY_ID;
-use tauri::{Manager, State};
+use tauri::State;
 
 #[tauri::command]
 pub fn refresh_tray_menu(app: tauri::AppHandle) -> Result<(), AppError> {
-    let new_menu = crate::build_tray_menu(&app)?;
-    if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        tray.set_menu(Some(new_menu))?;
-    }
+    crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
 
 #[tauri::command]
-pub async fn start_proxy(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<ProxyStatus, AppError> {
+pub async fn start_proxy(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ProxyStatus, AppError> {
     let settings = state.settings.read().await.clone();
     let port = settings.listen_port;
 
@@ -24,8 +23,21 @@ pub async fn start_proxy(app: tauri::AppHandle, state: State<'_, AppState>) -> R
         return Err(AppError::Proxy("Proxy already running".to_string()));
     }
 
-    let server = crate::proxy::ProxyServer::new(port, state.db.clone(), state.settings.clone(), app, state.failure_counts.clone());
-    server.start().await.map_err(|e| AppError::Proxy(e.to_string()))?;
+    let server = crate::proxy::ProxyServer::new(
+        port,
+        state.db.clone(),
+        state.settings.clone(),
+        app.clone(),
+        state.failure_counts.clone(),
+    );
+    let admin_router = crate::admin::build_combined_router(
+        &settings,
+        crate::admin::AdminState::new_runtime(state.inner().clone(), app.clone()),
+    );
+    server
+        .start_with_admin(admin_router)
+        .await
+        .map_err(|e| AppError::Proxy(e.to_string()))?;
 
     let status = ProxyStatus {
         running: true,
@@ -46,7 +58,10 @@ pub async fn start_proxy(app: tauri::AppHandle, state: State<'_, AppState>) -> R
 pub async fn stop_proxy(state: State<'_, AppState>) -> Result<(), AppError> {
     let mut proxy_guard = state.proxy.write().await;
     if let Some(server) = proxy_guard.take() {
-        server.stop().await.map_err(|e| AppError::Proxy(e.to_string()))?;
+        server
+            .stop()
+            .await
+            .map_err(|e| AppError::Proxy(e.to_string()))?;
     }
     state.db.set_config_value("proxy_enabled", "0")?;
     refresh_settings_l1(&state).await?;

@@ -3,7 +3,7 @@ use super::handlers::ProxyError;
 use super::protocol::get_adapter;
 use super::server::ProxyState;
 use crate::database::{AccessKey, ApiEntry, AppSettings, Database};
-use crate::{build_tray_menu, TRAY_ID};
+use crate::refresh_tray_if_enabled;
 use tauri::Emitter;
 use axum::body::Body;
 use axum::http::HeaderMap;
@@ -772,14 +772,7 @@ fn append_and_parse_sse(
 }
 
 fn refresh_tray(app_handle: &tauri::AppHandle) {
-    if crate::EXPERIMENTAL_LAZY_TRAY_REFRESH {
-        return;
-    }
-    if let Ok(new_menu) = build_tray_menu(app_handle) {
-        if let Some(tray) = app_handle.tray_by_id(TRAY_ID) {
-            let _ = tray.set_menu(Some(new_menu));
-        }
-    }
+    refresh_tray_if_enabled(app_handle);
 }
 
 fn status_matches_rule(rule: &str, status: u16) -> bool {

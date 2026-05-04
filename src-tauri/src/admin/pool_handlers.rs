@@ -1,0 +1,131 @@
+use crate::admin::error::AdminError;
+use crate::admin::state::AdminState;
+use crate::database::ApiEntry;
+use crate::services::pool_service;
+use axum::{extract::{Json, Path, State}};
+use serde::Deserialize;
+
+// ---------- Request/Response Types -----------------------------------------
+
+#[derive(Deserialize)]
+pub struct CreateEntryParams {
+    pub channel_id: String,
+    pub model: String,
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub provider_logo: String,
+    #[serde(default)]
+    pub release_date: String,
+    #[serde(default)]
+    pub model_meta_zh: String,
+    #[serde(default)]
+    pub model_meta_en: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogMetaUpdate {
+    pub id: String,
+    pub provider_logo: String,
+    pub release_date: String,
+    pub model_meta_zh: String,
+    pub model_meta_en: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderParams {
+    pub ordered_ids: Vec<String>,
+}
+
+// ---------- Handlers -------------------------------------------------------
+
+/// GET /admin/pool - List all API entries
+pub async fn list(State(state): State<AdminState>) -> Result<Json<Vec<ApiEntry>>, AdminError> {
+    let entries = pool_service::list_entries(&state.db)?;
+    Ok(Json(entries))
+}
+
+/// POST /admin/pool - Create a new API entry
+pub async fn create(
+    State(state): State<AdminState>,
+    Json(payload): Json<CreateEntryParams>,
+) -> Result<Json<ApiEntry>, AdminError> {
+    let entry = pool_service::create_entry(
+        &state.db,
+        pool_service::CreateEntryParams {
+            channel_id: payload.channel_id,
+            model: payload.model,
+            display_name: payload.display_name,
+            provider_logo: payload.provider_logo,
+            release_date: payload.release_date,
+            model_meta_zh: payload.model_meta_zh,
+            model_meta_en: payload.model_meta_en,
+        },
+    )?;
+    Ok(Json(entry))
+}
+
+/// PUT /admin/pool/:id/toggle - Toggle an entry's enabled state
+pub async fn toggle(
+    State(state): State<AdminState>,
+    Path(id): Path<String>,
+    Json(enabled): Json<bool>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    pool_service::toggle_entry(
+        &state.db,
+        &state.runtime.as_ref().ok_or_else(|| {
+            AdminError::Internal("Runtime state not available for toggle operation".to_string())
+        })?.failure_counts,
+        &id,
+        enabled,
+    )?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+/// DELETE /admin/pool/:id - Delete an entry by ID
+pub async fn delete(
+    State(state): State<AdminState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    pool_service::delete_entry(&state.db, &id)?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+/// POST /admin/pool/reorder - Reorder entries
+pub async fn reorder(
+    State(state): State<AdminState>,
+    Json(payload): Json<ReorderParams>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    pool_service::reorder_entries(&state.db, &payload.ordered_ids)?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+/// POST /admin/pool/:id/test-latency - Test latency for a specific entry
+pub async fn test_latency(
+    State(state): State<AdminState>,
+    Path(id): Path<String>,
+) -> Result<Json<pool_service::TestLatencyResult>, AdminError> {
+    let result = pool_service::test_entry_latency(&state.db, &id).await?;
+    Ok(Json(result))
+}
+
+/// POST /admin/pool/backfill-catalog-meta - Backfill catalog metadata for multiple entries
+pub async fn backfill_catalog_meta(
+    State(state): State<AdminState>,
+    Json(payload): Json<Vec<CatalogMetaUpdate>>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let updates: Vec<pool_service::CatalogMetaUpdate> = payload
+        .into_iter()
+        .map(|item| pool_service::CatalogMetaUpdate {
+            id: item.id,
+            provider_logo: item.provider_logo,
+            release_date: item.release_date,
+            model_meta_zh: item.model_meta_zh,
+            model_meta_en: item.model_meta_en,
+        })
+        .collect();
+    
+    pool_service::backfill_entry_catalog_meta(&state.db, updates)?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}

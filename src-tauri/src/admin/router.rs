@@ -2,9 +2,12 @@ use crate::admin::auth::require_auth;
 use crate::admin::channel_handlers;
 use crate::admin::cors::apply_admin_cors;
 use crate::admin::handlers;
+use crate::admin::pool_handlers;
 use crate::admin::state::AdminState;
+use crate::admin::token_handlers;
+use crate::admin::usage_handlers;
 use axum::middleware;
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use axum::Router;
 
 pub fn build_admin_router(state: AdminState) -> Router {
@@ -47,6 +50,62 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/admin/channels/:id/response-ms",
             put(channel_handlers::update_response_ms),
         )
+        // Pool API routes – all require auth
+        .route(
+            "/admin/pool",
+            get(pool_handlers::list).post(pool_handlers::create),
+        )
+        .route("/admin/pool/:id/toggle", put(pool_handlers::toggle))
+        .route("/admin/pool/:id", delete(pool_handlers::delete))
+        .route("/admin/pool/reorder", post(pool_handlers::reorder))
+        .route(
+            "/admin/pool/:id/test-latency",
+            post(pool_handlers::test_latency),
+        )
+        .route(
+            "/admin/pool/backfill-catalog-meta",
+            post(pool_handlers::backfill_catalog_meta),
+        )
+        // Token API routes – all require auth
+        .route(
+            "/admin/tokens",
+            get(token_handlers::list_tokens).post(token_handlers::create_token),
+        )
+        .route("/admin/tokens/:id", delete(token_handlers::delete_token))
+        .route(
+            "/admin/tokens/:id/toggle",
+            put(token_handlers::toggle_token),
+        )
+        // Usage/Dashboard API routes – all require auth
+        .route("/admin/logs", get(usage_handlers::get_logs))
+        .route(
+            "/admin/dashboard/stats",
+            get(usage_handlers::get_dashboard_stats),
+        )
+        .route(
+            "/admin/dashboard/model-consumption",
+            get(usage_handlers::get_model_consumption),
+        )
+        .route(
+            "/admin/dashboard/call-trend",
+            get(usage_handlers::get_call_trend),
+        )
+        .route(
+            "/admin/dashboard/model-distribution",
+            get(usage_handlers::get_model_distribution),
+        )
+        .route(
+            "/admin/dashboard/model-ranking",
+            get(usage_handlers::get_model_ranking),
+        )
+        .route(
+            "/admin/dashboard/user-ranking",
+            get(usage_handlers::get_user_ranking),
+        )
+        .route(
+            "/admin/dashboard/user-trend",
+            get(usage_handlers::get_user_trend),
+        )
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()
@@ -76,6 +135,50 @@ pub fn build_admin_router(state: AdminState) -> Router {
         .route("/admin/status", axum::routing::options(|| async {}))
         .route("/admin/audit-logs", axum::routing::options(|| async {}))
         .route("/admin/settings", axum::routing::options(|| async {}))
+        .route("/admin/pool", axum::routing::options(|| async {}))
+        .route("/admin/pool/:id", axum::routing::options(|| async {}))
+        .route(
+            "/admin/pool/:id/toggle",
+            axum::routing::options(|| async {}),
+        )
+        .route("/admin/pool/reorder", axum::routing::options(|| async {}))
+        .route(
+            "/admin/pool/:id/test-latency",
+            axum::routing::options(|| async {}),
+        )
+        .route(
+            "/admin/pool/backfill-catalog-meta",
+            axum::routing::options(|| async {}),
+        )
+        .route("/admin/logs", axum::routing::options(|| async {}))
+        .route(
+            "/admin/dashboard/stats",
+            axum::routing::options(|| async {}),
+        )
+        .route(
+            "/admin/dashboard/model-consumption",
+            axum::routing::options(|| async {}),
+        )
+        .route(
+            "/admin/dashboard/call-trend",
+            axum::routing::options(|| async {}),
+        )
+        .route(
+            "/admin/dashboard/model-distribution",
+            axum::routing::options(|| async {}),
+        )
+        .route(
+            "/admin/dashboard/model-ranking",
+            axum::routing::options(|| async {}),
+        )
+        .route(
+            "/admin/dashboard/user-ranking",
+            axum::routing::options(|| async {}),
+        )
+        .route(
+            "/admin/dashboard/user-trend",
+            axum::routing::options(|| async {}),
+        )
         .merge(protected)
         .with_state(state)
         .route_layer(middleware::from_fn(apply_admin_cors))

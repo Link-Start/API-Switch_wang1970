@@ -9,6 +9,7 @@ import type {
   ModelInfo,
   ModelCatalogMetaUpdate,
 } from '../features/channels/types';
+import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult } from '../types';
 
 const apiBase = '/admin';
 
@@ -58,12 +59,32 @@ function createHttpError(status: number, fallbackMessage: string, error?: Channe
   return instance;
 }
 
-async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, data?: unknown): Promise<T> {
+async function request<T>(
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  path: string,
+  data?: unknown,
+  queryParams?: Record<string, unknown> | null
+): Promise<T> {
   const token = localStorage.getItem('api-switch-web-admin-token');
+
+  // Build URL with query params for GET requests
+  let url = `${apiBase}${path}`;
+  if (queryParams) {
+    const searchParams = new URLSearchParams();
+    Object.entries(queryParams as Record<string, unknown>).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        searchParams.append(key, String(value));
+      }
+    });
+    const queryString = searchParams.toString();
+    if (queryString) {
+      url += `?${queryString}`;
+    }
+  }
 
   let response: Response;
   try {
-    response = await fetch(`${apiBase}${path}`, {
+    response = await fetch(url, {
       method,
       headers: {
         'Content-Type': 'application/json',
@@ -117,5 +138,13 @@ export const webAdminApiAdapter: ApiAdapter = {
       catalogMeta,
     }),
     updateResponseMs: (channelId, responseMs) => request<void>('PUT', `/channels/${channelId}/response-ms`, { channelId, responseMs }),
+  },
+  usage: {
+    getLogs: (filter) => request<PaginatedResult<UsageLog>>('GET', '/logs', undefined, filter as Record<string, unknown>),
+    getDashboardStats: (filter) => request<DashboardStats>('GET', '/dashboard/stats', undefined, filter as Record<string, unknown>),
+    getModelConsumption: (filter) => request<ChartDataPoint[]>('GET', '/dashboard/model-consumption', undefined, filter as Record<string, unknown>),
+    getCallTrend: (filter) => request<ChartDataPoint[]>('GET', '/dashboard/call-trend', undefined, filter as Record<string, unknown>),
+    getModelDistribution: (filter) => request<ModelRanking[]>('GET', '/dashboard/model-distribution', undefined, filter as Record<string, unknown>),
+    getUserTrend: (filter) => request<ChartDataPoint[]>('GET', '/dashboard/user-trend', undefined, filter as Record<string, unknown>),
   },
 };

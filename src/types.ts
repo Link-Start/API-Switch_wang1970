@@ -223,9 +223,17 @@ export interface AppSettings {
   start_minimized: boolean;
   show_guide: boolean;
   default_sort_mode: ModelSortMode;
+  web_admin_enabled: boolean;
+  web_admin_username: string;
+  web_admin_password: string;
+  web_admin_port: number;
 }
 
-export const DEFAULT_SETTINGS: AppSettings = {
+export interface VersionedAppSettings extends AppSettings {
+  _version: number;
+}
+
+export const DEFAULT_SETTINGS: VersionedAppSettings = {
   proxy_enabled: false,
   listen_port: 9090,
   access_key_required: false,
@@ -241,11 +249,22 @@ export const DEFAULT_SETTINGS: AppSettings = {
   start_minimized: false,
   show_guide: true,
   default_sort_mode: "custom",
+  web_admin_enabled: false,
+  web_admin_username: "",
+  web_admin_password: "",
+  web_admin_port: 9099,
+  _version: 0,
 };
 
 // --- Proxy ---
 
 export interface ProxyStatus {
+  running: boolean;
+  address: string;
+  port: number;
+}
+
+export interface AdminStatus {
   running: boolean;
   address: string;
   port: number;

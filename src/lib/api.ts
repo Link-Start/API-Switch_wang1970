@@ -17,6 +17,7 @@ import type {
   DashboardFilter,
   AppSettings,
   ProxyStatus,
+  AdminStatus,
   LimitQueryResult,
 } from "../types";
 
@@ -202,8 +203,12 @@ export async function getSettings(): Promise<AppSettings> {
   return invoke("get_settings");
 }
 
-export async function updateSettings(settings: Partial<AppSettings>): Promise<void> {
+export async function updateSettings(settings: AppSettings): Promise<void> {
   return invoke("update_settings", { settings });
+}
+
+export async function getAdminStatus(): Promise<AdminStatus> {
+  return invoke("get_admin_status");
 }
 
 // --- Proxy ---

@@ -5,11 +5,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm tauri dev",
-    "build": "pnpm tauri build",
-    "build:versioned": "pnpm tauri build && node scripts/versioned-build.cjs",
+    "dev": "pnpm build:web-admin && pnpm tauri dev",
+    "build": "pnpm build:web-admin && pnpm tauri build",
+    "build:versioned": "pnpm build:web-admin && pnpm tauri build && node scripts/versioned-build.cjs",
     "dev:renderer": "vite",
     "build:renderer": "vite build",
+    "dev:web-admin": "vite --config src/web-admin/vite.config.ts --host 127.0.0.1 --port 1430",
+    "build:web-admin": "vite build --config src/web-admin/vite.config.ts",
     "tauri": "tauri",
     "typecheck": "tsc --noEmit"
   },

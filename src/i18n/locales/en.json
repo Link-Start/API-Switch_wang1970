@@ -283,6 +283,17 @@
       "autostart": "Auto-start with System",
       "startMinimized": "Start Minimized"
     },
+    "webAdmin": {
+      "title": "Web Admin",
+      "enabled": "Enable Web Admin",
+      "enabledDesc": "Start the HTTP management interface when credentials are configured.",
+      "port": "Admin Port",
+      "username": "Username",
+      "password": "Password",
+      "configured": "Configured",
+      "singlePortDesc": "Use the same port as the proxy for single-port mode, or keep 9099 for a separate admin port.",
+      "address": "Address"
+    },
     "general": {
       "title": "General",
       "language": "Language",

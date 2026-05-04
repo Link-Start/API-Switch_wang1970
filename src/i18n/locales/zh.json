@@ -291,6 +291,17 @@
       "autostart": "跟随系统启动",
       "startMinimized": "启动最小化"
     },
+    "webAdmin": {
+      "title": "Web 管理",
+      "enabled": "启用 Web 管理",
+      "enabledDesc": "配置账号密码后启动 HTTP 管理界面。",
+      "port": "管理端口",
+      "username": "用户名",
+      "password": "密码",
+      "configured": "已配置",
+      "singlePortDesc": "使用与代理相同的端口为单端口模式；保持 9099 则使用独立管理端口。",
+      "address": "访问地址"
+    },
     "general": {
       "title": "通用设置",
       "language": "语言",

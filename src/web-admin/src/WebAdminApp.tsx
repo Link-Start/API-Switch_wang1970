@@ -3,18 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { Power } from 'lucide-react';
 import { ChannelPage } from '@/pages/ChannelPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { PoolManager } from '@/features/pool/PoolManager';
+import { TokenManager } from '@/features/tokens/TokenManager';
+import { LogViewer } from '@/features/logs/LogViewer';
+import { DashboardView } from '@/features/dashboard/DashboardView';
 import { MainShell, type MainPage } from '@/features/shell/MainShell';
 import type { VersionedAppSettings } from '@/types';
 import { clearToken, getHealth, getSettings, getStatus, getToken, login, setToken, type AdminHttpError, type AdminStatus, type HealthResponse } from './api';
-
-/** Placeholder for pages not available in Web Admin (Tauri-only features). */
-function ComingSoonPlaceholder() {
-  return (
-    <div className="flex h-64 items-center justify-center text-muted-foreground">
-      开发中
-    </div>
-  );
-}
 
 const GUIDE_BASE = 'https://github.com/wang1970/API-Switch/blob/master/';
 
@@ -160,13 +155,16 @@ function WebMain() {
         return <ChannelPage />;
       case 'settings':
         return <SettingsPage />;
-      // Pages not available in Web Admin (Tauri-only features)
-      case 'apiPool':
-      case 'tokens':
-      case 'logs':
-      case 'dashboard':
-      default:
-        return <ComingSoonPlaceholder />;
+case 'apiPool':
+          return <PoolManager />;
+        case 'tokens':
+          return <TokenManager />;
+        case 'logs':
+          return <LogViewer />;
+        case 'dashboard':
+          return <DashboardView />;
+        default:
+          return <ChannelPage />;
     }
   };
 

@@ -8,6 +8,15 @@ use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::{json, Value};
 
+fn normalize_requested_model(model: Option<&str>) -> String {
+    let trimmed = model.unwrap_or("auto").trim();
+    if trimmed.is_empty() {
+        "auto".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// Health check endpoint
 pub async fn health_check() -> (StatusCode, Json<Value>) {
     (
@@ -41,12 +50,7 @@ pub async fn handle_chat_completions(
     let body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::Internal(format!("Failed to parse JSON: {e}")))?;
 
-    let requested_model = body
-        .get("model")
-        .and_then(|m| m.as_str())
-        .unwrap_or("auto")
-        .to_string();
-    let requested_model = if requested_model.is_empty() { "auto".to_string() } else { requested_model };
+    let requested_model = normalize_requested_model(body.get("model").and_then(|m| m.as_str()));
 
     let is_stream = body
         .get("stream")
@@ -55,19 +59,16 @@ pub async fn handle_chat_completions(
 
     // Resolve target entries
     // - AUTO: only enabled entries enter the auto pool
-    // - exact model name: ALL entries (including disabled) are routable
+    // - named routes: resolution is based on group/model matching before AUTO fallback
     let all_entries = state.db.get_entries_for_routing()?;
     let auto_entries = state.db.get_enabled_entries_for_auto()?;
-    let settings = state.settings.read().await;
-    let sort_mode = settings.default_sort_mode.clone();
-    let active_group = settings.active_group.clone();
+    let sort_mode = state.settings.read().await.default_sort_mode.clone();
     let resolved = router::resolve(
         &requested_model,
         &all_entries,
         &auto_entries,
         &state.circuit_breakers,
         &sort_mode,
-        &active_group,
     )
     .await;
 

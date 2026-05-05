@@ -225,6 +225,7 @@ export interface AppSettings {
   start_minimized: boolean;
   show_guide: boolean;
   default_sort_mode: ModelSortMode;
+  // Remembers the default/restored group for the API Management UI only.
   active_group: string;
   web_admin_enabled: boolean;
   web_admin_username: string;

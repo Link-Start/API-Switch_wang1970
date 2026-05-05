@@ -46,6 +46,7 @@ export function SettingsPage() {
       localStorage.setItem("api-switch-sort-mode", value as string);
     }
     if (key === "active_group") {
+      // Persist the remembered default group for the API Management page locally for faster UI restoration.
       localStorage.setItem("api-switch-default-group", value as string);
     }
     updateMutation.mutate({ ...s, [key]: value });

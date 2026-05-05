@@ -329,7 +329,7 @@
       "themeDark": "Dark",
       "themeSystem": "System",
       "defaultGroup": "Default Group",
-      "defaultGroupDesc": "Default requests will prefer available models from this group first",
+      "defaultGroupDesc": "Remember the default API Management group to open in the UI",
       "defaultSortMode": "Default Sort Mode",
       "defaultSortModeDesc": "Default model sort order for the API Management page",
       "currentVersion": "Version"

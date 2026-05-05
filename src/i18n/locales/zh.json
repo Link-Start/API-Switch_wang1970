@@ -337,7 +337,7 @@
       "themeDark": "深色",
       "themeSystem": "跟随系统",
       "defaultGroup": "默认分组",
-      "defaultGroupDesc": "默认请求会优先从该分组中选择可用模型",
+      "defaultGroupDesc": "记住 API 管理页面默认打开的分组，仅用于界面选择",
 
       "defaultSortMode": "默认排序方式",
       "defaultSortModeDesc": "API 管理页面的默认模型排序方式",

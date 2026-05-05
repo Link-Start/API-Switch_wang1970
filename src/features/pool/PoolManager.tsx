@@ -540,6 +540,7 @@ export function PoolManager() {
   }, [entries]);
 
   useEffect(() => {
+    // Keep the API Management tab on the user's remembered default group selection.
     const nextGroup = settings?.active_group || "auto";
     setGroupFilter((current) => (groups.includes(nextGroup) ? nextGroup : current === nextGroup ? current : "auto"));
   }, [groups, settings?.active_group]);
@@ -752,12 +753,7 @@ export function PoolManager() {
                 type="button"
                 className={`h-6 flex-1 px-3 text-xs border-b-2 transition-colors ${groupFilter === group ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
                 onClick={() => {
-                  if (!settings) return;
-                  const newSettings: AppSettings = { ...settings, active_group: group };
-                  void adapter.settings.update(newSettings).then(() => {
-                    queryClient.invalidateQueries({ queryKey: ["settings"] });
-                    queryClient.invalidateQueries({ queryKey: ["entries"] });
-                  });
+                  setGroupFilter(group);
                 }}
               >
                 {group}

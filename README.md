@@ -16,7 +16,7 @@ Manage multiple AI API providers through a single endpoint with automatic failov
 | **Smart Circuit Breaker** | Auto-disable unrecoverable models (401/403/410), cooldown skips failed models, auto-recover on success |
 | **Auto Channel Calibration** | One-click model fetch with auto API type detection, Base URL correction, relay station model discovery |
 | **Smart Model Pre-selection** | Auto-select models released within 6 months + existing models; new entries enabled by default |
-| **System Tray** | Right-click tray icon to switch models directly without opening the main window |
+| **System Tray** | Right-click tray icon to reprioritize top AUTO-group entries without opening the main window |
 | **Bilingual** | UI and user guide support Chinese/English |
 | **Portable** | Single EXE file, data stored alongside the executable, copy and run anywhere |
 
@@ -42,9 +42,9 @@ Model: auto (smart match) or any specific model name
 
 | Mode | Behavior |
 |------|----------|
-| `model: auto` | Automatically select from enabled & non-cooled entries by priority |
-| `model: gpt-4o` | Exact match, falls back to auto flow on failure |
-| Tray right-click | Switch priority model anytime |
+| `model: auto` | Automatically select from enabled, non-cooled AUTO-group entries by priority |
+| `model: coding` | First try case-insensitive group exact match, then model-name fuzzy match, then fall back to the AUTO group |
+| Tray right-click | Reprioritize existing AUTO-group entries only; it does not switch groups |
 
 ---
 

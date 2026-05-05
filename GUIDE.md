@@ -108,7 +108,7 @@ Models that fail requests are automatically cooled down and do not participate i
 
 ### Tray Menu Model Order is Incorrect
 
-The tray shows the top 5 enabled available models, sorted by the order in API Management. Drag to adjust the order in API Management.
+The tray shows the top 5 enabled AUTO-group entries, sorted by the order in API Management. Drag to adjust the AUTO-group priority in API Management.
 
 ### Log Shows (auto) Prefix
 

@@ -24,6 +24,8 @@ pub struct CreateEntryParams {
     pub model_meta_zh: String,
     #[serde(default)]
     pub model_meta_en: String,
+    #[serde(default)]
+    pub group_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -45,6 +47,7 @@ impl From<CreateEntryParams> for pool_service::CreateEntryParams {
             release_date: p.release_date,
             model_meta_zh: p.model_meta_zh,
             model_meta_en: p.model_meta_en,
+            group_name: p.group_name,
         }
     }
 }
@@ -138,6 +141,23 @@ pub fn update_entry_response_ms(
     response_ms: String,
 ) -> Result<(), AppError> {
     pool_service::update_entry_response_ms(&state.db, &entry_id, &response_ms)?;
+    crate::refresh_tray_if_enabled(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_all_groups(state: State<'_, AppState>) -> Result<Vec<String>, AppError> {
+    pool_service::get_all_groups(&state.db)
+}
+
+#[tauri::command]
+pub fn update_entry_group(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    group_name: String,
+) -> Result<(), AppError> {
+    pool_service::update_entry_group(&state.db, &id, &group_name)?;
     crate::refresh_tray_if_enabled(&app);
     Ok(())
 }

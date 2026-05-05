@@ -58,8 +58,18 @@ pub async fn handle_chat_completions(
     // - exact model name: ALL entries (including disabled) are routable
     let all_entries = state.db.get_entries_for_routing()?;
     let auto_entries = state.db.get_enabled_entries_for_auto()?;
-    let sort_mode = state.settings.read().await.default_sort_mode.clone();
-    let resolved = router::resolve(&requested_model, &all_entries, &auto_entries, &state.circuit_breakers, &sort_mode).await;
+    let settings = state.settings.read().await;
+    let sort_mode = settings.default_sort_mode.clone();
+    let active_group = settings.active_group.clone();
+    let resolved = router::resolve(
+        &requested_model,
+        &all_entries,
+        &auto_entries,
+        &state.circuit_breakers,
+        &sort_mode,
+        &active_group,
+    )
+    .await;
 
     if resolved.is_empty() {
         return Err(ProxyError::NoAvailableProvider(requested_model));

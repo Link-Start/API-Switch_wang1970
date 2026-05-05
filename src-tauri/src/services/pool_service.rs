@@ -18,6 +18,8 @@ pub struct CreateEntryParams {
     pub model_meta_zh: String,
     #[serde(default)]
     pub model_meta_en: String,
+    #[serde(default)]
+    pub group_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -71,6 +73,7 @@ pub fn delete_entry(db: &Database, id: &str) -> Result<(), AppError> {
 /// Create a new API entry. Also syncs channel model list.
 pub fn create_entry(db: &Database, params: CreateEntryParams) -> Result<ApiEntry, AppError> {
     let display_name = params.display_name.as_deref().unwrap_or(&params.model);
+    let group_name = params.group_name.as_deref().unwrap_or("auto");
     let entry = db.create_entry_auto(
         &params.channel_id,
         &params.model,
@@ -79,6 +82,7 @@ pub fn create_entry(db: &Database, params: CreateEntryParams) -> Result<ApiEntry
         &params.release_date,
         &params.model_meta_zh,
         &params.model_meta_en,
+        group_name,
     )?;
     let _ = db.add_channel_model_if_missing(&params.channel_id, &params.model, entry.owned_by.as_deref());
     Ok(entry)
@@ -184,4 +188,14 @@ pub async fn test_entry_latency(
 /// Update response time for an entry.
 pub fn update_entry_response_ms(db: &Database, entry_id: &str, response_ms: &str) -> Result<(), AppError> {
     db.update_entry_response_ms(entry_id, response_ms)
+}
+
+/// Get all distinct group names from the database.
+pub fn get_all_groups(db: &Database) -> Result<Vec<String>, AppError> {
+    db.get_all_group_names()
+}
+
+/// Update the group_name for a specific entry.
+pub fn update_entry_group(db: &Database, id: &str, group_name: &str) -> Result<(), AppError> {
+    db.update_entry_group(id, group_name)
 }

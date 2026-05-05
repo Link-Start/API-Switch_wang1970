@@ -14,9 +14,9 @@ use crate::admin::state::AdminState;
 use crate::database::{Channel, ModelInfo};
 use crate::services::channel_service;
 use crate::services::channel_service::{ChannelOperationError, FetchModelsResult, ProbeResult};
-use axum::{extract::{Json, Path, State}, Json as AxumJson};
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use axum::{extract::{Json, Path, State}};
+use serde::Deserialize;
+
 
 // Types for request bodies – reuse the same definitions as in the Tauri commands
 #[derive(Deserialize)]
@@ -30,7 +30,7 @@ pub struct CreateChannelParams {
 
 #[derive(Deserialize)]
 pub struct UpdateChannelParams {
-    pub id: String,
+    pub _id: String,
     pub name: Option<String>,
     pub api_type: Option<String>,
     pub base_url: Option<String>,
@@ -182,7 +182,7 @@ pub async fn fetch_models(
 }
 
 pub async fn fetch_models_direct(
-    State(state): State<AdminState>,
+    State(_state): State<AdminState>,
     Json(payload): Json<FetchModelsDirectParams>,
 ) -> Result<Json<FetchModelsResult>, AdminError> {
     let res = channel_service::fetch_models_direct(

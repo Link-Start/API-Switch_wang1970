@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { getSettings, updateSettings, getProxyStatus, startProxy, stopProxy } from "@/lib/api";
+import { useApiAdapter, isTauriRuntime } from "@/lib/useApiAdapter";
 import { toast } from "sonner";
 import { DEFAULT_SETTINGS, type AppSettings } from "@/types";
 import { SettingsEditor } from "@/features/settings/SettingsEditor";
@@ -10,20 +10,29 @@ const APP_VERSION = "0.4.10";
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
+  const adapter = useApiAdapter();
 
   const { data: settings } = useQuery({
     queryKey: ["settings"],
-    queryFn: getSettings,
+    queryFn: adapter.settings.get,
+  });
+
+  const { data: groups = ["auto"] } = useQuery({
+    queryKey: ["pool-groups"],
+    queryFn: () => adapter.pool.getGroups(),
   });
 
   const { data: proxyStatus } = useQuery({
     queryKey: ["proxyStatus"],
-    queryFn: getProxyStatus,
+    queryFn: adapter.proxy.getStatus,
   });
 
   const updateMutation = useMutation({
-    mutationFn: updateSettings,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["settings"] }),
+    mutationFn: adapter.settings.update,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      queryClient.invalidateQueries({ queryKey: ["pool-groups"] });
+    },
   });
 
   const s = { ...DEFAULT_SETTINGS, ...settings };
@@ -36,15 +45,18 @@ export function SettingsPage() {
     if (key === "default_sort_mode") {
       localStorage.setItem("api-switch-sort-mode", value as string);
     }
+    if (key === "active_group") {
+      localStorage.setItem("api-switch-default-group", value as string);
+    }
     updateMutation.mutate({ ...s, [key]: value });
   };
 
   const toggleProxy = async (enabled: boolean) => {
     try {
       if (enabled) {
-        await startProxy();
+        await adapter.proxy.start();
       } else {
-        await stopProxy();
+        await adapter.proxy.stop();
       }
       queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
       queryClient.invalidateQueries({ queryKey: ["settings"] });
@@ -61,6 +73,8 @@ export function SettingsPage() {
         settings={s}
         proxyStatus={proxyStatus}
         appVersion={APP_VERSION}
+        isWeb={!isTauriRuntime()}
+        groups={groups}
         onChange={update}
         onProxyToggle={toggleProxy}
       />

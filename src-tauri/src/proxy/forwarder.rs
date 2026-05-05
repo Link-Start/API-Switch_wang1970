@@ -495,7 +495,7 @@ fn build_streaming_response(
     let mut sse_buffer = String::new();
     let mut upstream_stream = Box::pin(response.bytes_stream());
     let mut idle_timeout = Box::pin(sleep(STREAMING_IDLE_TIMEOUT));
-    let mut ping_interval = Box::pin(sleep(STREAMING_PING_INTERVAL));
+    let _ping_interval = Box::pin(sleep(STREAMING_PING_INTERVAL));
     let entry_id = entry.id.clone();
     let circuit_breakers = state.circuit_breakers.clone();
     let failure_counts = state.failure_counts.clone();

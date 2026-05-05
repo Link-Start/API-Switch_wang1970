@@ -1,17 +1,10 @@
 use axum::http::{header, HeaderValue, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
-use serde::Deserialize;
-use std::collections::HashMap;
+
+
 use std::path::{Component, Path, PathBuf};
 
-#[derive(Deserialize)]
-struct ViteManifestEntry {
-    file: String,
-    #[serde(default)]
-    css: Vec<String>,
-    #[serde(default)]
-    is_entry: bool,
-}
+
 
 fn dist_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist-web-admin")
@@ -25,21 +18,9 @@ fn read_bytes(path: &Path) -> Option<Vec<u8>> {
     std::fs::read(path).ok()
 }
 
-fn load_manifest() -> Option<HashMap<String, ViteManifestEntry>> {
-    let path = dist_dir().join(".vite").join("manifest.json");
-    let text = read_text(&path)?;
-    serde_json::from_str(&text).ok()
-}
 
-fn entry_assets() -> Option<(String, Vec<String>)> {
-    let manifest = load_manifest()?;
-    let entry = manifest
-        .values()
-        .find(|item| item.is_entry)
-        .or_else(|| manifest.values().find(|item| item.file.ends_with(".js")))?;
 
-    Some((entry.file.clone(), entry.css.clone()))
-}
+
 
 fn content_type_for(path: &str) -> &'static str {
     if path.ends_with(".css") {

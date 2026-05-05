@@ -2,20 +2,21 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Power } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { startProxy, stopProxy, getProxyStatus } from "@/lib/api";
+import { useApiAdapter } from "@/lib/useApiAdapter";
 import { toast } from "sonner";
 
 export function ProxyToggle() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const adapter = useApiAdapter();
   const { data: status } = useQuery({
     queryKey: ["proxyStatus"],
-    queryFn: getProxyStatus,
+    queryFn: adapter.proxy.getStatus,
     refetchInterval: 5000,
   });
 
   const startMutation = useMutation({
-    mutationFn: startProxy,
+    mutationFn: adapter.proxy.start,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["proxyStatus"] }),
     onError: (err) => {
       toast.error(`${t("settings.proxy.start")} ${t("common.failed")}: ${err}`, { duration: Infinity });
@@ -23,7 +24,7 @@ export function ProxyToggle() {
   });
 
   const stopMutation = useMutation({
-    mutationFn: stopProxy,
+    mutationFn: adapter.proxy.stop,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["proxyStatus"] }),
     onError: (err) => {
       toast.error(`${t("settings.proxy.stop")} ${t("common.failed")}: ${err}`, { duration: Infinity });

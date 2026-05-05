@@ -5,12 +5,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { useTranslation } from "react-i18next";
-import { DEFAULT_SETTINGS, type AppSettings, type ModelSortMode, type ProxyStatus } from "@/types";
+import { DEFAULT_SETTINGS, type AppSettings, type ProxyStatus } from "@/types";
 
 export interface SettingsEditorProps {
   settings?: AppSettings | null;
   proxyStatus?: ProxyStatus | null;
   appVersion?: string;
+  isWeb?: boolean;
+  groups?: string[];
   onChange: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
   onProxyToggle?: (enabled: boolean) => void | Promise<void>;
 }
@@ -19,11 +21,14 @@ export function SettingsEditor({
   settings,
   proxyStatus,
   appVersion,
+  isWeb = false,
+  groups = ["auto"],
   onChange,
   onProxyToggle,
 }: SettingsEditorProps) {
   const { t } = useTranslation();
   const s = { ...DEFAULT_SETTINGS, ...settings };
+  const groupOptions = Array.from(new Set(["auto", ...groups, s.active_group || "auto"])).filter(Boolean);
 
   return (
     <div className="space-y-6">
@@ -128,49 +133,49 @@ export function SettingsEditor({
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t("settings.webAdmin.title")}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label>{t("settings.webAdmin.enabled")}</Label>
-              <p className="text-xs text-muted-foreground">{t("settings.webAdmin.enabledDesc")}</p>
+          <CardHeader>
+            <CardTitle className="text-base">{t("settings.webAdmin.title")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label>{t("settings.webAdmin.enabled")}</Label>
+                <p className="text-xs text-muted-foreground">{t("settings.webAdmin.enabledDesc")}</p>
+              </div>
+              <Switch checked={s.web_admin_enabled} onCheckedChange={(value) => onChange("web_admin_enabled", value)} />
             </div>
-            <Switch checked={s.web_admin_enabled} onCheckedChange={(value) => onChange("web_admin_enabled", value)} />
-          </div>
-          <div className="flex items-center justify-between">
-            <Label>{t("settings.webAdmin.port")}</Label>
-            <Input
-              type="number"
-              min={1}
-              max={65535}
-              className="w-32"
-              value={s.web_admin_port}
-              onChange={(event) => onChange("web_admin_port", Math.min(65535, Math.max(1, parseInt(event.target.value) || 9099)))}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>{t("settings.webAdmin.username")}</Label>
-            <Input value={s.web_admin_username} onChange={(event) => onChange("web_admin_username", event.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label>{t("settings.webAdmin.password")}</Label>
-            <Input
-              type="password"
-              value={s.web_admin_password}
-              placeholder={settings?.web_admin_password ? t("settings.webAdmin.configured") : ""}
-              onChange={(event) => onChange("web_admin_password", event.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              {t("settings.webAdmin.singlePortDesc")}
-            </p>
-          </div>
-          {s.web_admin_enabled && s.web_admin_username && s.web_admin_password && (
-            <div className="text-sm text-muted-foreground">{t("settings.webAdmin.address")}: http://127.0.0.1:{s.web_admin_port}/admin</div>
-          )}
-        </CardContent>
-      </Card>
+            <div className="flex items-center justify-between">
+              <Label>{t("settings.webAdmin.port")}</Label>
+              <Input
+                type="number"
+                min={1}
+                max={65535}
+                className="w-32"
+                value={s.web_admin_port}
+                onChange={(event) => onChange("web_admin_port", Math.min(65535, Math.max(1, parseInt(event.target.value) || 9099)))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>{t("settings.webAdmin.username")}</Label>
+              <Input value={s.web_admin_username} onChange={(event) => onChange("web_admin_username", event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>{t("settings.webAdmin.password")}</Label>
+              <Input
+                type="password"
+                value={s.web_admin_password}
+                placeholder={settings?.web_admin_password ? t("settings.webAdmin.configured") : ""}
+                onChange={(event) => onChange("web_admin_password", event.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t("settings.webAdmin.singlePortDesc")}
+              </p>
+            </div>
+            {s.web_admin_enabled && s.web_admin_username && s.web_admin_password && (
+              <div className="text-sm text-muted-foreground">{t("settings.webAdmin.address")}: http://127.0.0.1:{s.web_admin_port}/admin</div>
+            )}
+          </CardContent>
+        </Card>
 
       <Card>
         <CardHeader>
@@ -204,28 +209,32 @@ export function SettingsEditor({
           </div>
           <div className="flex items-center justify-between">
             <div>
-              <Label>{t("settings.general.defaultSortMode")}</Label>
-              <p className="text-xs text-muted-foreground">{t("settings.general.defaultSortModeDesc")}</p>
+              <Label>{t("settings.general.defaultGroup")}</Label>
+              <p className="text-xs text-muted-foreground">{t("settings.general.defaultGroupDesc")}</p>
             </div>
-            <Select value={s.default_sort_mode} onValueChange={(value: ModelSortMode) => onChange("default_sort_mode", value)}>
-              <SelectTrigger className="w-32">
+            <Select value={s.active_group || "auto"} onValueChange={(value) => onChange("active_group", value)}>
+              <SelectTrigger className="w-40">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="custom">{t("apiPool.sort.custom")}</SelectItem>
-                <SelectItem value="latest">{t("apiPool.sort.latest")}</SelectItem>
-                <SelectItem value="fastest">{t("apiPool.sort.fastest")}</SelectItem>
+                {groupOptions.map((group) => (
+                  <SelectItem key={group} value={group}>{group}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
-          <div className="flex items-center justify-between">
-            <Label>{t("settings.tray.autostart")}</Label>
-            <Switch checked={s.autostart} onCheckedChange={(value) => onChange("autostart", value)} />
-          </div>
-          <div className="flex items-center justify-between">
-            <Label>{t("settings.tray.startMinimized")}</Label>
-            <Switch checked={s.start_minimized} onCheckedChange={(value) => onChange("start_minimized", value)} />
-          </div>
+          {!isWeb && (
+            <>
+              <div className="flex items-center justify-between">
+                <Label>{t("settings.tray.autostart")}</Label>
+                <Switch checked={s.autostart} onCheckedChange={(value) => onChange("autostart", value)} />
+              </div>
+              <div className="flex items-center justify-between">
+                <Label>{t("settings.tray.startMinimized")}</Label>
+                <Switch checked={s.start_minimized} onCheckedChange={(value) => onChange("start_minimized", value)} />
+              </div>
+            </>
+          )}
           {appVersion && (
             <div className="flex items-center justify-between pt-2 border-t">
               <Label className="text-muted-foreground">{t("settings.general.currentVersion")}</Label>

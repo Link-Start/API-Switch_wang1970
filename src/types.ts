@@ -73,6 +73,7 @@ export interface ApiEntry {
   channel_id: string;
   model: string;
   display_name: string;
+  group_name: string;
   sort_index: number;
   enabled: boolean;
   cooldown_until?: number | null;
@@ -100,6 +101,7 @@ export interface CreateEntryParams {
   release_date?: string;
   model_meta_zh?: string;
   model_meta_en?: string;
+  group_name?: string;
 }
 
 export type CircuitState = "closed" | "open" | "half_open";
@@ -223,6 +225,7 @@ export interface AppSettings {
   start_minimized: boolean;
   show_guide: boolean;
   default_sort_mode: ModelSortMode;
+  active_group: string;
   web_admin_enabled: boolean;
   web_admin_username: string;
   web_admin_password: string;
@@ -249,6 +252,7 @@ export const DEFAULT_SETTINGS: VersionedAppSettings = {
   start_minimized: false,
   show_guide: true,
   default_sort_mode: "custom",
+  active_group: "auto",
   web_admin_enabled: false,
   web_admin_username: "",
   web_admin_password: "",
@@ -289,4 +293,16 @@ export interface LimitQueryResult {
   error: string | null;
   queriedAt: number | null;
   raw: unknown | null;
+}
+
+// --- Test Chat ---
+
+export interface TestChatResponse {
+  content: string;
+  latency_ms: number;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }

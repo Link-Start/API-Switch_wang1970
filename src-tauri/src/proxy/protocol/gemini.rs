@@ -118,6 +118,7 @@ impl ProtocolAdapter for GeminiAdapter {
 
 /// Build URL for Gemini native `generateContent` endpoint.
 /// Format: `{base_url}/v1beta/models/{model}:generateContent`
+#[allow(dead_code)]
 pub fn build_gemini_native_chat_url(base_url: &str, model: &str) -> String {
     join_url(
         base_url,
@@ -127,6 +128,7 @@ pub fn build_gemini_native_chat_url(base_url: &str, model: &str) -> String {
 
 /// Build URL for Gemini native `streamGenerateContent` endpoint.
 /// Format: `{base_url}/v1beta/models/{model}:streamGenerateContent?alt=sse`
+#[allow(dead_code)]
 pub fn build_gemini_native_stream_url(base_url: &str, model: &str) -> String {
     join_url(
         base_url,
@@ -136,12 +138,14 @@ pub fn build_gemini_native_stream_url(base_url: &str, model: &str) -> String {
 
 /// Build URL for Gemini native model listing.
 /// Format: `{base_url}/v1beta/models?key=<api_key>`
+#[allow(dead_code)]
 pub fn build_gemini_native_models_url(base_url: &str, api_key: &str) -> String {
     format!("{}?key={}", join_url(base_url, "v1beta/models"), api_key)
 }
 
 /// Parse Gemini native `listModels` response.
 /// Format: { models: [{ name: "models/gemini-pro", displayName: "Gemini Pro", ... }] }
+#[allow(dead_code)]
 pub fn parse_gemini_native_models(body: &Value) -> Vec<(String, Option<String>)> {
     body.get("models")
         .and_then(|d| d.as_array())
@@ -173,6 +177,7 @@ pub fn parse_gemini_native_models(body: &Value) -> Vec<(String, Option<String>)>
 /// ```json
 /// { "contents": [{"role": "user", "parts": [{"text": "..."}]}], "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1024} }
 /// ```
+#[allow(dead_code)]
 pub fn transform_request_to_gemini(body: &mut Value, actual_model: &str) {
     let Some(obj) = body.as_object_mut() else {
         return;
@@ -247,6 +252,7 @@ pub fn transform_request_to_gemini(body: &mut Value, actual_model: &str) {
 }
 
 /// Transform Gemini native response into OpenAI format.
+#[allow(dead_code)]
 pub fn transform_response_from_gemini(body: &mut Value) {
     let Some(obj) = body.as_object_mut() else {
         return;
@@ -330,6 +336,7 @@ pub fn transform_response_from_gemini(body: &mut Value) {
 /// Transform a Gemini native SSE line into OpenAI SSE format.
 /// Gemini streaming returns JSON objects (not `data: ` prefixed).
 /// Each object: `{ "candidates": [...], "usageMetadata": {...} }`
+#[allow(dead_code)]
 pub fn transform_gemini_sse_line(data_line: &str) -> Option<String> {
     let Ok(value) = serde_json::from_str::<Value>(data_line) else {
         return None;
@@ -400,11 +407,12 @@ pub fn transform_gemini_sse_line(data_line: &str) -> Option<String> {
         });
     }
 
-    Some(serde_json::to_string(&chunk).unwrap())
+    Some(serde_json::to_string(&chunk).unwrap_or_default())
 }
 
 // ── Gemini native conversion helpers ──────────────────────────────────
 
+#[allow(dead_code)]
 fn extract_gemini_text(content: &Value) -> String {
     match content {
         Value::String(s) => s.clone(),
@@ -423,6 +431,7 @@ fn extract_gemini_text(content: &Value) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn convert_message_to_gemini(msg: &Value) -> Value {
     let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("user");
     let content = msg.get("content");
@@ -517,6 +526,7 @@ fn convert_message_to_gemini(msg: &Value) -> Value {
     }
 }
 
+#[allow(dead_code)]
 fn convert_tools_to_gemini(openai_tools: &Value) -> Value {
     let Some(tools_arr) = openai_tools.as_array() else {
         return json!([]);

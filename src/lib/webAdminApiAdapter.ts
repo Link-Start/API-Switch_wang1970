@@ -9,9 +9,12 @@ import type {
   ModelInfo,
   ModelCatalogMetaUpdate,
 } from '../features/channels/types';
-import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey } from '../types';
+import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, VersionedAppSettings, ProxyStatus, TestChatResponse } from '../types';
 
 const apiBase = '/admin';
+
+// Track settings version for optimistic concurrency control
+let lastSettingsVersion = 0;
 
 interface ErrorEnvelope {
   error?: ChannelOperationError;
@@ -60,10 +63,10 @@ function createHttpError(status: number, fallbackMessage: string, error?: Channe
 }
 
 async function request<T>(
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
-  path: string,
-  data?: unknown,
-  queryParams?: Record<string, unknown> | null
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
+    path: string,
+    data?: unknown,
+    queryParams?: Record<string, unknown> | null
 ): Promise<T> {
   const token = localStorage.getItem('api-switch-web-admin-token');
 
@@ -149,17 +152,53 @@ export const webAdminApiAdapter: ApiAdapter = {
   },
   pool: {
     list: () => request<ApiEntry[]>('GET', '/pool'),
-    toggle: (id, enabled) => request<void>('PUT', `/pool/${id}/toggle`, { enabled }),
-    reorder: (orderedIds) => request<void>('POST', '/pool/reorder', { orderedIds }),
-    create: (params) => request<ApiEntry>('POST', '/pool', params),
+    toggle: (id, enabled) => request<void>('PUT', `/pool/${id}/toggle`, enabled),
+    reorder: (orderedIds) => request<void>('POST', '/pool/reorder', { ordered_ids: orderedIds }),
+    create: (params) => request<ApiEntry>('POST', '/pool', {
+      channel_id: params.channelId,
+      model: params.model,
+      display_name: params.displayName,
+      group_name: params.groupName,
+    }),
     delete: (id) => request<void>('DELETE', `/pool/${id}`),
     testLatency: (id) => request<{ entry_id: string; latency_ms: number | null }>('POST', `/pool/${id}/test-latency`),
-    backfillCatalogMeta: (items) => request<void>('POST', '/pool/backfill-catalog-meta', { items }),
+    backfillCatalogMeta: (items) => request<void>('POST', '/pool/backfill-catalog-meta', {
+      items: items.map(item => ({
+        id: item.entryId,
+        catalog_provider: item.catalogProvider,
+        catalog_model_id: item.catalogModelId,
+      })),
+    }),
+    getGroups: () => request<string[]>('GET', '/pool/groups'),
+    updateGroup: (id, groupName) => request<void>('PUT', `/pool/${id}/group`, groupName),
   },
   tokens: {
     list: () => request<AccessKey[]>('GET', '/tokens'),
     create: (name) => request<AccessKey>('POST', '/tokens', { name }),
     delete: (id) => request<void>('DELETE', `/tokens/${id}`),
-    toggle: (id, enabled) => request<void>('PUT', `/tokens/${id}/toggle`, { enabled }),
+    toggle: (id, enabled) => request<void>('PUT', `/tokens/${id}/toggle`, enabled),
   },
+settings: {
+    get: () => request<{ data: AppSettings; _version: number }>('GET', '/settings').then(r => {
+        // Track version for subsequent updates
+        lastSettingsVersion = r._version;
+        return r.data;
+    }),
+    update: (settings) => {
+        return request<void>('PUT', '/settings', { data: settings, _version: lastSettingsVersion });
+    },
+    patchSettings: (patch) => {
+        return request<{ data: AppSettings; _version: number }>('PATCH', '/settings', patch).then(r => {
+            lastSettingsVersion = r._version;
+            return r.data;
+        });
+    },
+},
+  proxy: {
+    getStatus: () => request<ProxyStatus>('GET', '/proxy/status'),
+    start: () => request<ProxyStatus>('POST', '/proxy/start'),
+    stop: () => request<void>('POST', '/proxy/stop'),
+  },
+  getVersion: () => request<{ version: string }>('GET', '/admin/version'),
+  testChat: (entryId, messages) => request<TestChatResponse>('POST', '/test-chat', { entry_id: entryId, messages }),
 };

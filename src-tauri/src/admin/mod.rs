@@ -1,5 +1,6 @@
 mod auth;
 mod channel_handlers;
+mod chat_handlers;
 mod cors;
 mod error;
 mod handlers;
@@ -9,8 +10,9 @@ mod router;
 mod state;
 mod static_files;
 mod usage_handlers;
+mod proxy_handlers;
 
-use crate::database::{AppSettings, Database};
+use crate::database::AppSettings;
 use crate::AppState;
 use axum::Router;
 use serde::{Deserialize, Serialize};
@@ -24,15 +26,11 @@ pub enum AdminMode {
     Combined,
 }
 
-pub use error::{AdminError, ERROR_CODE_BAD_REQUEST, ERROR_CODE_CHANNEL_REFERENCED,
-    ERROR_CODE_EMPTY_MODEL_LIST, ERROR_CODE_ENDPOINT_CORRECTION_FAILED,
-    ERROR_CODE_ENDPOINT_UNREACHABLE, ERROR_CODE_ENDPOINT_VALIDATION_FAILED,
-    ERROR_CODE_FETCH_MODELS_FAILED, ERROR_CODE_FORBIDDEN, ERROR_CODE_HTTP_CLIENT_ERROR,
-    ERROR_CODE_INTERNAL, ERROR_CODE_INVALID_CREDENTIALS, ERROR_CODE_INVALID_URL,
-    ERROR_CODE_NOT_FOUND, ERROR_CODE_PORT_IN_USE, ERROR_CODE_RATE_LIMITED,
-    ERROR_CODE_TIMEOUT, ERROR_CODE_UNSUPPORTED_PROVIDER, ERROR_CODE_UNAUTHORIZED,
-    ERROR_CODE_VERSION_MISMATCH,
-};
+pub use error::{ERROR_CODE_EMPTY_MODEL_LIST,
+    ERROR_CODE_ENDPOINT_CORRECTION_FAILED, ERROR_CODE_ENDPOINT_UNREACHABLE,
+    ERROR_CODE_ENDPOINT_VALIDATION_FAILED, ERROR_CODE_FETCH_MODELS_FAILED,
+    ERROR_CODE_HTTP_CLIENT_ERROR, ERROR_CODE_INVALID_CREDENTIALS, ERROR_CODE_INVALID_URL,
+    ERROR_CODE_RATE_LIMITED, ERROR_CODE_TIMEOUT, ERROR_CODE_UNSUPPORTED_PROVIDER};
 pub use handlers::RestartInfo;
 pub use router::build_admin_router;
 pub use state::AdminState;

@@ -76,6 +76,7 @@ impl CircuitBreaker {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_state(&self) -> CircuitState {
         self.state
             .try_read()

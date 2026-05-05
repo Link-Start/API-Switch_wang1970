@@ -14,12 +14,14 @@ pub struct ModelCatalogMetaInput {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct ProbeSuccess {
     models: Vec<ModelInfo>,
     corrected_base_url: String,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum ModelsEndpointError {
     Network(String),
     Timeout(String),
@@ -29,6 +31,7 @@ enum ModelsEndpointError {
     Empty,
 }
 
+#[allow(dead_code)]
 impl ModelsEndpointError {
     fn is_blocking(&self) -> bool {
         matches!(self, Self::Network(_) | Self::Timeout(_) | Self::Auth(_))
@@ -47,6 +50,7 @@ impl ModelsEndpointError {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct EndpointGuess {
 
     detected_type: String,
@@ -190,6 +194,7 @@ pub fn select_models(
 }
 
 /// Generate model list URL candidates: adapter standard + common variants
+#[allow(dead_code)]
 fn build_models_url_variants(
     adapter: &(dyn crate::proxy::protocol::ProtocolAdapter + Send + Sync),
     base_url: &str,
@@ -205,6 +210,7 @@ fn build_models_url_variants(
 }
 
 /// Try a single models endpoint, return parsed models or a structured endpoint error.
+#[allow(dead_code)]
 async fn try_models_endpoint(
     client: &reqwest::Client,
     adapter: &(dyn crate::proxy::protocol::ProtocolAdapter + Send + Sync),
@@ -243,6 +249,7 @@ async fn try_models_endpoint(
 
 
 /// Try to extract model list from a JSON body (even error responses)
+#[allow(dead_code)]
 fn extract_models_from_json(body: &str) -> Option<Vec<ModelInfo>> {
     let json: serde_json::Value = serde_json::from_str(body).ok()?;
     let arr = json.get("data")?.as_array()?;
@@ -260,6 +267,7 @@ fn extract_models_from_json(body: &str) -> Option<Vec<ModelInfo>> {
 }
 
 /// Chat probe: send a tiny request to verify the API works
+#[allow(dead_code)]
 async fn try_chat_probe(
     client: &reqwest::Client,
     adapter: &(dyn crate::proxy::protocol::ProtocolAdapter + Send + Sync),
@@ -299,6 +307,7 @@ async fn try_chat_probe(
 }
 
 /// Commonly known models per API type
+#[allow(dead_code)]
 fn known_models_for_type(api_type: &str) -> Vec<ModelInfo> {
     let list: &[(&str, &str)] = match api_type {
         "openai" => &[
@@ -329,6 +338,7 @@ fn known_models_for_type(api_type: &str) -> Vec<ModelInfo> {
     }).collect()
 }
 
+#[allow(dead_code)]
 fn dedup_models(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
     let mut seen = std::collections::HashSet::new();
     models

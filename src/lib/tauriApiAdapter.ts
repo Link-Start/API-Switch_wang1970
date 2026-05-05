@@ -14,6 +14,12 @@ import {
   createAccessKey,
   deleteAccessKey,
   toggleAccessKey,
+  getSettings,
+  updateSettings,
+  getProxyStatus,
+  startProxy,
+  stopProxy,
+  testChat,
 } from './api';
 
 export const tauriApiAdapter: ApiAdapter = {
@@ -70,7 +76,7 @@ export const tauriApiAdapter: ApiAdapter = {
     list: listEntries,
     toggle: (id, enabled) => toggleEntry(id, enabled),
     reorder: reorderEntries,
-    create: (params) => createEntry({ channel_id: params.channelId, model: params.model, display_name: params.displayName }),
+    create: (params) => createEntry({ channel_id: params.channelId, model: params.model, display_name: params.displayName, group_name: params.groupName }),
     delete: deleteEntry,
     testLatency: async (id) => {
       const result = await testEntryLatency(id);
@@ -89,11 +95,33 @@ export const tauriApiAdapter: ApiAdapter = {
           model_meta_en: '',
         }))
       ),
+    getGroups: () => invoke<string[]>('get_all_groups'),
+    updateGroup: (id, groupName) => invoke('update_entry_group', { id, groupName }),
   },
   tokens: {
     list: listAccessKeys,
     create: createAccessKey,
     delete: deleteAccessKey,
     toggle: toggleAccessKey,
+  },
+settings: {
+    get: getSettings,
+    update: updateSettings,
+    patchSettings: async (patch) => {
+        // Tauri command 使用完整对象，fallback 到完整 update
+        const current = await getSettings();
+        await updateSettings({ ...current, ...patch });
+        return { ...current, ...patch };
+    },
+},
+  proxy: {
+    getStatus: getProxyStatus,
+    start: startProxy,
+    stop: stopProxy,
+  },
+  testChat: (entryId, messages) => testChat(entryId, messages),
+  async getVersion() {
+    const response = await fetch('/admin/version');
+    return response.json();
   },
 };

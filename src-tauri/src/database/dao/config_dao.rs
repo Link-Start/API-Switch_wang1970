@@ -20,6 +20,7 @@ pub struct AppSettings {
     pub start_minimized: bool,
     pub show_guide: bool,
     pub default_sort_mode: String,
+    pub active_group: String,
     pub web_admin_enabled: bool,
     pub web_admin_username: String,
     pub web_admin_password: String,
@@ -37,8 +38,6 @@ impl Default for AppSettings {
             circuit_failure_threshold: 3,
             proxy_connect_timeout_secs: 30,
             circuit_recovery_secs: 300,
-            locale: "zh".to_string(),
-            theme: "light".to_string(),
             circuit_disable_codes: "401,403,410".to_string(),
             circuit_retry_codes: "100-199,300-399,401-407,409-499,500-503,505-523,525-599".to_string(),
             disable_keywords: "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized".to_string(),
@@ -46,14 +45,17 @@ impl Default for AppSettings {
             start_minimized: false,
             show_guide: true,
             default_sort_mode: "custom".to_string(),
+            active_group: "auto".to_string(),
             web_admin_enabled: false,
             web_admin_username: String::new(),
             web_admin_password: String::new(),
             web_admin_port: 9099,
+            locale: String::new(),
+            theme: String::new(),
             updated_at: 0,
+            }
         }
     }
-}
 
 impl Database {
     pub fn get_settings(&self) -> Result<AppSettings, AppError> {
@@ -111,10 +113,13 @@ impl Database {
         if let Some(v) = kv.get("show_guide") {
             settings.show_guide = v == "1";
         }
-        if let Some(v) = kv.get("default_sort_mode") {
-            settings.default_sort_mode = v.clone();
-        }
-        if let Some(v) = kv.get("web_admin_enabled") {
+if let Some(v) = kv.get("default_sort_mode") {
+    settings.default_sort_mode = v.clone();
+}
+if let Some(v) = kv.get("active_group") {
+    settings.active_group = v.clone();
+}
+if let Some(v) = kv.get("web_admin_enabled") {
             settings.web_admin_enabled = v == "1";
         }
         if let Some(v) = kv.get("web_admin_username") {
@@ -173,12 +178,13 @@ impl Database {
                 "start_minimized",
                 if updates.start_minimized { "1" } else { "0" },
             ),
-            ("show_guide", if updates.show_guide { "1" } else { "0" }),
-            ("default_sort_mode", &updates.default_sort_mode),
-            (
-                "web_admin_enabled",
-                if updates.web_admin_enabled { "1" } else { "0" },
-            ),
+("show_guide", if updates.show_guide { "1" } else { "0" }),
+("default_sort_mode", &updates.default_sort_mode),
+("active_group", &updates.active_group),
+(
+    "web_admin_enabled",
+    if updates.web_admin_enabled { "1" } else { "0" },
+),
             ("web_admin_username", &updates.web_admin_username),
             ("web_admin_password", &updates.web_admin_password),
             ("web_admin_port", &updates.web_admin_port.to_string()),

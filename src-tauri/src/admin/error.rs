@@ -26,6 +26,7 @@ pub const ERROR_CODE_FETCH_MODELS_FAILED: &str = "FETCH_MODELS_FAILED";
 pub const ERROR_CODE_HTTP_CLIENT_ERROR: &str = "HTTP_CLIENT_ERROR";
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum AdminError {
     // 认证与授权
     Unauthorized,

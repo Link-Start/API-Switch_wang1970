@@ -159,6 +159,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
         ("autostart", "0"),
         ("start_minimized", "0"),
         ("default_sort_mode", "custom"),
+        ("active_group", "auto"),
         ("web_admin_enabled", "0"),
         ("web_admin_username", ""),
         ("web_admin_password", ""),
@@ -201,6 +202,8 @@ fn ensure_api_entry_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "api_entries", "release_date", "TEXT DEFAULT ''")?;
     ensure_column(conn, "api_entries", "model_meta_zh", "TEXT DEFAULT ''")?;
     ensure_column(conn, "api_entries", "model_meta_en", "TEXT DEFAULT ''")?;
+    // group_name 分组字段
+    ensure_column(conn, "api_entries", "group_name", "TEXT NOT NULL DEFAULT 'auto'")?;
     Ok(())
 }
 

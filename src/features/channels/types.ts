@@ -8,6 +8,7 @@ export interface Channel {
   selected_models?: string[];
   enabled: boolean;
   notes?: string;
+  response_ms?: string;
 }
 export interface CreateChannelParams {
   name: string;

@@ -1,7 +1,7 @@
 use crate::database::AppSettings;
 use crate::error::AppError;
 use crate::AppState;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize};
 use tauri::State;
 use crate::admin::RestartInfo;
 
@@ -72,6 +72,7 @@ const GITHUB_REPO: &str = "wang1970/API-Switch";
 struct GithubRelease {
     tag_name: String,
     html_url: String,
+    #[allow(dead_code)]
     body: Option<String>,
 }
 

@@ -505,20 +505,20 @@ fn transform_anthropic_sse_line(data_line: &str) -> Option<String> {
                     .get("id")
                     .and_then(|i| i.as_str())
                     .unwrap_or("chatcmpl-anthropic");
-                return Some(
-                    serde_json::to_string(&json!({
-                        "id": id,
-                        "object": "chat.completion.chunk",
-                        "created": chrono::Utc::now().timestamp(),
-                        "model": model,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {"role": "assistant", "content": ""},
-                            "finish_reason": null
-                        }]
-                    }))
-                    .unwrap(),
-                );
+            return Some(
+                serde_json::to_string(&json!({
+                    "id": id,
+                    "object": "chat.completion.chunk",
+                    "created": chrono::Utc::now().timestamp(),
+                    "model": model,
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": ""},
+                        "finish_reason": null
+                    }]
+                }))
+                .unwrap_or_default(),
+            );
             }
             None
         }
@@ -535,69 +535,69 @@ fn transform_anthropic_sse_line(data_line: &str) -> Option<String> {
                             .get("text")
                             .and_then(|t| t.as_str())
                             .unwrap_or("");
-                        if !text.is_empty() {
-                            return Some(
-                                serde_json::to_string(&json!({
-                                    "id": "chatcmpl-anthropic",
-                                    "object": "chat.completion.chunk",
-                                    "created": chrono::Utc::now().timestamp(),
-                                    "model": "claude",
-                                    "choices": [{
-                                        "index": index,
-                                        "delta": {"role": "assistant", "content": text},
-                                        "finish_reason": null
-                                    }]
-                                }))
-                                .unwrap(),
-                            );
-                        }
-                        // Empty first text chunk — still emit the role
-                        Some(
-                            serde_json::to_string(&json!({
-                                "id": "chatcmpl-anthropic",
-                                "object": "chat.completion.chunk",
-                                "created": chrono::Utc::now().timestamp(),
-                                "model": "claude",
-                                "choices": [{
-                                    "index": index,
-                                    "delta": {},
-                                    "finish_reason": null
-                                }]
-                            }))
-                            .unwrap(),
-                        )
+                if !text.is_empty() {
+                    return Some(
+                        serde_json::to_string(&json!({
+                            "id": "chatcmpl-anthropic",
+                            "object": "chat.completion.chunk",
+                            "created": chrono::Utc::now().timestamp(),
+                            "model": "claude",
+                            "choices": [{
+                                "index": index,
+                                "delta": {"role": "assistant", "content": text},
+                                "finish_reason": null
+                            }]
+                        }))
+                        .unwrap_or_default(),
+                    );
+                }
+                // Empty first text chunk — still emit the role
+                Some(
+                    serde_json::to_string(&json!({
+                        "id": "chatcmpl-anthropic",
+                        "object": "chat.completion.chunk",
+                        "created": chrono::Utc::now().timestamp(),
+                        "model": "claude",
+                        "choices": [{
+                            "index": index,
+                            "delta": {},
+                            "finish_reason": null
+                        }]
+                    }))
+                    .unwrap_or_default(),
+                )
                     }
-                    "tool_use" => {
-                        let id = content_block
-                            .get("id")
-                            .and_then(|i| i.as_str())
-                            .unwrap_or("");
-                        let name = content_block
-                            .get("name")
-                            .and_then(|n| n.as_str())
-                            .unwrap_or("");
-                        Some(
-                            serde_json::to_string(&json!({
-                                "id": "chatcmpl-anthropic",
-                                "object": "chat.completion.chunk",
-                                "created": chrono::Utc::now().timestamp(),
-                                "model": "claude",
-                                "choices": [{
-                                    "index": 0,
-                                    "delta": {
-                                        "role": "assistant",
-                                        "tool_calls": [{
-                                            "index": index,
-                                            "id": id,
-                                            "type": "function",
-                                            "function": {"name": name, "arguments": ""}
-                                        }]
-                                    },
-                                    "finish_reason": null
+            "tool_use" => {
+                let id = content_block
+                    .get("id")
+                    .and_then(|i| i.as_str())
+                    .unwrap_or("");
+                let name = content_block
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("");
+                Some(
+                    serde_json::to_string(&json!({
+                        "id": "chatcmpl-anthropic",
+                        "object": "chat.completion.chunk",
+                        "created": chrono::Utc::now().timestamp(),
+                        "model": "claude",
+                        "choices": [{
+                            "index": 0,
+                            "delta": {
+                                "role": "assistant",
+                                "tool_calls": [{
+                                    "index": index,
+                                    "id": id,
+                                    "type": "function",
+                                    "function": {"name": name, "arguments": ""}
                                 }]
-                            }))
-                            .unwrap(),
-                        )
+                            },
+                            "finish_reason": null
+                        }]
+                    }))
+                    .unwrap_or_default(),
+                )
                     }
                     _ => None,
                 }
@@ -611,53 +611,53 @@ fn transform_anthropic_sse_line(data_line: &str) -> Option<String> {
             let delta_type = delta.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
             match delta_type {
-                "text_delta" => {
-                    let text = delta.get("text").and_then(|t| t.as_str()).unwrap_or("");
-                    if text.is_empty() {
-                        return None;
-                    }
-                    Some(
-                        serde_json::to_string(&json!({
-                            "id": "chatcmpl-anthropic",
-                            "object": "chat.completion.chunk",
-                            "created": chrono::Utc::now().timestamp(),
-                            "model": "claude",
-                            "choices": [{
-                                "index": index,
-                                "delta": {"content": text},
-                                "finish_reason": null
-                            }]
-                        }))
-                        .unwrap(),
-                    )
+            "text_delta" => {
+                let text = delta.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                if text.is_empty() {
+                    return None;
                 }
-                "input_json_delta" => {
-                    let partial_json = delta
-                        .get("partial_json")
-                        .and_then(|t| t.as_str())
-                        .unwrap_or("");
-                    if partial_json.is_empty() {
-                        return None;
-                    }
-                    Some(
-                        serde_json::to_string(&json!({
-                            "id": "chatcmpl-anthropic",
-                            "object": "chat.completion.chunk",
-                            "created": chrono::Utc::now().timestamp(),
-                            "model": "claude",
-                            "choices": [{
-                                "index": 0,
-                                "delta": {
-                                    "tool_calls": [{
-                                        "index": index,
-                                        "function": {"arguments": partial_json}
-                                    }]
-                                },
-                                "finish_reason": null
-                            }]
-                        }))
-                        .unwrap(),
-                    )
+                Some(
+                    serde_json::to_string(&json!({
+                        "id": "chatcmpl-anthropic",
+                        "object": "chat.completion.chunk",
+                        "created": chrono::Utc::now().timestamp(),
+                        "model": "claude",
+                        "choices": [{
+                            "index": index,
+                            "delta": {"content": text},
+                            "finish_reason": null
+                        }]
+                    }))
+                    .unwrap_or_default(),
+                )
+                }
+            "input_json_delta" => {
+                let partial_json = delta
+                    .get("partial_json")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("");
+                if partial_json.is_empty() {
+                    return None;
+                }
+                Some(
+                    serde_json::to_string(&json!({
+                        "id": "chatcmpl-anthropic",
+                        "object": "chat.completion.chunk",
+                        "created": chrono::Utc::now().timestamp(),
+                        "model": "claude",
+                        "choices": [{
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [{
+                                    "index": index,
+                                    "function": {"arguments": partial_json}
+                                }]
+                            },
+                            "finish_reason": null
+                        }]
+                    }))
+                    .unwrap_or_default(),
+                )
                 }
                 _ => None,
             }
@@ -702,7 +702,7 @@ fn transform_anthropic_sse_line(data_line: &str) -> Option<String> {
                 });
             }
 
-            Some(serde_json::to_string(&chunk).unwrap())
+            Some(serde_json::to_string(&chunk).unwrap_or_default())
         }
         "message_stop" => Some("[DONE]".to_string()),
         "ping" => None,
@@ -724,7 +724,7 @@ fn transform_anthropic_sse_line(data_line: &str) -> Option<String> {
                     }],
                     "error": error_info
                 }))
-                .unwrap(),
+                .unwrap_or_default(),
             )
         }
         _ => None,

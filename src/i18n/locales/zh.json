@@ -25,7 +25,12 @@
     "sort": {
       "latest": "最新模型",
       "fastest": "最快模型",
-      "custom": "指定模型"
+      "custom": "手动排序"
+    },
+    "group": {
+      "searchPlaceholder": "搜索或输入分组...",
+      "create": "创建 \"{{name}}\"",
+      "updateFailed": "更新分组失败"
     },
     "cooldownRemaining": "冷却中，剩余 {{time}}",
     "channel": "渠道",
@@ -35,6 +40,7 @@
     "modelPlaceholder": "输入模型名称，如 gpt-4o、claude-3.5-sonnet",
     "displayName": "显示名称",
     "displayNamePlaceholder": "留空则使用模型名称",
+    "groupLabel": "分组",
     "modelMeta": {
       "releaseDate": "发布",
       "context": "上下文",
@@ -256,6 +262,27 @@
       "week": "周"
     }
   },
+  "translator": {
+    "title": "桌面翻译转发",
+    "description": "在桌面侧触发自动翻译，并把翻译结果转发到 Web Admin 端口。",
+    "desktopPanel": "桌面发送面板",
+    "sourceLang": "源语言",
+    "targetLang": "目标语言",
+    "autoDetect": "自动识别",
+    "sourceText": "原文",
+    "sourcePlaceholder": "在此输入文本。翻译结果会自动转发到 Web 端口。",
+    "translateAndRelay": "翻译并转发",
+    "translating": "翻译中...",
+    "relayed": "翻译内容已转发到 Web Admin",
+    "failed": "翻译失败",
+    "webPreview": "最新 Web 载荷预览",
+    "webTitle": "Web 翻译结果",
+    "webDescription": "此页面展示从桌面侧转发到 Web 的最新翻译结果。",
+    "latestRoute": "转发路径",
+    "original": "原文",
+    "translated": "译文",
+    "empty": "当前还没有转发任何翻译内容。"
+  },
   "settings": {
     "title": "系统设置",
     "proxy": {
@@ -303,12 +330,15 @@
       "address": "访问地址"
     },
     "general": {
-      "title": "通用设置",
+      "title": "通用",
       "language": "语言",
       "theme": "主题",
       "themeLight": "浅色",
       "themeDark": "深色",
       "themeSystem": "跟随系统",
+      "defaultGroup": "默认分组",
+      "defaultGroupDesc": "默认请求会优先从该分组中选择可用模型",
+
       "defaultSortMode": "默认排序方式",
       "defaultSortModeDesc": "API 管理页面的默认模型排序方式",
       "currentVersion": "当前版本"

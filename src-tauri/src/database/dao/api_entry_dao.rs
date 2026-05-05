@@ -35,6 +35,9 @@ pub struct ApiEntry {
     pub model_meta_zh: Option<String>,
     #[serde(default)]
     pub model_meta_en: Option<String>,
+    // Group name for entry grouping
+    #[serde(default)]
+    pub group_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -81,6 +84,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>, include_channel: bool) -> rusqlite::Res
     let release_date: String = row.get(13).unwrap_or_default();
     let model_meta_zh: String = row.get(14).unwrap_or_default();
     let model_meta_en: String = row.get(15).unwrap_or_default();
+    let group_name: String = row.get(16).unwrap_or_default();
     let channel_api_type = if include_channel { row.get(10).ok() } else { None };
     let owned_by = owned_by_from_api_type(channel_api_type.clone());
 
@@ -103,15 +107,16 @@ fn row_to_entry(row: &rusqlite::Row<'_>, include_channel: bool) -> rusqlite::Res
         release_date: empty_to_none(release_date),
         model_meta_zh: empty_to_none(model_meta_zh),
         model_meta_en: empty_to_none(model_meta_en),
+        group_name: empty_to_none(group_name),
     })
 }
 
 const ENTRY_SELECT_WITH_CHANNEL: &str =
     "SELECT e.id, e.channel_id, e.model, e.display_name, e.sort_index, e.enabled,
-            e.cooldown_until, e.created_at, e.updated_at, c.name, c.api_type,
-            e.response_ms, e.provider_logo, e.release_date, e.model_meta_zh, e.model_meta_en
-     FROM api_entries e
-     LEFT JOIN channels c ON e.channel_id = c.id";
+        e.cooldown_until, e.created_at, e.updated_at, c.name, c.api_type,
+        e.response_ms, e.provider_logo, e.release_date, e.model_meta_zh, e.model_meta_en, e.group_name
+        FROM api_entries e
+        LEFT JOIN channels c ON e.channel_id = c.id";
 
 impl Database {
     pub fn list_entries(&self) -> Result<Vec<ApiEntry>, AppError> {
@@ -127,77 +132,80 @@ impl Database {
         Ok(entries)
     }
 
-    pub fn create_entry(
-        &self,
-        channel_id: &str,
-        model: &str,
-        display_name: &str,
-        sort_index: i32,
-        provider_logo: &str,
-        release_date: &str,
-        model_meta_zh: &str,
-        model_meta_en: &str,
-    ) -> Result<ApiEntry, AppError> {
-        let conn = lock_conn!(self.conn);
-        let id = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().timestamp();
-        conn.execute(
-            "INSERT INTO api_entries (
-                id, channel_id, model, display_name, sort_index, enabled,
-                provider_logo, release_date, model_meta_zh, model_meta_en,
-                created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?10)",
-            rusqlite::params![id, channel_id, model, display_name, sort_index, provider_logo, release_date, model_meta_zh, model_meta_en, now],
-        )?;
+pub fn create_entry(
+    &self,
+    channel_id: &str,
+    model: &str,
+    display_name: &str,
+    sort_index: i32,
+    provider_logo: &str,
+    release_date: &str,
+    model_meta_zh: &str,
+    model_meta_en: &str,
+    group_name: &str,
+) -> Result<ApiEntry, AppError> {
+    let conn = lock_conn!(self.conn);
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().timestamp();
+    conn.execute(
+        "INSERT INTO api_entries (
+            id, channel_id, model, display_name, sort_index, enabled,
+            provider_logo, release_date, model_meta_zh, model_meta_en, group_name,
+            created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
+        rusqlite::params![id, channel_id, model, display_name, sort_index, provider_logo, release_date, model_meta_zh, model_meta_en, group_name, now],
+    )?;
 
-        Ok(ApiEntry {
-            id,
-            channel_id: channel_id.to_string(),
-            model: model.to_string(),
-            display_name: display_name.to_string(),
-            sort_index,
-            enabled: true,
-            cooldown_until: None,
-            circuit_state: "closed".to_string(),
-            created_at: now,
-            updated_at: now,
-            channel_name: None,
-            channel_api_type: None,
-            owned_by: None,
-            response_ms: None,
-            provider_logo: empty_to_none(provider_logo.to_string()),
-            release_date: empty_to_none(release_date.to_string()),
-            model_meta_zh: empty_to_none(model_meta_zh.to_string()),
-            model_meta_en: empty_to_none(model_meta_en.to_string()),
-        })
+    Ok(ApiEntry {
+        id,
+        channel_id: channel_id.to_string(),
+        model: model.to_string(),
+        display_name: display_name.to_string(),
+        sort_index,
+        enabled: true,
+        cooldown_until: None,
+        circuit_state: "closed".to_string(),
+        created_at: now,
+        updated_at: now,
+        channel_name: None,
+        channel_api_type: None,
+        owned_by: None,
+        response_ms: None,
+        provider_logo: empty_to_none(provider_logo.to_string()),
+        release_date: empty_to_none(release_date.to_string()),
+        model_meta_zh: empty_to_none(model_meta_zh.to_string()),
+        model_meta_en: empty_to_none(model_meta_en.to_string()),
+        group_name: empty_to_none(group_name.to_string()),
+    })
+}
+
+pub fn create_entry_auto(
+    &self,
+    channel_id: &str,
+    model: &str,
+    display_name: &str,
+    provider_logo: &str,
+    release_date: &str,
+    model_meta_zh: &str,
+    model_meta_en: &str,
+    group_name: &str,
+) -> Result<ApiEntry, AppError> {
+    if let Some(existing) = self.find_entry_by_channel_and_model(channel_id, model)? {
+        return Ok(existing);
     }
 
-    pub fn create_entry_auto(
-        &self,
-        channel_id: &str,
-        model: &str,
-        display_name: &str,
-        provider_logo: &str,
-        release_date: &str,
-        model_meta_zh: &str,
-        model_meta_en: &str,
-    ) -> Result<ApiEntry, AppError> {
-        if let Some(existing) = self.find_entry_by_channel_and_model(channel_id, model)? {
-            return Ok(existing);
-        }
+    let conn = lock_conn!(self.conn);
+    let next_sort: i32 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(sort_index), -1) + 1 FROM api_entries",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    drop(conn);
 
-        let conn = lock_conn!(self.conn);
-        let next_sort: i32 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(sort_index), -1) + 1 FROM api_entries",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        drop(conn);
-
-        self.create_entry(channel_id, model, display_name, next_sort, provider_logo, release_date, model_meta_zh, model_meta_en)
-    }
+    self.create_entry(channel_id, model, display_name, next_sort, provider_logo, release_date, model_meta_zh, model_meta_en, group_name)
+}
 
     pub fn toggle_entry(&self, id: &str, enabled: bool) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
@@ -311,7 +319,7 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let sql = format!(
             "SELECT id, channel_id, model, display_name, sort_index, enabled, cooldown_until, created_at, updated_at,
-                    '' as channel_name, '' as api_type, response_ms, provider_logo, release_date, model_meta_zh, model_meta_en
+                    '' as channel_name, '' as api_type, response_ms, provider_logo, release_date, model_meta_zh, model_meta_en, group_name
              FROM api_entries WHERE channel_id = ?1 AND model = ?2"
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -356,25 +364,25 @@ impl Database {
         for model in selected_models {
             let meta = catalog_meta.iter().find(|item| item.model == *model);
             if !current_models.contains(model) {
-                let id = uuid::Uuid::new_v4().to_string();
-                conn.execute(
-                    "INSERT INTO api_entries (
-                        id, channel_id, model, display_name, sort_index, enabled,
-                        provider_logo, release_date, model_meta_zh, model_meta_en,
-                        created_at, updated_at
-                     ) VALUES (?1, ?2, ?3, ?3, ?4, 1, ?5, ?6, ?7, ?8, ?9, ?9)",
-                    rusqlite::params![
-                        id,
-                        channel_id,
-                        model,
-                        next_sort,
-                        meta.map(|m| m.provider_logo.as_str()).unwrap_or(""),
-                        meta.map(|m| m.release_date.as_str()).unwrap_or(""),
-                        meta.map(|m| m.model_meta_zh.as_str()).unwrap_or(""),
-                        meta.map(|m| m.model_meta_en.as_str()).unwrap_or(""),
-                        now,
-                    ],
-                )?;
+            let id = uuid::Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO api_entries (
+                    id, channel_id, model, display_name, sort_index, enabled,
+                    provider_logo, release_date, model_meta_zh, model_meta_en, group_name,
+                    created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?3, ?4, 1, ?5, ?6, ?7, ?8, 'auto', ?9, ?9)",
+                rusqlite::params![
+                    id,
+                    channel_id,
+                    model,
+                    next_sort,
+                    meta.map(|m| m.provider_logo.as_str()).unwrap_or(""),
+                    meta.map(|m| m.release_date.as_str()).unwrap_or(""),
+                    meta.map(|m| m.model_meta_zh.as_str()).unwrap_or(""),
+                    meta.map(|m| m.model_meta_en.as_str()).unwrap_or(""),
+                    now,
+                ],
+            )?;
                 next_sort += 1;
             } else if let Some(meta) = meta {
                 conn.execute(
@@ -454,5 +462,51 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(entries)
+    }
+
+/// Get all distinct group names from api_entries.
+pub fn get_all_group_names(&self) -> Result<Vec<String>, AppError> {
+    let conn = lock_conn!(self.conn);
+    let mut stmt = conn.prepare("SELECT DISTINCT group_name FROM api_entries WHERE group_name != '' AND group_name IS NOT NULL ORDER BY group_name")?;
+
+    let groups = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(groups)
+}
+
+/// Get enabled entries for a specific group (for tray menu).
+/// Only enabled + non-cooldown entries enter the pool, filtered by group_name.
+pub fn get_enabled_entries_for_group(&self, group_name: &str) -> Result<Vec<ApiEntry>, AppError> {
+    let conn = lock_conn!(self.conn);
+    let sql = format!(
+        "{ENTRY_SELECT_WITH_CHANNEL}
+        WHERE e.enabled = 1 AND c.enabled = 1
+        AND e.group_name = ?1
+        AND (e.cooldown_until IS NULL OR e.cooldown_until <= strftime('%s','now'))
+        ORDER BY e.sort_index, e.created_at"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+
+    let entries = stmt
+        .query_map([group_name], |row| row_to_entry(row, true))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+    Ok(entries)
+}
+
+    /// Update the group_name for a specific entry.
+    pub fn update_entry_group(&self, id: &str, group_name: &str) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        let now = chrono::Utc::now().timestamp();
+        conn.execute(
+            "UPDATE api_entries SET group_name = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![group_name, now, id],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
     }
 }

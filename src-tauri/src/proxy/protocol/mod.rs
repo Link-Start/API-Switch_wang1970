@@ -29,9 +29,11 @@ pub trait ProtocolAdapter {
 
     // ── Authentication ─────────────────────────────────────────────
     /// Whether this type authenticates via URL query parameter instead of headers.
+    #[allow(dead_code)]
     fn uses_query_auth(&self) -> bool;
 
     /// Return auth headers as `(name, value)` pairs.
+    #[allow(dead_code)]
     fn build_auth_headers(&self, api_key: &str) -> Vec<(String, String)>;
 
     /// Apply auth to an existing `reqwest::RequestBuilder`.

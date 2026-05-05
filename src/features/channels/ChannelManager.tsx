@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Edit, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -78,6 +79,12 @@ export const ChannelManager: React.FC = () => {
     }
   }
 
+  const queryClient = useQueryClient();
+
+  const invalidateChannels = async () => {
+    queryClient.invalidateQueries({ queryKey: ["channels"] });
+  };
+
   useEffect(() => {
     loadChannels();
   }, []);
@@ -132,6 +139,7 @@ export const ChannelManager: React.FC = () => {
             <col />
             <col className="w-24" />
             <col className="w-24" />
+            <col className="w-24" />
             <col className="w-32" />
           </colgroup>
           <thead className="bg-muted/50">
@@ -140,6 +148,7 @@ export const ChannelManager: React.FC = () => {
               <th className="px-4 py-3 text-left font-medium">类型</th>
               <th className="px-4 py-3 text-left font-medium">Base URL</th>
               <th className="px-4 py-3 text-left font-medium">状态</th>
+              <th className="px-4 py-3 text-left font-medium">延迟</th>
               <th className="px-4 py-3 text-left font-medium">模型数</th>
               <th className="px-4 py-3 text-right font-medium">操作</th>
             </tr>
@@ -162,7 +171,7 @@ export const ChannelManager: React.FC = () => {
                   onToggle={() => setExpandedId((current) => (current === channel.id ? null : channel.id))}
                   onEdit={() => openEdit(channel)}
                   onDelete={() => handleDelete(channel)}
-                  onChanged={loadChannels}
+                  onChanged={invalidateChannels}
                 />
               ))
             )}
@@ -174,7 +183,7 @@ export const ChannelManager: React.FC = () => {
         open={dialogOpen}
         channel={editing}
         onOpenChange={setDialogOpen}
-        onSaved={loadChannels}
+        onSaved={invalidateChannels}
       />
       </div>
     </div>
@@ -199,6 +208,8 @@ function ChannelRow({
   const api = useApiAdapter();
   const [saving, setSaving] = useState(false);
   const [fetching, setFetching] = useState(false);
+  const [probing, setProbing] = useState(false);
+  const [probeResult, setProbeResult] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
   const availableModels = channel.available_models ?? [];
@@ -214,6 +225,20 @@ function ChannelRow({
       setRowError(getChannelErrorMessage(err, '保存渠道状态失败'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const probeUrl = async () => {
+    setProbing(true);
+    setProbeResult(null);
+    setRowError(null);
+    try {
+      const result = await api.channels.probeUrl(channel.base_url);
+      setProbeResult(`${result.latency_ms}ms`);
+    } catch (err) {
+      setRowError(getChannelErrorMessage(err, '测速失败'));
+    } finally {
+      setProbing(false);
     }
   };
 
@@ -270,6 +295,15 @@ function ChannelRow({
             {channel.enabled ? '启用' : '禁用'}
           </span>
         </td>
+        <td className="px-4 py-3">
+          {channel.response_ms ? (
+            <span className={cn('text-xs', channel.response_ms === 'X' ? 'text-red-500' : 'text-green-600')}>
+              {channel.response_ms}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">-</span>
+          )}
+        </td>
         <td className="px-4 py-3 whitespace-nowrap">{selectedModels.length} / {availableModels.length}</td>
         <td className="px-4 py-3">
           <div className="flex justify-end gap-1">
@@ -296,6 +330,11 @@ function ChannelRow({
                   <RefreshCw className={cn('h-3.5 w-3.5', fetching && 'animate-spin')} />
                   {fetching ? '获取中...' : '获取模型列表'}
                 </Button>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={probeUrl} disabled={probing}>
+                  <RefreshCw className={cn('h-3.5 w-3.5', probing && 'animate-spin')} />
+                  {probing ? '测速中...' : '测速'}
+                </Button>
+                {probeResult && <span className="text-sm text-green-600">延迟: {probeResult}</span>}
                 <Button size="sm" variant="outline" onClick={() => syncSelection(availableModels.map((model) => model.name))} disabled={saving || availableModels.length === 0}>
                   全选模型
                 </Button>

@@ -2,7 +2,7 @@ import { tauriApiAdapter } from './tauriApiAdapter';
 import { webAdminApiAdapter } from './webAdminApiAdapter';
 import type { ApiAdapter } from './apiAdapter';
 
-function isTauriRuntime(): boolean {
+export function isTauriRuntime(): boolean {
   if (typeof window === 'undefined') {
     return false;
   }

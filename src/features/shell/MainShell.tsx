@@ -1,4 +1,5 @@
 import { BarChart3, BookOpen, ExternalLink, FileText, KeyRound, Layers, Power, Route, Settings } from 'lucide-react';
+
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';

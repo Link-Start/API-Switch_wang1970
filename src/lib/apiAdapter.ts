@@ -22,10 +22,12 @@ export interface ApiAdapter {
     list(): Promise<ApiEntry[]>;
     toggle(id: string, enabled: boolean): Promise<void>;
     reorder(orderedIds: string[]): Promise<void>;
-    create(params: { channelId: string; model: string; displayName?: string }): Promise<ApiEntry>;
+    create(params: { channelId: string; model: string; displayName?: string; groupName?: string }): Promise<ApiEntry>;
     delete(id: string): Promise<void>;
     testLatency(id: string): Promise<{ entry_id: string; latency_ms: number | null }>;
     backfillCatalogMeta(items: { entryId: string; catalogProvider: string; catalogModelId: string }[]): Promise<void>;
+    getGroups(): Promise<string[]>;
+    updateGroup(id: string, groupName: string): Promise<void>;
   };
   tokens: {
     list(): Promise<AccessKey[]>;
@@ -33,8 +35,20 @@ export interface ApiAdapter {
     delete(id: string): Promise<void>;
     toggle(id: string, enabled: boolean): Promise<void>;
   };
+settings: {
+    get(): Promise<AppSettings>;
+    update(settings: AppSettings): Promise<void>;
+    patchSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
+};
+  proxy: {
+    getStatus(): Promise<ProxyStatus>;
+    start(): Promise<ProxyStatus>;
+    stop(): Promise<void>;
+  };
+  testChat(entryId: string, messages: { role: string; content: string }[]): Promise<TestChatResponse>;
+  getVersion(): Promise<{ version: string }>;
 }
 
 // Types referenced above – import from shared definitions
 import type { Channel, CreateChannelParams, UpdateChannelParams, FetchModelsResult, ProbeResult, ModelInfo, ModelCatalogMetaUpdate } from '../features/channels/types';
-import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey } from '../types';
+import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, ProxyStatus, TestChatResponse } from '../types';

@@ -124,17 +124,12 @@ function WebMain() {
       });
   }, []);
 
-  // Apply locale and theme
   useEffect(() => {
     if (!settings) return;
-
-    // Apply locale from DB
     const saved = localStorage.getItem('api-switch-locale');
     if (!saved && settings.locale) {
       i18n.changeLanguage(settings.locale);
     }
-
-    // Apply theme
     const root = document.documentElement;
     if (settings.theme === 'dark') {
       root.classList.add('dark');
@@ -155,16 +150,16 @@ function WebMain() {
         return <ChannelPage />;
       case 'settings':
         return <SettingsPage />;
-case 'apiPool':
-          return <PoolManager />;
-        case 'tokens':
-          return <TokenManager />;
-        case 'logs':
-          return <LogViewer />;
-        case 'dashboard':
-          return <DashboardView />;
-        default:
-          return <ChannelPage />;
+      case 'apiPool':
+        return <PoolManager />;
+      case 'tokens':
+        return <TokenManager />;
+      case 'logs':
+        return <LogViewer />;
+      case 'dashboard':
+        return <DashboardView />;
+      default:
+        return <ChannelPage />;
     }
   };
 
@@ -203,3 +198,4 @@ export const WebAdminApp: React.FC = () => {
 
   return <WebMain />;
 };
+

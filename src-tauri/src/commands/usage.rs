@@ -1,5 +1,6 @@
 use crate::database::*;
 use crate::error::AppError;
+use crate::services::log_service;
 use crate::AppState;
 use serde::Deserialize;
 use tauri::State;
@@ -9,7 +10,7 @@ pub fn get_usage_logs(
     state: State<'_, AppState>,
     filter: UsageLogFilter,
 ) -> Result<PaginatedResult<UsageLog>, AppError> {
-    state.db.get_usage_logs(&filter)
+    log_service::get_usage_logs(&state.db, &filter)
 }
 
 #[tauri::command]
@@ -18,7 +19,7 @@ pub fn get_dashboard_stats(
     filter: Option<DashboardFilterParams>,
 ) -> Result<DashboardStats, AppError> {
     let (start, end, _) = parse_filter(filter);
-    state.db.get_dashboard_stats(start, end)
+    log_service::get_dashboard_stats(&state.db, start, end)
 }
 
 #[tauri::command]
@@ -27,9 +28,7 @@ pub fn get_model_consumption(
     filter: Option<DashboardFilterParams>,
 ) -> Result<Vec<ChartDataPoint>, AppError> {
     let (start, end, granularity) = parse_filter(filter);
-    state
-        .db
-        .get_model_consumption(start, end, granularity.as_deref())
+    log_service::get_model_consumption(&state.db, start, end, granularity.as_deref())
 }
 
 #[tauri::command]
@@ -38,7 +37,7 @@ pub fn get_call_trend(
     filter: Option<DashboardFilterParams>,
 ) -> Result<Vec<ChartDataPoint>, AppError> {
     let (start, end, granularity) = parse_filter(filter);
-    state.db.get_call_trend(start, end, granularity.as_deref())
+    log_service::get_call_trend(&state.db, start, end, granularity.as_deref())
 }
 
 #[tauri::command]
@@ -47,7 +46,7 @@ pub fn get_model_distribution(
     filter: Option<DashboardFilterParams>,
 ) -> Result<Vec<ModelRanking>, AppError> {
     let (start, end, _) = parse_filter(filter);
-    state.db.get_model_distribution(start, end)
+    log_service::get_model_distribution(&state.db, start, end)
 }
 
 #[tauri::command]
@@ -56,7 +55,7 @@ pub fn get_model_ranking(
     filter: Option<DashboardFilterParams>,
 ) -> Result<Vec<ModelRanking>, AppError> {
     let (start, end, _) = parse_filter(filter);
-    state.db.get_model_ranking(start, end)
+    log_service::get_model_ranking(&state.db, start, end)
 }
 
 #[tauri::command]
@@ -65,7 +64,7 @@ pub fn get_user_ranking(
     filter: Option<DashboardFilterParams>,
 ) -> Result<Vec<UserRanking>, AppError> {
     let (start, end, _) = parse_filter(filter);
-    state.db.get_user_ranking(start, end)
+    log_service::get_user_ranking(&state.db, start, end)
 }
 
 #[tauri::command]
@@ -74,7 +73,7 @@ pub fn get_user_trend(
     filter: Option<DashboardFilterParams>,
 ) -> Result<Vec<ChartDataPoint>, AppError> {
     let (start, end, granularity) = parse_filter(filter);
-    state.db.get_user_trend(start, end, granularity.as_deref())
+    log_service::get_user_trend(&state.db, start, end, granularity.as_deref())
 }
 
 #[derive(Deserialize)]

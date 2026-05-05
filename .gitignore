@@ -38,6 +38,18 @@ src-tauri/target
 # Build artifacts
 tsconfig.tsbuildinfo
 release/
+dist-web-admin/
+
+# Test artifacts
+.playwright-mcp/
+playwright-report/
+test-results/
+tests/
+playwright.config.ts
+
+# Snapshots / temporary verification assets
+*-snapshot.md
+*-verified.png
 
 # Design assets (not for repo)
 design/

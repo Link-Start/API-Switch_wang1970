@@ -25,7 +25,12 @@
     "sort": {
       "latest": "Latest Models",
       "fastest": "Fastest Models",
-      "custom": "Specified Models"
+      "custom": "Manual Order"
+    },
+    "group": {
+      "searchPlaceholder": "Search or type group...",
+      "create": "Create \"{{name}}\"",
+      "updateFailed": "Failed to update group"
     },
     "cooldownRemaining": "Cooling down, {{time}} remaining",
     "channel": "Channel",
@@ -35,6 +40,7 @@
     "modelPlaceholder": "Enter model name, e.g. gpt-4o, claude-3.5-sonnet",
     "displayName": "Display Name",
     "displayNamePlaceholder": "Leave empty to use model name",
+    "groupLabel": "Group",
     "modelMeta": {
       "releaseDate": "Released",
       "context": "Context",
@@ -248,6 +254,27 @@
       "week": "Week"
     }
   },
+  "translator": {
+    "title": "Desktop Translation Relay",
+    "description": "Translate text on the desktop side and forward the translated result to the Web Admin port.",
+    "desktopPanel": "Desktop sender",
+    "sourceLang": "Source language",
+    "targetLang": "Target language",
+    "autoDetect": "Auto detect",
+    "sourceText": "Source text",
+    "sourcePlaceholder": "Type text here. The translated result will be forwarded to the Web port.",
+    "translateAndRelay": "Translate & Relay",
+    "translating": "Translating...",
+    "relayed": "Translated content forwarded to Web Admin",
+    "failed": "Translation failed",
+    "webPreview": "Latest Web payload preview",
+    "webTitle": "Web Translation Relay",
+    "webDescription": "This view shows the latest translated payload received from the desktop side.",
+    "latestRoute": "Forwarding route",
+    "original": "Original",
+    "translated": "Translated",
+    "empty": "No translated content has been forwarded yet."
+  },
   "settings": {
     "title": "Settings",
     "proxy": {
@@ -301,6 +328,8 @@
       "themeLight": "Light",
       "themeDark": "Dark",
       "themeSystem": "System",
+      "defaultGroup": "Default Group",
+      "defaultGroupDesc": "Default requests will prefer available models from this group first",
       "defaultSortMode": "Default Sort Mode",
       "defaultSortModeDesc": "Default model sort order for the API Management page",
       "currentVersion": "Version"

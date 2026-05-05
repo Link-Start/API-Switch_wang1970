@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { testChat } from "@/lib/api";
+import { useApiAdapter } from "@/lib/useApiAdapter";
 import { Send, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +30,7 @@ interface TestChatDialogProps {
 
 export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProps) {
   const { t } = useTranslation();
+  const adapter = useApiAdapter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -75,7 +76,7 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
     const start = performance.now();
 
     try {
-      const result = await testChat(
+      const result = await adapter.testChat(
         entry.id,
         newMessages.map((m) => ({ role: m.role, content: m.content }))
       );
@@ -219,7 +220,7 @@ export function TestChatDialog({ open, onOpenChange, entry }: TestChatDialogProp
               size="icon"
               onClick={clearMessages}
               disabled={loading}
-              title={t("common.delete")}
+              title={t("common.clear")}
             >
               <Trash2 className="h-4 w-4" />
             </Button>

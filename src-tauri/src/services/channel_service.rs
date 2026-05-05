@@ -11,6 +11,7 @@ use crate::proxy::protocol::get_adapter;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct ModelCatalogMetaInput {
     pub model: String,
     pub provider_logo: String,
@@ -20,6 +21,7 @@ pub struct ModelCatalogMetaInput {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct ProbeSuccess {
     models: Vec<ModelInfo>,
     corrected_base_url: String,
@@ -774,6 +776,7 @@ async fn try_models_endpoint(
     }
 }
 
+#[allow(dead_code)]
 fn extract_models_from_json(body: &str) -> Option<Vec<ModelInfo>> {
     let json: serde_json::Value = serde_json::from_str(body).ok()?;
     let arr = json.get("data")?.as_array()?;
@@ -791,6 +794,7 @@ fn extract_models_from_json(body: &str) -> Option<Vec<ModelInfo>> {
     if models.is_empty() { None } else { Some(models) }
 }
 
+#[allow(dead_code)]
 async fn try_chat_probe(
     client: &reqwest::Client,
     adapter: &(dyn crate::proxy::protocol::ProtocolAdapter + Send + Sync),
@@ -824,6 +828,7 @@ async fn try_chat_probe(
     }
 }
 
+#[allow(dead_code)]
 fn known_models_for_type(api_type: &str) -> Vec<ModelInfo> {
     let list: &[(&str, &str)] = match api_type {
         "openai" => &[("gpt-4o","openai"),("gpt-4o-mini","openai"),("gpt-4-turbo","openai"),("gpt-3.5-turbo","openai"),("o1","openai"),("o1-mini","openai"),("o1-preview","openai"),("o3-mini","openai"),("o4-mini","openai")],

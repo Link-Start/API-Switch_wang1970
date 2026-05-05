@@ -181,78 +181,124 @@ pub fn run() {
             log::info!("API Switch initialized");
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            commands::channel::list_channels,
-            commands::channel::create_channel,
-            commands::channel::update_channel,
-            commands::channel::update_channel_response_ms,
-            commands::channel::delete_channel,
-            commands::channel::fetch_models,
-            commands::channel::fetch_models_direct,
-            commands::channel::probe_url,
-            commands::channel::select_models,
-            commands::pool::list_entries,
-            commands::pool::toggle_entry,
-            commands::pool::reorder_entries,
-            commands::pool::delete_entry,
-            commands::pool::create_entry,
-            commands::pool::backfill_entry_catalog_meta,
-            commands::pool::test_entry_latency,
-            commands::pool::update_entry_response_ms,
-            commands::token::list_access_keys,
-            commands::token::create_access_key,
-            commands::token::delete_access_key,
-            commands::token::toggle_access_key,
-            commands::usage::get_usage_logs,
-            commands::usage::get_dashboard_stats,
-            commands::usage::get_model_consumption,
-            commands::usage::get_call_trend,
-            commands::usage::get_model_distribution,
-            commands::usage::get_model_ranking,
-            commands::usage::get_user_ranking,
-            commands::usage::get_user_trend,
-            commands::config::get_settings,
-            commands::config::update_settings,
-            commands::config::check_update,
-            commands::proxy_cmd::start_proxy,
-            commands::proxy_cmd::stop_proxy,
-            commands::proxy_cmd::get_proxy_status,
-            commands::proxy_cmd::refresh_tray_menu,
-            commands::test_chat::test_chat,
-            commands::cli::set_user_env_vars,
-            commands::cli::get_cli_data,
-            commands::limit::query_limit,
-            commands::admin_cmd::get_admin_status,
-        ])
+    .invoke_handler(tauri::generate_handler![
+        commands::channel::list_channels,
+        commands::channel::create_channel,
+        commands::channel::update_channel,
+        commands::channel::update_channel_response_ms,
+        commands::channel::delete_channel,
+        commands::channel::fetch_models,
+        commands::channel::fetch_models_direct,
+        commands::channel::probe_url,
+        commands::channel::select_models,
+        commands::pool::list_entries,
+        commands::pool::toggle_entry,
+        commands::pool::reorder_entries,
+        commands::pool::delete_entry,
+        commands::pool::create_entry,
+        commands::pool::backfill_entry_catalog_meta,
+        commands::pool::test_entry_latency,
+        commands::pool::update_entry_response_ms,
+        commands::pool::get_all_groups,
+        commands::pool::update_entry_group,
+        commands::token::list_access_keys,
+        commands::token::create_access_key,
+        commands::token::delete_access_key,
+        commands::token::toggle_access_key,
+        commands::usage::get_usage_logs,
+        commands::usage::get_dashboard_stats,
+        commands::usage::get_model_consumption,
+        commands::usage::get_call_trend,
+        commands::usage::get_model_distribution,
+        commands::usage::get_model_ranking,
+        commands::usage::get_user_ranking,
+        commands::usage::get_user_trend,
+        commands::config::get_settings,
+        commands::config::update_settings,
+        commands::config::check_update,
+        commands::proxy_cmd::start_proxy,
+        commands::proxy_cmd::stop_proxy,
+        commands::proxy_cmd::get_proxy_status,
+        commands::proxy_cmd::refresh_tray_menu,
+        commands::test_chat::test_chat,
+        commands::cli::set_user_env_vars,
+        commands::cli::get_cli_data,
+        commands::limit::query_limit,
+        commands::admin_cmd::get_admin_status,
+    ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
 pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let app_state = app.state::<AppState>();
-    let mut entries = app_state
-        .db
-        .get_enabled_entries_for_auto()
-        .unwrap_or_default();
-    let sort_mode = app_state
+    let settings = app_state
         .settings
         .try_read()
-        .map(|settings| settings.default_sort_mode.clone())
+        .map(|s| s.clone())
         .unwrap_or_else(|_| {
             app_state
                 .db
                 .get_settings()
-                .map(|settings| settings.default_sort_mode)
-                .unwrap_or_else(|_| "custom".to_string())
+                .unwrap_or_default()
         });
-    proxy::apply_sort_mode(&mut entries, &sort_mode);
+    
+    let current_group = settings.active_group;
+    
+    // Get all group names from DB
+    let all_groups = app_state
+        .db
+        .get_all_group_names()
+        .unwrap_or_default();
+    
+    // Ensure "auto" is always in the list (even if no entries have group_name="auto")
+    let groups: Vec<String> = if all_groups.contains(&"auto".to_string()) {
+        all_groups
+    } else {
+        let mut g = all_groups;
+        g.insert(0, "auto".to_string());
+        g
+    };
+    
+    // Get enabled entries for the current group
+    let entries = app_state
+        .db
+        .get_enabled_entries_for_group(&current_group)
+        .unwrap_or_default();
+    
+    // Use DB sort_index ordering for tray entries (no default sort mode applied)
+    // Entries are already ordered by sort_index from the database
+    // No additional sorting is performed here
     let top5: Vec<_> = entries.into_iter().take(5).collect();
 
     // 1. Show main window (top of menu)
     let show_item = MenuItem::with_id(app, "show_main", "Open Main Window", true, None::<String>)?;
     let separator1 = PredefinedMenuItem::separator(app)?;
 
-    // 2. CheckMenuItems for top 5 entries
+    // 2. Group submenu (CheckMenuItem with current group marked)
+    let group_menu_items: Vec<CheckMenuItem<tauri::Wry>> = groups
+        .iter()
+        .map(|group| {
+            let checked = group == &current_group;
+            CheckMenuItem::with_id(app, &format!("group:{}", group), group, true, checked, None::<String>).unwrap()
+        })
+        .collect();
+    
+// Create a Submenu with ID and items - need to convert to slice of trait objects
+    let group_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = group_menu_items
+        .iter()
+        .map(|item| item as &dyn tauri::menu::IsMenuItem<_>)
+        .collect();
+    
+    let group_menu_item = tauri::menu::Submenu::with_id_and_items(
+        app,
+        "groups_submenu",
+        "Groups",
+        true,
+        &group_items,
+    )?;
+
+    // 3. Top N entries for current group (CheckMenuItem)
     let check_items: Vec<CheckMenuItem<tauri::Wry>> = top5
         .iter()
         .enumerate()
@@ -262,18 +308,20 @@ pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<taur
                 Some(ch) => format!("{} / {}", entry.display_name, ch),
                 None => entry.display_name.clone(),
             };
-            CheckMenuItem::with_id(app, &entry.id, &label, true, checked, None::<String>).unwrap()
+            CheckMenuItem::with_id(app, &format!("model:{}", entry.id), &label, true, checked, None::<String>).unwrap()
         })
         .collect();
 
-    // 3. Quit
+    // 4. Quit
     let separator2 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Exit", true, None::<String>)?;
 
     // Assemble menu
-    let mut all: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = Vec::with_capacity(top5.len() + 4);
+    let mut all: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = Vec::with_capacity(top5.len() + 6);
     all.push(&show_item as &dyn tauri::menu::IsMenuItem<_>);
     all.push(&separator1 as &dyn tauri::menu::IsMenuItem<_>);
+    all.push(&group_menu_item as &dyn tauri::menu::IsMenuItem<_>);
+    all.push(&separator2 as &dyn tauri::menu::IsMenuItem<_>);
     for item in &check_items {
         all.push(item);
     }
@@ -308,32 +356,60 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
             }
         }
         _ => {
-            // Provider entry click — set as top priority
-            let entry_id = event_id.to_string();
-            log::info!("[tray] setting priority for entry={entry_id}");
-
-            // Update sort_index: set clicked entry to 0, increment others
-            {
-                let app_state = app.state::<AppState>();
-                let guard = app_state.db.conn.lock();
-                if let Ok(conn) = guard {
-                    let now = chrono::Utc::now().timestamp();
-                    let _ = conn.execute(
-                        "UPDATE api_entries SET sort_index = sort_index + 1, updated_at = ?1 WHERE id != ?2",
-                        rusqlite::params![now, entry_id],
-                    );
-                    let _ = conn.execute(
-                        "UPDATE api_entries SET sort_index = 0, updated_at = ?1 WHERE id = ?2",
-                        rusqlite::params![now, entry_id],
-                    );
+            // Parse event_id to determine if it's a group click or model click
+            if event_id.starts_with("group:") {
+                // Group click - switch default group
+                let group_name = event_id.strip_prefix("group:").unwrap_or(event_id);
+                log::info!("[tray] switching default group: {}", group_name);
+                
+                // Update active_group in settings (single source of truth for default group)
+                {
+                    let app_state = app.state::<AppState>();
+                    let mut settings_guard = app_state.settings.blocking_write();
+                    settings_guard.active_group = group_name.to_string();
+                    
+                    // Persist to DB
+                    let _ = app_state.db.update_settings(&settings_guard);
                 }
+                
+                // Refresh tray menu
+                refresh_tray_if_enabled(app);
+                
+                // Notify frontend to refresh
+                let _ = app.emit("tray-priority-changed", ());
+            } else if event_id.starts_with("model:") {
+                // Model click - set as top priority (existing behavior)
+                let entry_id = event_id.strip_prefix("model:").unwrap_or(event_id).to_string();
+                log::info!("[tray] setting priority for entry={entry_id}");
+
+                // Update sort_index within current default group only
+                {
+                    let app_state = app.state::<AppState>();
+                    let current_group = app_state
+                        .settings
+                        .blocking_read()
+                        .active_group
+                        .clone();
+                    let guard = app_state.db.conn.lock();
+                    if let Ok(conn) = guard {
+                        let now = chrono::Utc::now().timestamp();
+                        let _ = conn.execute(
+                            "UPDATE api_entries SET sort_index = sort_index + 1, updated_at = ?1 WHERE id != ?2 AND COALESCE(group_name, 'auto') = ?3",
+                            rusqlite::params![now, entry_id, current_group],
+                        );
+                        let _ = conn.execute(
+                            "UPDATE api_entries SET sort_index = 0, updated_at = ?1 WHERE id = ?2 AND COALESCE(group_name, 'auto') = ?3",
+                            rusqlite::params![now, entry_id, current_group],
+                        );
+                    }
+                }
+
+                // Rebuild tray menu with updated priority
+                refresh_tray_if_enabled(app);
+
+                // Notify frontend to refresh API Pool list
+                let _ = app.emit("tray-priority-changed", ());
             }
-
-            // Rebuild tray menu with updated priority
-            refresh_tray_if_enabled(app);
-
-            // Notify frontend to refresh API Pool list
-            let _ = app.emit("tray-priority-changed", ());
         }
     }
 }

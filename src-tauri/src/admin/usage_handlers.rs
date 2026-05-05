@@ -8,6 +8,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
+use crate::services::log_service;
 
 // Query parameter structs
 #[derive(Deserialize, Default)]
@@ -70,7 +71,7 @@ pub async fn get_logs(
     Query(params): Query<LogsQueryParams>,
 ) -> Result<Json<crate::database::PaginatedResult<UsageLog>>, AdminError> {
     let filter = query_to_usage_log_filter(&params);
-    let result = state.db.get_usage_logs(&filter)?;
+    let result = log_service::get_usage_logs(&state.db, &filter)?;
     Ok(Json(result))
 }
 
@@ -84,7 +85,7 @@ pub async fn get_dashboard_stats(
     } else {
         (None, None, None)
     };
-    let result = state.db.get_dashboard_stats(start, end)?;
+    let result = log_service::get_dashboard_stats(&state.db, start, end)?;
     Ok(Json(result))
 }
 
@@ -98,7 +99,7 @@ pub async fn get_model_consumption(
     } else {
         (None, None, None)
     };
-    let result = state.db.get_model_consumption(start, end, granularity.as_deref())?;
+    let result = log_service::get_model_consumption(&state.db, start, end, granularity.as_deref())?;
     Ok(Json(result))
 }
 
@@ -112,7 +113,7 @@ pub async fn get_call_trend(
     } else {
         (None, None, None)
     };
-    let result = state.db.get_call_trend(start, end, granularity.as_deref())?;
+    let result = log_service::get_call_trend(&state.db, start, end, granularity.as_deref())?;
     Ok(Json(result))
 }
 
@@ -126,7 +127,7 @@ pub async fn get_model_distribution(
     } else {
         (None, None, None)
     };
-    let result = state.db.get_model_distribution(start, end)?;
+    let result = log_service::get_model_distribution(&state.db, start, end)?;
     Ok(Json(result))
 }
 
@@ -140,7 +141,7 @@ pub async fn get_model_ranking(
     } else {
         (None, None, None)
     };
-    let result = state.db.get_model_ranking(start, end)?;
+    let result = log_service::get_model_ranking(&state.db, start, end)?;
     Ok(Json(result))
 }
 
@@ -154,7 +155,7 @@ pub async fn get_user_ranking(
     } else {
         (None, None, None)
     };
-    let result = state.db.get_user_ranking(start, end)?;
+    let result = log_service::get_user_ranking(&state.db, start, end)?;
     Ok(Json(result))
 }
 
@@ -168,6 +169,6 @@ pub async fn get_user_trend(
     } else {
         (None, None, None)
     };
-    let result = state.db.get_user_trend(start, end, granularity.as_deref())?;
+    let result = log_service::get_user_trend(&state.db, start, end, granularity.as_deref())?;
     Ok(Json(result))
 }

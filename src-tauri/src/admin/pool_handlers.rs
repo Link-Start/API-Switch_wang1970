@@ -20,6 +20,8 @@ pub struct CreateEntryParams {
     pub model_meta_zh: String,
     #[serde(default)]
     pub model_meta_en: String,
+    #[serde(default)]
+    pub group_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -61,6 +63,7 @@ pub async fn create(
             release_date: payload.release_date,
             model_meta_zh: payload.model_meta_zh,
             model_meta_en: payload.model_meta_en,
+            group_name: payload.group_name,
         },
     )?;
     Ok(Json(entry))
@@ -125,7 +128,25 @@ pub async fn backfill_catalog_meta(
             model_meta_en: item.model_meta_en,
         })
         .collect();
-    
+
     pool_service::backfill_entry_catalog_meta(&state.db, updates)?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+/// GET /admin/pool/groups - Get all distinct group names
+pub async fn get_groups(
+    State(state): State<AdminState>,
+) -> Result<Json<Vec<String>>, AdminError> {
+    let groups = pool_service::get_all_groups(&state.db)?;
+    Ok(Json(groups))
+}
+
+/// PUT /admin/pool/:id/group - Update the group_name for an entry
+pub async fn update_group(
+    State(state): State<AdminState>,
+    Path(id): Path<String>,
+    Json(group_name): Json<String>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    pool_service::update_entry_group(&state.db, &id, &group_name)?;
     Ok(Json(serde_json::json!({"ok": true})))
 }

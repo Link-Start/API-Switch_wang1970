@@ -14,7 +14,7 @@ pub struct LoginFailureState {
 pub struct SessionInfo {
     pub username: String,
     pub expires_at: chrono::DateTime<chrono::Utc>,
-    pub settings_version: i64,
+
 }
 
 #[derive(Clone)]
@@ -28,16 +28,7 @@ pub struct AdminState {
 }
 
 impl AdminState {
-    pub fn new(db: Arc<Database>, settings: Arc<RwLock<AppSettings>>) -> Self {
-        Self {
-            db,
-            settings,
-            login_sessions: Arc::new(RwLock::new(HashMap::new())),
-            login_failures: Arc::new(Mutex::new(HashMap::new())),
-            runtime: None,
-            app_handle: None,
-        }
-    }
+
 
     pub fn new_runtime(runtime: AppState, app_handle: tauri::AppHandle) -> Self {
         Self {

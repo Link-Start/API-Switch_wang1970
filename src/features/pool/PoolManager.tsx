@@ -674,12 +674,13 @@ export function PoolManager() {
 
   const testAllEntries = useCallback(async () => {
     if (!entries || testProgress) return;
+    const scopedEntries = entries.filter((entry) => (entry.group_name || "auto") === groupFilter);
     const results: Record<string, string> = {};
     let completed = 0;
-    const total = entries.length;
+    const total = scopedEntries.length;
     setTestProgress({ current: 0, total });
     const grouped = new Map<string, ApiEntry[]>();
-    for (const entry of entries) {
+    for (const entry of scopedEntries) {
       const list = grouped.get(entry.channel_id) || [];
       list.push(entry);
       grouped.set(entry.channel_id, list);
@@ -742,7 +743,7 @@ export function PoolManager() {
           {filterText ? <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setFilterText("")}><X className="h-4 w-4" /></button> : null}
         </div>
       </div>
-      {groups.length > 1 ? (
+      {groups.length > 0 ? (
         <div className="mt-2 -mx-px w-[calc(100%+2px)] rounded-t-md border border-b-0 bg-background">
           <div className="flex w-full items-center px-0 py-0">
             {groups.map((group, index) => (

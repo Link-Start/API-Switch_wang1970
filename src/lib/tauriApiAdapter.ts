@@ -49,7 +49,7 @@ export const tauriApiAdapter: ApiAdapter = {
       await invoke('select_models', { channelId, modelNames, availableModels, catalogMeta });
     },
     async updateResponseMs(channelId, responseMs) {
-      await invoke('update_channel_response_ms', { channelId, responseMs });
+      await invoke('update_channel_response_ms', { params: { channelId, responseMs } });
     },
   },
   usage: {

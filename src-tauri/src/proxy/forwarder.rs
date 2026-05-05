@@ -244,18 +244,22 @@ struct StreamLogGuard {
     status_code: i32,
     start: Instant,
     prior_attempts: Vec<AttemptInfo>,
+    circuit_breakers: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CircuitBreaker>>>,
+    failure_counts: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
+    settings: Arc<tokio::sync::RwLock<AppSettings>>,
 }
 
 impl Drop for StreamLogGuard {
     fn drop(&mut self) {
         if !self.logged.swap(true, Ordering::SeqCst) {
-            // Client disconnect: upstream was fine (status_code 200), mark as success.
-            // stream_end_reason: dropped distinguishes it from normal completion.
+            let prompt_tokens = self.prompt_tokens.load(Ordering::SeqCst);
+            let completion_tokens = self.completion_tokens.load(Ordering::SeqCst);
+            let success = self.status_code == 200 && (prompt_tokens > 0 || completion_tokens > 0);
             let attempt_path = attempt_path_with_current(
                 &self.prior_attempts,
                 &self.entry,
                 self.status_code,
-                true,
+                success,
                 None,
             );
             let db = self.db.clone();
@@ -263,19 +267,40 @@ impl Drop for StreamLogGuard {
             let access_key = self.access_key.clone();
             let entry = self.entry.clone();
             let requested_model = self.requested_model.clone();
-            let prompt_tokens = self.prompt_tokens.load(Ordering::SeqCst);
-            let completion_tokens = self.completion_tokens.load(Ordering::SeqCst);
             let first_token_ms = self.first_token_ms.load(Ordering::SeqCst);
             let latency_ms = self.start.elapsed().as_millis() as i64;
             let status_code = self.status_code;
+            let circuit_breakers = self.circuit_breakers.clone();
+            let failure_counts = self.failure_counts.clone();
+            let settings = self.settings.clone();
+            let entry_id = entry.id.clone();
             tokio::spawn(async move {
                 log_usage(
                     &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
                     true, prompt_tokens, completion_tokens,
                     first_token_ms, latency_ms,
-                    status_code, true, None,
+                    status_code, success, None,
                     Some(attempt_path.as_str()), Some(StreamEndReason::Dropped),
                 );
+                if success {
+                    spawn_record_circuit_success(
+                        circuit_breakers,
+                        failure_counts,
+                        settings,
+                        db.clone(),
+                        app_handle.clone(),
+                        entry_id,
+                    );
+                } else {
+                    spawn_cool_down_entry(
+                        circuit_breakers,
+                        failure_counts,
+                        settings,
+                        db.clone(),
+                        app_handle.clone(),
+                        entry_id,
+                    );
+                }
             });
         }
     }
@@ -390,6 +415,15 @@ async fn forward_single(
     let mut upstream_body = body.clone();
     adapter.transform_request(&mut upstream_body, &entry.model);
 
+    if is_stream {
+        if let Some(body_obj) = upstream_body.as_object_mut() {
+            body_obj.insert(
+                "stream_options".to_string(),
+                serde_json::json!({ "include_usage": true }),
+            );
+        }
+    }
+
     let mut request = adapter
         .apply_auth(state.http_client.post(&url), &channel.api_key)
         .json(&upstream_body);
@@ -488,6 +522,7 @@ fn build_streaming_response(
     let first_token_ms = Arc::new(AtomicI64::new(0));
     let prompt_tokens = Arc::new(AtomicI64::new(0));
     let completion_tokens = Arc::new(AtomicI64::new(0));
+    let has_sse_error = Arc::new(AtomicBool::new(false));
     let chunk_count = Arc::new(AtomicI64::new(0));
     let streamed_bytes = Arc::new(AtomicI64::new(0));
     let seen_first_chunk = Arc::new(AtomicBool::new(false));
@@ -518,6 +553,9 @@ fn build_streaming_response(
         status_code,
         start,
         prior_attempts: prior_attempts.clone(),
+        circuit_breakers: circuit_breakers.clone(),
+        failure_counts: failure_counts.clone(),
+        settings: settings_cache.clone(),
     };
 
     let body_stream = futures::stream::poll_fn(move |cx| -> Poll<Option<Result<Bytes, std::io::Error>>> {
@@ -592,7 +630,13 @@ fn build_streaming_response(
                         return Poll::Pending;
                     }
                 } else {
-                    append_and_parse_sse(&mut sse_buffer, &chunk, &prompt_tokens, &completion_tokens);
+                    append_and_parse_sse(
+                        &mut sse_buffer,
+                        &chunk,
+                        &prompt_tokens,
+                        &completion_tokens,
+                        &has_sse_error,
+                    );
                 }
 
                 Poll::Ready(Some(Ok(chunk)))
@@ -652,15 +696,20 @@ fn build_streaming_response(
             }
             Poll::Ready(None) => {
                 if !logged.swap(true, Ordering::SeqCst) {
+                    let pt = prompt_tokens.load(Ordering::SeqCst);
+                    let ct = completion_tokens.load(Ordering::SeqCst);
+                    let has_error = has_sse_error.load(Ordering::SeqCst);
+                    let chunk_total = chunk_count.load(Ordering::SeqCst);
+                    let byte_total = streamed_bytes.load(Ordering::SeqCst);
+                    let ft = first_token_ms.load(Ordering::SeqCst);
+                    let success = status_code == 200 && !has_error && (pt > 0 || ct > 0);
                     let attempt_path = attempt_path_with_current(
                         &prior_attempts,
                         &entry,
                         status_code,
-                        true,
+                        success,
                         None,
                     );
-                    let chunk_total = chunk_count.load(Ordering::SeqCst);
-                    let byte_total = streamed_bytes.load(Ordering::SeqCst);
                     let stream_summary = build_stream_diagnostic(
                         "stream_complete",
                         None,
@@ -671,7 +720,7 @@ fn build_streaming_response(
                         chunk_total,
                         byte_total,
                         sse_buffer.len(),
-                        first_token_ms.load(Ordering::SeqCst),
+                        ft,
                         start.elapsed().as_millis() as i64,
                     );
                     let db2 = db.clone();
@@ -679,8 +728,6 @@ fn build_streaming_response(
                     let ak2 = access_key.clone();
                     let e2 = entry.clone();
                     let rm2 = requested_model.clone();
-                    let pt = prompt_tokens.load(Ordering::SeqCst);
-                    let ct = completion_tokens.load(Ordering::SeqCst);
                     let ft = first_token_ms.load(Ordering::SeqCst);
                     let lat = start.elapsed().as_millis() as i64;
                     let sc = status_code;
@@ -693,10 +740,14 @@ fn build_streaming_response(
                         log_usage(
                             &db2, &ah2, ak2.as_ref(), &e2, &rm2,
                             true, pt, ct, ft, lat,
-                            sc, true, Some(stream_summary.as_str()),
+                            sc, success, Some(stream_summary.as_str()),
                             Some(attempt_path.as_str()), Some(StreamEndReason::Done),
                         );
-                        spawn_record_circuit_success(scb, sfc, sdb, db2.clone(), eah, eid);
+                        if success {
+                            spawn_record_circuit_success(scb, sfc, sdb, db2.clone(), eah, eid);
+                        } else {
+                            spawn_cool_down_entry(scb, sfc, sdb, db2.clone(), eah, eid);
+                        }
                     });
                 }
                 Poll::Ready(None)
@@ -753,6 +804,7 @@ fn append_and_parse_sse(
     chunk: &Bytes,
     prompt_tokens: &Arc<AtomicI64>,
     completion_tokens: &Arc<AtomicI64>,
+    has_sse_error: &Arc<AtomicBool>,
 ) {
     buffer.push_str(&String::from_utf8_lossy(chunk));
 
@@ -765,6 +817,10 @@ fn append_and_parse_sse(
         if payload == "[DONE]" { continue }
 
         let Ok(value) = serde_json::from_str::<Value>(payload) else { continue };
+        if value.get("error").is_some() {
+            has_sse_error.store(true, Ordering::Relaxed);
+            continue;
+        }
         let (prompt, completion) = extract_usage_tokens(&value);
         if prompt > 0 { prompt_tokens.store(prompt, Ordering::Relaxed); }
         if completion > 0 { completion_tokens.store(completion, Ordering::Relaxed); }

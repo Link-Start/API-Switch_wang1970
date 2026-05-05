@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
-import { Edit, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { Edit, Plus, RefreshCw, Save, Trash2, Power, PowerOff, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -13,10 +14,11 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { cn } from '@/lib/utils';
+import { cn, formatResponseMs } from '@/lib/utils';
+import { getCatalogModel, getCatalogProviderLogo, formatTokenCount } from '@/lib/modelsCatalog';
 import { useApiAdapter } from '../../lib/useApiAdapter';
 import { getChannelErrorMessage } from './channelErrors';
-import type { Channel, CreateChannelParams, ModelInfo, UpdateChannelParams } from './types';
+import type { Channel, CreateChannelParams, ModelInfo, UpdateChannelParams, ModelCatalogMetaUpdate } from './types';
 
 type ChannelFormState = {
   id?: string;
@@ -57,6 +59,107 @@ function channelToForm(channel: Channel): ChannelFormState {
   };
 }
 
+function formatReleaseDate(value?: string) {
+  if (!value) return '';
+  const compact = value.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
+  const monthOnly = value.match(/^(\d{4})-(\d{2})$/);
+  if (monthOnly) return `${value}-01`;
+  return value;
+}
+
+function buildEntryCatalogMeta(modelName: string): ModelCatalogMetaUpdate {
+  const model = getCatalogModel(modelName);
+  if (!model) {
+    return {
+      model: modelName,
+      provider_logo: getCatalogProviderLogo(modelName),
+      release_date: '',
+      model_meta_zh: '',
+      model_meta_en: '',
+    };
+  }
+
+  const inputs = model.modalities?.input || [];
+  const outputs = model.modalities?.output || [];
+  const features: string[] = [];
+  if (outputs.includes('image')) features.push('imageGeneration');
+  if (inputs.includes('image')) features.push('imageUnderstanding');
+  if (inputs.includes('audio') || outputs.includes('audio')) features.push('audio');
+  if (inputs.includes('video') || outputs.includes('video')) features.push('video');
+  if (inputs.includes('pdf') || outputs.includes('pdf')) features.push('pdf');
+  if (model.reasoning) features.push('reasoning');
+  if (model.interleaved) features.push('interleaved');
+  if (model.tool_call) features.push('toolCall');
+  if (model.structured_output) features.push('structuredOutput');
+  if (model.attachment) features.push('attachment');
+  if (model.temperature) features.push('temperature');
+
+  const releaseDate = formatReleaseDate(model.release_date);
+  const context = formatTokenCount(model.limit?.context) || '';
+  const output = formatTokenCount(model.limit?.output) || '';
+  const zhFeatureLabels: Record<string, string> = {
+    imageGeneration: '生图',
+    imageUnderstanding: '识图',
+    audio: '音频',
+    video: '视频',
+    pdf: 'PDF',
+    reasoning: '推理',
+    interleaved: '思维链',
+    toolCall: '工具调用',
+    structuredOutput: '结构输出',
+    attachment: '附件',
+    temperature: '温度',
+  };
+  const enFeatureLabels: Record<string, string> = {
+    imageGeneration: 'Image Gen',
+    imageUnderstanding: 'Vision',
+    audio: 'Audio',
+    video: 'Video',
+    pdf: 'PDF',
+    reasoning: 'Reasoning',
+    interleaved: 'Reasoning Trace',
+    toolCall: 'Tool Calling',
+    structuredOutput: 'Struct Output',
+    attachment: 'Attachment',
+    temperature: 'Temperature',
+  };
+  const buildMeta = (labels: Record<string, string>, releaseLabel: string, contextLabel: string, outputLabel: string) => [
+    releaseDate ? `${releaseLabel}: ${releaseDate}` : null,
+    ...features.map((feature) => labels[feature]).filter(Boolean),
+    context ? `${contextLabel}: ${context}` : null,
+    output ? `${outputLabel}: ${output}` : null,
+  ].filter(Boolean).join(' / ');
+
+  return {
+    model: modelName,
+    provider_logo: getCatalogProviderLogo(modelName),
+    release_date: releaseDate,
+    model_meta_zh: buildMeta(zhFeatureLabels, '发布', '上下文', '输出'),
+    model_meta_en: buildMeta(enFeatureLabels, 'Release', 'Context', 'Output'),
+  };
+}
+
+function sortChannels(items: Channel[]): Channel[] {
+  const parseResponseMs = (value?: string) => {
+    if (!value || value === 'X') return Number.POSITIVE_INFINITY;
+    const num = Number(value);
+    return Number.isFinite(num) && num > 0 ? num : Number.POSITIVE_INFINITY;
+  };
+
+  return [...items].sort((a, b) => {
+    if (a.enabled !== b.enabled) {
+      return a.enabled ? -1 : 1;
+    }
+    const aMs = parseResponseMs(a.response_ms);
+    const bMs = parseResponseMs(b.response_ms);
+    if (aMs !== bMs) {
+      return aMs - bMs;
+    }
+    return a.name.localeCompare(b.name, 'zh-CN');
+  });
+}
+
 export const ChannelManager: React.FC = () => {
   const api = useApiAdapter();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -65,13 +168,15 @@ export const ChannelManager: React.FC = () => {
   const [editing, setEditing] = useState<Channel | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [testingChannelId, setTestingChannelId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, string>>({});
 
   async function loadChannels() {
     setLoading(true);
     setError(null);
     try {
       const items = await api.channels.list();
-      setChannels(items);
+      setChannels(sortChannels(items));
     } catch (err) {
       setError(getChannelErrorMessage(err, '渠道列表加载失败'));
     } finally {
@@ -81,8 +186,9 @@ export const ChannelManager: React.FC = () => {
 
   const queryClient = useQueryClient();
 
-  const invalidateChannels = async () => {
+  const refreshChannels = async () => {
     queryClient.invalidateQueries({ queryKey: ["channels"] });
+    await loadChannels();
   };
 
   useEffect(() => {
@@ -113,6 +219,32 @@ export const ChannelManager: React.FC = () => {
     } catch (err) {
       setError(getChannelErrorMessage(err, '删除渠道失败'));
     }
+  };
+
+  const testAllChannels = async () => {
+    if (!channels) return;
+    const toTest = [...channels];
+    const results: Record<string, string> = {};
+    for (const ch of toTest) {
+      setTestingChannelId(ch.id);
+      try {
+        const probe = await api.channels.probeUrl(ch.base_url);
+        if (probe.reachable && probe.latency_ms > 0) {
+          const ms = String(probe.latency_ms);
+          await api.channels.updateResponseMs(ch.id, ms);
+          results[ch.id] = ms;
+        } else {
+          results[ch.id] = 'X';
+        }
+      } catch {
+        results[ch.id] = 'X';
+      }
+      setTestResults({ ...results });
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    setTestingChannelId(null);
+    await loadChannels();
+    setTestResults({});
   };
 
   return (
@@ -148,7 +280,20 @@ export const ChannelManager: React.FC = () => {
               <th className="px-4 py-3 text-left font-medium">类型</th>
               <th className="px-4 py-3 text-left font-medium">Base URL</th>
               <th className="px-4 py-3 text-left font-medium">状态</th>
-              <th className="px-4 py-3 text-left font-medium">延迟</th>
+              <th className="px-4 py-3 text-left font-medium whitespace-nowrap">
+                <div className="flex items-center gap-1">
+                  <span>响应</span>
+                  <button
+                    type="button"
+                    onClick={testAllChannels}
+                    disabled={testingChannelId !== null}
+                    className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                    title="一键测速"
+                  >
+                    <RefreshCw className={cn('h-3.5 w-3.5', testingChannelId !== null && 'animate-spin')} />
+                  </button>
+                </div>
+              </th>
               <th className="px-4 py-3 text-left font-medium">模型数</th>
               <th className="px-4 py-3 text-right font-medium">操作</th>
             </tr>
@@ -165,14 +310,17 @@ export const ChannelManager: React.FC = () => {
             ) : (
               channels.map((channel) => (
                 <ChannelRow
-                  key={channel.id}
-                  channel={channel}
-                  expanded={expandedId === channel.id}
-                  onToggle={() => setExpandedId((current) => (current === channel.id ? null : channel.id))}
-                  onEdit={() => openEdit(channel)}
-                  onDelete={() => handleDelete(channel)}
-                  onChanged={invalidateChannels}
-                />
+                    key={channel.id}
+                    channel={channel}
+                    expanded={expandedId === channel.id}
+                    onToggle={() => setExpandedId((current) => (current === channel.id ? null : channel.id))}
+                    onEdit={() => openEdit(channel)}
+                    onDelete={() => handleDelete(channel)}
+                    onChanged={refreshChannels}
+                    testingChannelId={testingChannelId}
+                    testResults={testResults}
+                  />
+
               ))
             )}
           </tbody>
@@ -183,7 +331,7 @@ export const ChannelManager: React.FC = () => {
         open={dialogOpen}
         channel={editing}
         onOpenChange={setDialogOpen}
-        onSaved={invalidateChannels}
+        onSaved={refreshChannels}
       />
       </div>
     </div>
@@ -197,6 +345,8 @@ function ChannelRow({
   onEdit,
   onDelete,
   onChanged,
+  testingChannelId,
+  testResults,
 }: {
   channel: Channel;
   expanded: boolean;
@@ -204,6 +354,8 @@ function ChannelRow({
   onEdit: () => void;
   onDelete: () => void;
   onChanged: () => Promise<void>;
+  testingChannelId?: string | null;
+  testResults?: Record<string, string>;
 }) {
   const api = useApiAdapter();
   const [saving, setSaving] = useState(false);
@@ -277,12 +429,11 @@ function ChannelRow({
 
   return (
     <>
-      <tr className="border-b border-border hover:bg-muted/30">
+      <tr className="border-b border-border hover:bg-muted/30 cursor-pointer" onClick={onToggle}>
         <td className="min-w-0 px-4 py-3">
-          <button type="button" className="max-w-full text-left" onClick={onToggle}>
+          <div className="max-w-full text-left">
             <div className="truncate font-medium">{channel.name}</div>
-            {channel.notes ? <div className="mt-1 truncate text-xs text-muted-foreground">{channel.notes}</div> : null}
-          </button>
+          </div>
         </td>
         <td className="px-4 py-3">
           <span className="rounded bg-secondary px-2 py-0.5 text-xs text-muted-foreground">{channel.api_type}</span>
@@ -295,78 +446,59 @@ function ChannelRow({
             {channel.enabled ? '启用' : '禁用'}
           </span>
         </td>
-        <td className="px-4 py-3">
-          {channel.response_ms ? (
-            <span className={cn('text-xs', channel.response_ms === 'X' ? 'text-red-500' : 'text-green-600')}>
-              {channel.response_ms}
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">-</span>
-          )}
+        <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+          {testingChannelId === channel.id ? (
+            <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          ) : (() => {
+            const testValue = testResults?.[channel.id];
+            const persistedValue = channel.response_ms ? String(channel.response_ms) : '';
+            const displayValue = testValue && testValue !== 'X' && persistedValue !== testValue
+              ? testValue
+              : persistedValue;
+
+            if (testValue === 'X' && !persistedValue) {
+              return <span className="text-red-500" title="测速失败"><XCircle className="h-3.5 w-3.5" /></span>;
+            }
+
+            if (displayValue) {
+              return <span className="text-green-600">{formatResponseMs(displayValue)}</span>;
+            }
+
+            return <span className="text-red-500" title="未测速"><XCircle className="h-3.5 w-3.5" /></span>;
+          })()}
         </td>
         <td className="px-4 py-3 whitespace-nowrap">{selectedModels.length} / {availableModels.length}</td>
         <td className="px-4 py-3">
           <div className="flex justify-end gap-1">
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit} title="编辑">
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(event) => { event.stopPropagation(); onEdit(); }} title="编辑">
               <Edit className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-8" onClick={toggleEnabled} disabled={saving}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8"
+              onClick={(event) => { event.stopPropagation(); toggleEnabled(); }}
+              disabled={saving}
+            >
               {channel.enabled ? '禁用' : '启用'}
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onDelete} title="删除">
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(event) => { event.stopPropagation(); onDelete(); }} title="删除">
               <Trash2 className="h-4 w-4 text-destructive" />
             </Button>
           </div>
         </td>
       </tr>
 
-      {expanded && (
-        <tr className="border-b border-border bg-muted/10">
-          <td colSpan={6} className="px-4 py-4">
-            <div className="space-y-4">
-              {rowError && <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{rowError}</div>}
-              <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={fetchModels} disabled={fetching}>
-                  <RefreshCw className={cn('h-3.5 w-3.5', fetching && 'animate-spin')} />
-                  {fetching ? '获取中...' : '获取模型列表'}
-                </Button>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={probeUrl} disabled={probing}>
-                  <RefreshCw className={cn('h-3.5 w-3.5', probing && 'animate-spin')} />
-                  {probing ? '测速中...' : '测速'}
-                </Button>
-                {probeResult && <span className="text-sm text-green-600">延迟: {probeResult}</span>}
-                <Button size="sm" variant="outline" onClick={() => syncSelection(availableModels.map((model) => model.name))} disabled={saving || availableModels.length === 0}>
-                  全选模型
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => syncSelection([])} disabled={saving || selectedModels.length === 0}>
-                  清空选择
-                </Button>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2 text-sm">
-                <InfoBlock label="Base URL" value={channel.base_url} mono />
-                <InfoBlock label="API Key" value={channel.api_key ? '••••••••' : ''} mono />
-              </div>
-
-              {availableModels.length > 0 ? (
-                <div className="max-h-72 overflow-y-auto rounded-md border border-border bg-background">
-                  {availableModels.map((model) => (
-                    <label key={model.id || model.name} className="flex cursor-pointer items-center gap-2 border-b border-border px-3 py-2 text-sm last:border-b-0 hover:bg-accent">
-                      <Checkbox checked={selectedModels.includes(model.name)} onCheckedChange={() => toggleModel(model.name)} disabled={saving} />
-                      <span className="truncate">{model.name}</span>
-                      {model.owned_by ? <span className="ml-auto text-xs text-muted-foreground">{model.owned_by}</span> : null}
-                    </label>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                  暂无模型。请先点击“获取模型列表”。
-                </div>
-              )}
+      {expanded && channel.notes ? (
+        <tr className="border-b border-border bg-muted/20">
+          <td colSpan={7} className="px-4 py-3">
+            <div className="space-y-1 text-sm max-w-3xl">
+              <div className="font-medium text-muted-foreground">备注</div>
+              <pre className="whitespace-pre-wrap break-all">{channel.notes}</pre>
             </div>
           </td>
         </tr>
-      )}
+      ) : null}
     </>
   );
 }
@@ -383,39 +515,241 @@ function ChannelEditorDialog({
   onSaved: () => Promise<void>;
 }) {
   const api = useApiAdapter();
+  const queryClient = useQueryClient();
   const [form, setForm] = useState<ChannelFormState>(DEFAULT_FORM);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [modelsValidated, setModelsValidated] = useState(false);
+  const [modelSearch, setModelSearch] = useState('');
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
+  const [urlProbe, setUrlProbe] = useState<{ reachable: boolean; latency_ms: number; status_code?: number; detected_type?: string; message: string } | null>(null);
+  const [probingUrl, setProbingUrl] = useState(false);
+  const [endpointVerified, setEndpointVerified] = useState(false);
+  const [endpointVerificationMessage, setEndpointVerificationMessage] = useState<string | null>(null);
+  const [saveStage, setSaveStage] = useState<string | null>(null);
+  const [modelSelectionDirty, setModelSelectionDirty] = useState(false);
+  const probeSeqRef = React.useRef(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isEdit = !!channel;
 
   useEffect(() => {
     if (!open) return;
     setError(null);
-    setForm(channel ? channelToForm(channel) : DEFAULT_FORM);
+    setAvailableModels([]);
+    setSelectedModels([]);
+    setModelSearch('');
+    setShowApiKey(false);
+    setEndpointVerified(false);
+    setEndpointVerificationMessage(null);
+    setModelSelectionDirty(false);
+    setModelsValidated(!!channel && ((channel.available_models?.length || 0) > 0));
+    if (channel) {
+      setForm(channelToForm(channel));
+      setAvailableModels(channel.available_models || []);
+      setSelectedModels(channel.selected_models || []);
+    } else {
+      setForm(DEFAULT_FORM);
+    }
   }, [channel, open]);
 
-  const canSave = form.name.trim() && form.base_url.trim() && form.api_key.trim();
+  useEffect(() => {
+    const seq = ++probeSeqRef.current;
+    if (!form.base_url.trim()) {
+      setUrlProbe(null);
+      setProbingUrl(false);
+      return;
+    }
+    setUrlProbe(null);
+    setProbingUrl(true);
+    const timer = setTimeout(async () => {
+      try {
+        const result = await api.channels.probeUrl(form.base_url.trim());
+        if (probeSeqRef.current === seq) {
+          setUrlProbe(result as { reachable: boolean; latency_ms: number; status_code?: number; detected_type?: string; message: string });
+          setEndpointVerificationMessage(result.reachable ? `端点可达：${result.message}` : `端点不可达：${result.message}`);
+        }
+      } catch {
+        if (probeSeqRef.current === seq) {
+          setUrlProbe({ reachable: false, status_code: undefined, latency_ms: 0, detected_type: undefined, message: 'Probe failed' });
+          setEndpointVerificationMessage('端点校对失败');
+        }
+      } finally {
+        if (probeSeqRef.current === seq) {
+          setProbingUrl(false);
+        }
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [api, form.base_url]);
+
+  const canSave = !!(form.name.trim() && form.base_url.trim() && form.api_key.trim());
 
   const setValue = <K extends keyof ChannelFormState>(key: K, value: ChannelFormState[K]) => {
+    if (key === 'api_type' || key === 'base_url' || key === 'api_key') {
+      setEndpointVerified(false);
+      setEndpointVerificationMessage(null);
+      setModelsValidated(false);
+      setUrlProbe(null);
+      setAvailableModels([]);
+      setSelectedModels([]);
+    }
     setForm((current) => ({ ...current, [key]: value }));
   };
 
-  const handleSave = async () => {
-    if (!canSave) return;
-    setSaving(true);
+  const handleApiTypeChange = (type: string) => {
+    setForm((prev) => ({
+      ...prev,
+      api_type: type,
+      base_url: prev.base_url,
+    }));
+    setAvailableModels([]);
+    setSelectedModels([]);
+    setEndpointVerified(false);
+    setEndpointVerificationMessage(null);
+    setModelsValidated(false);
+  };
+
+  const autoSelectModels = useCallback(async (models: ModelInfo[], channelId?: string): Promise<string[]> => {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const sixMonthsAgoStr = sixMonthsAgo.toISOString().slice(0, 10);
+
+    let existingModels = new Set<string>();
+    if (channelId) {
+      try {
+        const entries = await api.pool.list();
+        existingModels = new Set(
+          entries.filter((entry) => entry.channel_id === channelId).map((entry) => entry.model.toLowerCase()),
+        );
+      } catch {}
+    }
+
+    const selected = new Set<string>();
+
+    for (const model of models) {
+      const catalog = getCatalogModel(model.name);
+      if (catalog?.release_date && formatReleaseDate(catalog.release_date) >= sixMonthsAgoStr) {
+        selected.add(model.name);
+      }
+    }
+
+    for (const model of models) {
+      if (existingModels.has(model.name.toLowerCase())) {
+        selected.add(model.name);
+      }
+    }
+
+    return Array.from(selected);
+  }, [api]);
+
+  const handleFetchModels = async () => {
+    if (probingUrl) {
+      setError('URL 还在检测中，请稍后再试');
+      return;
+    }
+
+    let probe = urlProbe;
+    if (!probe) {
+      setProbingUrl(true);
+      try {
+        probe = await api.channels.probeUrl(form.base_url.trim()) as { reachable: boolean; latency_ms: number; status_code?: number; detected_type?: string; message: string };
+        setUrlProbe(probe);
+      } catch {
+        probe = { reachable: false, status_code: undefined, latency_ms: 0, detected_type: undefined, message: 'Probe failed' };
+        setUrlProbe(probe);
+      } finally {
+        setProbingUrl(false);
+      }
+    }
+
+    if (!probe.reachable) {
+      setError(`URL 不可达: ${probe.message}`);
+      return;
+    }
+
+    setFetchingModels(true);
+    setModelsValidated(false);
     setError(null);
     try {
-      if (form.id) {
+      const result = await api.channels.fetchModelsDirect(form.api_type, form.base_url, form.api_key, false);
+      setForm((prev) => ({
+        ...prev,
+        api_type: result.detected_type,
+        base_url: result.corrected_base_url || prev.base_url,
+      }));
+      setEndpointVerified(true);
+      setEndpointVerificationMessage(`端点校对通过，已识别为 ${result.detected_type.toUpperCase()}`);
+      setModelsValidated(true);
+      const normalizedModels: ModelInfo[] = (result.models || []).map((item, index) => ({
+        id: String(item.id ?? item.name ?? index),
+        name: String(item.name ?? ''),
+        owned_by: typeof item.owned_by === 'string' ? item.owned_by : undefined,
+      })).filter((item) => item.name);
+      setAvailableModels(normalizedModels);
+      const nextSelected = await autoSelectModels(normalizedModels, channel?.id);
+      setSelectedModels(nextSelected);
+      setModelSelectionDirty(!channel && nextSelected.length > 0);
+    } catch (err) {
+      setError(getChannelErrorMessage(err, '获取模型列表失败'));
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
+  const toggleModel = (modelName: string) => {
+    setModelSelectionDirty(true);
+    setSelectedModels((prev) =>
+      prev.includes(modelName)
+        ? prev.filter((m) => m !== modelName)
+        : [...prev, modelName],
+    );
+  };
+
+  const selectAllFiltered = () => {
+    setModelSelectionDirty(true);
+    const filtered = modelSearch
+      ? availableModels.filter((m) => m.name.toLowerCase().includes(modelSearch.toLowerCase()))
+      : availableModels;
+    const names = filtered.map((m) => m.name);
+    setSelectedModels((prev) => Array.from(new Set([...prev, ...names])));
+  };
+
+  const clearAllSelected = () => {
+    setModelSelectionDirty(true);
+    setSelectedModels([]);
+  };
+
+  const handleSave = async () => {
+    if (saving || fetchingModels) return;
+    if (!canSave) {
+      setError('请填写渠道名称、Base URL 和 API Key 后再保存');
+      return;
+    }
+    if (!isEdit && selectedModels.length === 0) {
+      setError('请至少选择一个模型后再保存');
+      return;
+    }
+    setSaving(true);
+    setSaveStage('开始保存渠道...');
+    setError(null);
+    try {
+      let channelId = form.id;
+      if (channelId) {
+        setSaveStage('正在更新渠道信息...');
         const params: UpdateChannelParams = {
-          id: form.id,
+          id: channelId,
           name: form.name,
           api_type: form.api_type,
           base_url: form.base_url,
           api_key: form.api_key,
-          enabled: form.enabled,
           notes: form.notes,
         };
         await api.channels.update(params);
       } else {
+        setSaveStage('正在创建渠道...');
         const params: CreateChannelParams = {
           name: form.name,
           api_type: form.api_type,
@@ -423,66 +757,210 @@ function ChannelEditorDialog({
           api_key: form.api_key,
           notes: form.notes,
         };
-        await api.channels.create(params);
+        const saved = await api.channels.create(params);
+        channelId = saved.id;
       }
+
+      if (urlProbe?.reachable && urlProbe.latency_ms > 0 && channelId) {
+        try {
+          setSaveStage('正在写入响应时间...');
+          await api.channels.updateResponseMs(channelId, String(urlProbe.latency_ms));
+        } catch (err) {
+          toast.error(getChannelErrorMessage(err, '渠道已保存，但响应时间写入失败'));
+          return;
+        }
+      }
+
+      const shouldSyncModels = !!channelId && (!isEdit || modelSelectionDirty);
+      if (shouldSyncModels && channelId) {
+        try {
+          setSaveStage('正在同步所选模型...');
+          await Promise.race([
+            api.channels.selectModels(
+              channelId,
+              selectedModels,
+              availableModels,
+              selectedModels.map(buildEntryCatalogMeta),
+            ),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('模型同步超时')), 10000)),
+          ]);
+        } catch (err) {
+          toast.error(getChannelErrorMessage(err, '渠道已保存，但模型同步失败'));
+          return;
+        }
+      }
+
+      setSaveStage('正在刷新数据...');
       await onSaved();
+      queryClient.invalidateQueries({ queryKey: ['entries'] });
+      setSaveStage('正在关闭窗口...');
       onOpenChange(false);
     } catch (err) {
-      setError(getChannelErrorMessage(err, '保存渠道失败'));
+      toast.error(getChannelErrorMessage(err, '保存渠道失败'));
     } finally {
+      setSaveStage(null);
       setSaving(false);
     }
   };
 
+  const handleClose = () => {
+    queryClient.invalidateQueries({ queryKey: ['channels'] });
+    queryClient.invalidateQueries({ queryKey: ['entries'] });
+    onOpenChange(false);
+  };
+
+  const filteredModels = modelSearch
+    ? availableModels.filter((m) => m.name.toLowerCase().includes(modelSearch.toLowerCase()))
+    : availableModels;
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+    <Dialog open={open} onOpenChange={(value) => {
+      if (!value) setSaving(false);
+      if (!value) {
+        queryClient.invalidateQueries({ queryKey: ['channels'] });
+        queryClient.invalidateQueries({ queryKey: ['entries'] });
+      }
+      onOpenChange(value);
+    }}>
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>{channel ? '编辑渠道' : '添加渠道'}</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
-          {error && <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
-          <div className="space-y-2">
-            <Label>渠道名称</Label>
-            <Input value={form.name} onChange={(event) => setValue('name', event.target.value)} placeholder="例如 OpenAI" />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <div className="space-y-4 pb-4">
+            {error && <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
+            {!error && saveStage && <div className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">{saveStage}</div>}
+            {endpointVerificationMessage && (
+              <div className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+                {endpointVerificationMessage}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>渠道名称</Label>
+              <Input value={form.name} onChange={(event) => setValue('name', event.target.value)} placeholder="例如 OpenAI" />
+            </div>
+
+            <div className="space-y-2">
+              <Label>API 类型</Label>
+              <Select value={form.api_type} onValueChange={handleApiTypeChange}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {API_TYPES.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Base URL</Label>
+              <div className="relative">
+                <Input
+                  value={form.base_url}
+                  onChange={(event) => setValue('base_url', event.target.value)}
+                  placeholder="https://api.example.com"
+                  className={urlProbe ? (urlProbe.reachable ? 'pr-24 border-green-500/50 focus-visible:ring-green-500/30' : 'pr-24 border-red-500/50 focus-visible:ring-red-500/30') : 'pr-8'}
+                />
+                <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none">
+                  {probingUrl ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                  ) : urlProbe?.reachable ? (
+                    <span className="text-[10px] text-green-600 font-medium whitespace-nowrap">{urlProbe.latency_ms}ms ✓</span>
+                  ) : urlProbe ? (
+                    <span className="text-[10px] text-red-500" title={urlProbe.message}>✗</span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>API Key</Label>
+              <div className="relative">
+                <Input type={showApiKey ? 'text' : 'password'} value={form.api_key} onChange={(event) => setValue('api_key', event.target.value)} className="pr-10" />
+                <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-full px-3 hover:bg-transparent" onClick={() => setShowApiKey(!showApiKey)}>
+                  {showApiKey ? '隐藏' : '显示'}
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>备注</Label>
+              <Input value={form.notes} onChange={(event) => setValue('notes', event.target.value)} />
+            </div>
+
           </div>
-          <div className="space-y-2">
-            <Label>API 类型</Label>
-            <Select value={form.api_type} onValueChange={(value) => setValue('api_type', value)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {API_TYPES.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+
+          <div className="space-y-3 pt-4 border-t">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">
+                  {availableModels.length > 0 ? `模型列表（${availableModels.length}）` : '暂无模型'}
+                </div>
+                {availableModels.length > 0 ? (
+                  <div className="text-xs text-muted-foreground">已选择 {selectedModels.length} 个</div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">
+                    {modelsValidated ? '当前未返回可选模型' : endpointVerified ? '端点已校验，可继续拉取模型' : '请先校验端点并拉取模型'}
+                  </div>
+                )}
+              </div>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={handleFetchModels} disabled={!canSave || probingUrl || urlProbe?.reachable === false || fetchingModels}>
+                <RefreshCw className={cn('h-3.5 w-3.5', fetchingModels && 'animate-spin')} />
+                {fetchingModels ? '获取中...' : '获取模型列表'}
+              </Button>
+            </div>
+
+            {availableModels.length > 0 ? (
+              <>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <Input placeholder="搜索模型" value={modelSearch} onChange={(e) => setModelSearch(e.target.value)} className="h-8 text-sm flex-1 min-w-48" />
+                  <Button size="sm" variant="outline" onClick={selectAllFiltered}>全选筛选结果</Button>
+                  <Button size="sm" variant="outline" onClick={clearAllSelected}>清空已选</Button>
+                </div>
+
+                <div className="max-h-48 overflow-y-auto rounded-md border border-border bg-background">
+                  {filteredModels.map((model) => (
+                    <label key={model.id || model.name} className="flex cursor-pointer items-center gap-2 border-b border-border px-3 py-2 text-sm last:border-b-0 hover:bg-accent">
+                      <Checkbox checked={selectedModels.includes(model.name)} onCheckedChange={() => toggleModel(model.name)} />
+                      <span className="truncate">{model.name}</span>
+                      {model.owned_by ? <span className="ml-auto text-xs text-muted-foreground">{model.owned_by}</span> : null}
+                    </label>
+                  ))}
+                </div>
+
+                {selectedModels.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedModels.slice(0, 20).map((model) => (
+                      <span key={model} className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-xs">
+                        {model}
+                        <button type="button" className="hover:text-destructive" onClick={() => toggleModel(model)}>
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                    {selectedModels.length > 20 && (
+                      <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
+                        +{selectedModels.length - 20}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+                {modelsValidated ? '未获取到模型，请检查渠道配置或直接保存后稍后同步。' : '请先完成渠道配置，然后点击“获取模型列表”。'}
+              </div>
+            )}
           </div>
-          <div className="space-y-2">
-            <Label>Base URL</Label>
-            <Input value={form.base_url} onChange={(event) => setValue('base_url', event.target.value)} placeholder="https://api.example.com" />
-          </div>
-          <div className="space-y-2">
-            <Label>API Key</Label>
-            <Input type="password" value={form.api_key} onChange={(event) => setValue('api_key', event.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label>备注</Label>
-            <Input value={form.notes} onChange={(event) => setValue('notes', event.target.value)} />
-          </div>
-          {form.id && (
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={form.enabled} onCheckedChange={(value) => setValue('enabled', Boolean(value))} />
-              启用该渠道
-            </label>
-          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>取消</Button>
-          <Button onClick={handleSave} disabled={!canSave || saving} className="gap-1.5">
+          <Button variant="outline" onClick={handleClose} disabled={saving || fetchingModels}>取消</Button>
+          <Button onClick={handleSave} disabled={saving || fetchingModels} className="gap-1.5">
             <Save className="h-4 w-4" />
             {saving ? '保存中...' : '保存'}
           </Button>

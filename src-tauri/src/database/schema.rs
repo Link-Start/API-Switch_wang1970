@@ -204,6 +204,11 @@ fn ensure_api_entry_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "api_entries", "model_meta_en", "TEXT DEFAULT ''")?;
     // group_name 分组字段
     ensure_column(conn, "api_entries", "group_name", "TEXT NOT NULL DEFAULT 'auto'")?;
+    conn.execute(
+        "UPDATE api_entries SET group_name = 'auto' WHERE group_name IS NULL OR TRIM(group_name) = ''",
+        [],
+    )
+    .map_err(|e| AppError::Database(e.to_string()))?;
     Ok(())
 }
 

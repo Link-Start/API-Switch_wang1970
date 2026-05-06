@@ -546,7 +546,9 @@ export function PoolManager() {
     setGroupFilter((current) => (groups.includes(nextGroup) ? nextGroup : current === nextGroup ? current : "auto"));
   }, [groups, settings?.active_group]);
 
-  // Real-time tray reprioritisation (desktop Tauri event; no-op on web)
+  // Desktop-only: Real-time tray reprioritisation via Tauri event.
+  // This hook is a no-op on web builds (isTauriRuntime() returns false).
+  // Event: "tray-priority-changed" — triggered when user reorders entries via system tray.
   useTauriEvent("tray-priority-changed", () => {
     queryClient.invalidateQueries({ queryKey: ["entries"] });
     queryClient.invalidateQueries({ queryKey: ["settings"] });

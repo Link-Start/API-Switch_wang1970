@@ -48,7 +48,9 @@ export function LogPage() {
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  // Real-time log push (desktop Tauri event; no-op on web)
+  // Desktop-only: Real-time log push via Tauri event.
+  // This hook is a no-op on web builds (isTauriRuntime() returns false).
+  // Event: "new-usage-log" — triggered when backend writes a new usage log.
   useTauriEvent("new-usage-log", () => {
     queryClient.invalidateQueries({ queryKey: ["usageLogs"] });
   });

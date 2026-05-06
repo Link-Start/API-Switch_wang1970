@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { ApiAdapter } from './apiAdapter';
 import type { Channel, CreateChannelParams, UpdateChannelParams, FetchModelsResult, ProbeResult, ModelInfo, ModelCatalogMetaUpdate } from '../features/channels/types';
 import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, TranslationRelayPayload, TranslationRelayRequest } from '../types';
+import { ADMIN_API_PREFIX } from './adminApiConfig';
 import {
   listEntries,
   toggleEntry,
@@ -124,12 +125,11 @@ settings: {
     getLatest: () => invoke<TranslationRelayPayload | null>('get_translation_relay'),
     translateAndRelay: (request: TranslationRelayRequest) => invoke<TranslationRelayPayload>('translate_and_relay', { request }),
   },
-  // NOTE: Uses raw fetch instead of Tauri invoke because there is no `get_version` command.
-  // In Combined mode the admin server is merged into the proxy port, so /admin/version works.
-  // This path MUST stay as '/admin/version' to match the Rust route in admin/router.rs.
-  // Do NOT refactor this to use ADMIN_API_PREFIX — desktop stability depends on this literal.
-  async getVersion() {
-    const response = await fetch('/admin/version');
-    return response.json();
-  },
+    // Uses raw fetch instead of Tauri invoke because there is no `get_version` command.
+    // In Combined mode the admin server is merged into the proxy port, so /admin/version works.
+    // Path constructed from ADMIN_API_PREFIX to match the Rust route in admin/router.rs.
+    async getVersion() {
+      const response = await fetch(`${ADMIN_API_PREFIX}/version`);
+      return response.json();
+    },
 };

@@ -46,9 +46,13 @@ settings: {
     stop(): Promise<void>;
   };
   testChat(entryId: string, messages: { role: string; content: string }[]): Promise<TestChatResponse>;
+  translation: {
+    getLatest(): Promise<TranslationRelayPayload | null>;
+    translateAndRelay(request: TranslationRelayRequest): Promise<TranslationRelayPayload>;
+  };
   getVersion(): Promise<{ version: string }>;
 }
 
 // Types referenced above – import from shared definitions
 import type { Channel, CreateChannelParams, UpdateChannelParams, FetchModelsResult, ProbeResult, ModelInfo, ModelCatalogMetaUpdate } from '../features/channels/types';
-import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, ProxyStatus, TestChatResponse } from '../types';
+import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, ProxyStatus, TestChatResponse, TranslationRelayPayload, TranslationRelayRequest } from '../types';

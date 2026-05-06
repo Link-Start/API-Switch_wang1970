@@ -8,6 +8,7 @@ import { TokenManager } from '@/features/tokens/TokenManager';
 import { LogViewer } from '@/features/logs/LogViewer';
 import { DashboardView } from '@/features/dashboard/DashboardView';
 import { MainShell, type MainPage } from '@/features/shell/MainShell';
+import { TranslationRelayView } from '@/features/translator/TranslationRelayPanel';
 import type { VersionedAppSettings } from '@/types';
 import { clearToken, getHealth, getSettings, getStatus, getToken, login, setToken, type AdminHttpError, type AdminStatus, type HealthResponse } from './api';
 
@@ -158,6 +159,8 @@ function WebMain() {
         return <LogViewer />;
       case 'dashboard':
         return <DashboardView />;
+      case 'translator':
+        return <TranslationRelayView />;
       default:
         return <ChannelPage />;
     }

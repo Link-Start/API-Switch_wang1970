@@ -12,6 +12,7 @@ import { WelcomeGuide } from "@/components/WelcomeGuide";
 import { useQuery } from "@tanstack/react-query";
 import { getSettings, updateSettings, checkUpdate, getProxyStatus } from "@/lib/api";
 import { MainShell, type MainPage } from "@/features/shell/MainShell";
+import { TranslationRelayPanel } from "@/features/translator/TranslationRelayPanel";
 
 const GUIDE_BASE = "https://github.com/wang1970/API-Switch/blob/master/";
 
@@ -104,6 +105,8 @@ export default function App() {
         return <LogPage />;
       case "dashboard":
         return <DashboardPage />;
+      case "translator":
+        return <TranslationRelayPanel />;
       case "settings":
         return <SettingsPage />;
     }

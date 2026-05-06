@@ -9,7 +9,7 @@ import type {
   ModelInfo,
   ModelCatalogMetaUpdate,
 } from '../features/channels/types';
-import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, VersionedAppSettings, ProxyStatus, TestChatResponse } from '../types';
+import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, VersionedAppSettings, ProxyStatus, TestChatResponse, TranslationRelayPayload, TranslationRelayRequest, TranslationRelayResponse } from '../types';
 
 const apiBase = '/admin';
 
@@ -201,4 +201,13 @@ settings: {
   },
   getVersion: () => request<{ version: string }>('GET', '/admin/version'),
   testChat: (entryId, messages) => request<TestChatResponse>('POST', '/test-chat', { entry_id: entryId, messages }),
+  translation: {
+    getLatest: async () => {
+      const response = await request<TranslationRelayResponse>('GET', '/translation-relay');
+      return response.latest;
+    },
+    translateAndRelay: () => {
+      throw new Error('Web Admin does not support triggering translation in v1');
+    },
+  },
 };

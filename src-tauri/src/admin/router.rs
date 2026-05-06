@@ -7,6 +7,7 @@ use crate::admin::pool_handlers;
 use crate::admin::proxy_handlers;
 use crate::admin::state::AdminState;
 use crate::admin::token_handlers;
+use crate::admin::translation_handlers;
 use crate::admin::usage_handlers;
 use axum::middleware;
 use axum::routing::{delete, get, post, put};
@@ -110,10 +111,11 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/admin/dashboard/user-trend",
             get(usage_handlers::get_user_trend),
         )
-        .route("/admin/proxy/status", get(proxy_handlers::get_status))
-        .route("/admin/proxy/start", post(proxy_handlers::start))
-        .route("/admin/proxy/stop", post(proxy_handlers::stop))
-        .route("/admin/test-chat", post(chat_handlers::test_chat))
+.route("/admin/proxy/status", get(proxy_handlers::get_status))
+.route("/admin/proxy/start", post(proxy_handlers::start))
+.route("/admin/proxy/stop", post(proxy_handlers::stop))
+.route("/admin/test-chat", post(chat_handlers::test_chat))
+.route("/admin/translation-relay", get(translation_handlers::get_translation_relay))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()

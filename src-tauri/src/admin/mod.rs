@@ -5,12 +5,13 @@ mod cors;
 mod error;
 mod handlers;
 mod pool_handlers;
+mod proxy_handlers;
 mod token_handlers;
+mod translation_handlers;
 mod router;
 mod state;
 mod static_files;
 mod usage_handlers;
-mod proxy_handlers;
 
 use crate::database::AppSettings;
 use crate::AppState;

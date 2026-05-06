@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { ApiAdapter } from './apiAdapter';
 import type { Channel, CreateChannelParams, UpdateChannelParams, FetchModelsResult, ProbeResult, ModelInfo, ModelCatalogMetaUpdate } from '../features/channels/types';
-import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey } from '../types';
+import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, TranslationRelayPayload, TranslationRelayRequest } from '../types';
 import {
   listEntries,
   toggleEntry,
@@ -120,6 +120,10 @@ settings: {
     stop: stopProxy,
   },
   testChat: (entryId, messages) => testChat(entryId, messages),
+  translation: {
+    getLatest: () => invoke<TranslationRelayPayload | null>('get_translation_relay'),
+    translateAndRelay: (request: TranslationRelayRequest) => invoke<TranslationRelayPayload>('translate_and_relay', { request }),
+  },
   async getVersion() {
     const response = await fetch('/admin/version');
     return response.json();

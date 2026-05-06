@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, ExternalLink, FileText, KeyRound, Layers, Power, Route, Settings } from 'lucide-react';
+import { BarChart3, BookOpen, ExternalLink, FileText, KeyRound, Languages, Layers, Power, Route, Settings } from 'lucide-react';
 
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,7 @@ import { Toaster } from 'sonner';
 import { cn } from '@/lib/utils';
 import type { AppSettings, ProxyStatus } from '@/types';
 
-export type MainPage = 'apiPool' | 'channels' | 'tokens' | 'logs' | 'dashboard' | 'settings' | 'guide';
+export type MainPage = 'apiPool' | 'channels' | 'tokens' | 'logs' | 'dashboard' | 'translator' | 'settings' | 'guide';
 
 const NAV_ITEMS: { key: MainPage; icon: typeof Layers; labelKey: string; externalLang?: Record<string, string> }[] = [
   { key: 'apiPool', icon: Layers, labelKey: 'nav.apiPool' },
@@ -16,6 +16,7 @@ const NAV_ITEMS: { key: MainPage; icon: typeof Layers; labelKey: string; externa
   { key: 'tokens', icon: KeyRound, labelKey: 'nav.tokens' },
   { key: 'logs', icon: FileText, labelKey: 'nav.logs' },
   { key: 'dashboard', icon: BarChart3, labelKey: 'nav.dashboard' },
+  { key: 'translator', icon: Languages, labelKey: 'nav.translator' },
   { key: 'settings', icon: Settings, labelKey: 'nav.settings' },
   { key: 'guide', icon: BookOpen, labelKey: 'nav.guide', externalLang: { zh: 'GUIDE_CN.md', en: 'GUIDE.md' } },
 ];

@@ -307,3 +307,47 @@ export interface TestChatResponse {
     total_tokens: number;
   };
 }
+
+// --- Translation Relay ---
+
+/**
+ * Request payload for translation relay.
+ */
+export interface TranslationRelayRequest {
+  /** Text to be translated */
+  text: string;
+  /** Optional source language code */
+  sourceLang?: string;
+  /** Optional target language code */
+  targetLang?: string;
+  /** Optional identifier of the model/entry used for translation */
+  entryId?: string;
+}
+
+/**
+ * Payload representing the latest translation result.
+ */
+export interface TranslationRelayPayload {
+  /** Original source text */
+  sourceText: string;
+  /** Translated text */
+  translatedText: string;
+  /** Source language, if known */
+  sourceLang?: string;
+  /** Target language, if known */
+  targetLang?: string;
+  /** Whether translation succeeded */
+  success: boolean;
+  /** Error message if failed */
+  error?: string | null;
+  /** Timestamp of the update (ms since epoch) */
+  updatedAt: number;
+}
+
+/**
+ * HTTP response shape for translation relay endpoint.
+ */
+export interface TranslationRelayResponse {
+  /** The latest payload, or null if none */
+  latest: TranslationRelayPayload | null;
+}

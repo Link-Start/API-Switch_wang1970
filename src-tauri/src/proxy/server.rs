@@ -102,6 +102,16 @@ impl ProxyServer {
                 post(handlers::handle_messages),
             )
             .route("/v1/models", get(handlers::handle_list_models))
+            // Gemini native endpoint (non-streaming only for now)
+            .route(
+                "/v1beta/models/*rest",
+                post(handlers::handle_gemini_native),
+            )
+            // Azure native endpoint
+            .route(
+                "/openai/deployments/*rest",
+                post(handlers::handle_azure_chat),
+            )
             .layer(cors)
             .with_state(self.state.clone());
 

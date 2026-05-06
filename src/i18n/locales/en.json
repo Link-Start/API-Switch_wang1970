@@ -10,7 +10,8 @@
     "dashboard": "Dashboard",
     "cli": "Connect CLI",
     "settings": "Settings",
-    "guide": "Guide"
+    "guide": "Guide",
+    "translator": "Translator"
   },
   "apiPool": {
     "title": "API Management",
@@ -273,7 +274,26 @@
     "latestRoute": "Forwarding route",
     "original": "Original",
     "translated": "Translated",
-    "empty": "No translated content has been forwarded yet."
+    "empty": "No translated content has been forwarded yet.",
+    "refresh": "Refresh",
+    "pollingDescription": "Polling for latest translation results...",
+    "relayPanel": {
+      "title": "Translation Relay",
+      "description": "Initiate translation on desktop and sync the latest result to the Web display.",
+      "submitTitle": "Submit Translation",
+      "submitDescription": "Enter the original text and click Translate. The target language defaults to zh.",
+      "resultTitle": "Result",
+      "resultDescription": "After submission, the returned result and sync status will be displayed.",
+      "success": "Translation succeeded, result synced to Web display.",
+      "failure": "Translation request failed"
+    },
+    "viewPanel": {
+      "title": "Translation Display",
+      "latestTitle": "Latest Result",
+      "latestDescription": "Refreshes automatically every 3 seconds.",
+      "empty": "No translated content has been forwarded yet."
+    },
+    "fetchFailed": "Failed to fetch latest translation"
   },
   "settings": {
     "title": "Settings",

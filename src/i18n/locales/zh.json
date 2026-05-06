@@ -10,7 +10,8 @@
     "dashboard": "数据看板",
     "cli": "连接 CLI",
     "settings": "系统设置",
-    "guide": "使用指南"
+    "guide": "使用指南",
+    "translator": "翻译"
   },
   "apiPool": {
     "title": "API 管理",
@@ -281,7 +282,26 @@
     "latestRoute": "转发路径",
     "original": "原文",
     "translated": "译文",
-    "empty": "当前还没有转发任何翻译内容。"
+    "empty": "当前还没有转发任何翻译内容。",
+    "refresh": "刷新",
+    "pollingDescription": "正在轮询最新翻译结果...",
+    "relayPanel": {
+      "title": "翻译中继",
+      "description": "在桌面端发起翻译，并同步最新结果到 Web 展示页。",
+      "submitTitle": "提交翻译",
+      "submitDescription": "输入原文后点击翻译，目标语言默认使用 zh。",
+      "resultTitle": "本次结果",
+      "resultDescription": "提交后会显示返回结果与同步状态。",
+      "success": "翻译成功，结果已同步到 Web 展示端。",
+      "failure": "翻译请求失败"
+    },
+    "viewPanel": {
+      "title": "翻译展示",
+      "latestTitle": "最新结果",
+      "latestDescription": "每 3 秒自动刷新一次。",
+      "empty": "暂无翻译结果"
+    },
+    "fetchFailed": "读取最新翻译失败"
   },
   "settings": {
     "title": "系统设置",

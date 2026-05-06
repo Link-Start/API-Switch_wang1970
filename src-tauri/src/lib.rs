@@ -10,11 +10,25 @@ use admin::AdminServer;
 use database::{AppSettings, Database};
 use proxy::ProxyServer;
 use runtime_mode::RuntimeMode;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::{Emitter, Manager};
 
 pub use error::AppError;
+
+/// Latest translation relay result cached in memory for the Web Admin display.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationRelayPayload {
+    pub source_text: String,
+    pub translated_text: String,
+    pub source_lang: Option<String>,
+    pub target_lang: Option<String>,
+    pub success: bool,
+    pub error: Option<String>,
+    pub updated_at: i64,
+}
 
 /// Shared application state
 #[derive(Clone)]
@@ -23,6 +37,7 @@ pub struct AppState {
     pub settings: Arc<tokio::sync::RwLock<AppSettings>>,
     pub proxy: Arc<tokio::sync::RwLock<Option<ProxyServer>>>,
     pub admin: Arc<tokio::sync::RwLock<Option<AdminServer>>>,
+    pub translation_relay: Arc<tokio::sync::RwLock<Option<TranslationRelayPayload>>>,
     pub failure_counts: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
     pub runtime_mode: RuntimeMode,
 }
@@ -51,6 +66,7 @@ pub fn run() {
             settings: Arc::new(tokio::sync::RwLock::new(settings_cache)),
             proxy: Arc::new(tokio::sync::RwLock::new(None)),
             admin: Arc::new(tokio::sync::RwLock::new(None)),
+            translation_relay: Arc::new(tokio::sync::RwLock::new(None)),
             failure_counts: Arc::new(
                 tokio::sync::RwLock::new(std::collections::HashMap::new()),
             ),
@@ -225,6 +241,8 @@ pub fn run() {
         commands::cli::get_cli_data,
         commands::limit::query_limit,
         commands::admin_cmd::get_admin_status,
+        commands::translation::translate_and_relay,
+        commands::translation::get_translation_relay,
     ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

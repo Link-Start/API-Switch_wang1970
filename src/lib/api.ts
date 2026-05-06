@@ -1,25 +1,32 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  Channel,
-  CreateChannelParams,
-  UpdateChannelParams,
-  ModelInfo,
-  ApiEntry,
-  CreateEntryParams,
-  AccessKey,
-  UsageLog,
-  UsageLogFilter,
-  PaginatedResult,
-  DashboardStats,
-  ModelRanking,
-  UserRanking,
-  ChartDataPoint,
-  DashboardFilter,
-  AppSettings,
-  ProxyStatus,
-  AdminStatus,
-  LimitQueryResult,
+    Channel,
+    ModelInfo,
+    ApiEntry,
+    CreateEntryParams,
+    AccessKey,
+    UsageLog,
+    UsageLogFilter,
+    PaginatedResult,
+    DashboardStats,
+    ModelRanking,
+    UserRanking,
+    ChartDataPoint,
+    DashboardFilter,
+    AppSettings,
+    ProxyStatus,
+    AdminStatus,
+    LimitQueryResult,
+    TranslationRelayRequest,
+    TranslationRelayPayload,
 } from "../types";
+import type {
+    CreateChannelParams,
+    UpdateChannelParams,
+    FetchModelsResult,
+    ProbeResult,
+    ModelCatalogMetaUpdate,
+} from "../features/channels/types";
 
 // --- Channel ---
 
@@ -44,26 +51,11 @@ export async function deleteChannel(id: string): Promise<void> {
 }
 
 export async function fetchModels(channelId: string): Promise<FetchModelsResult> {
-  return invoke("fetch_models", { channelId });
-}
-
-export interface FetchModelsResult {
-  detected_type: string;
-  corrected_base_url: string;
-  models: ModelInfo[];
-  message: string;
+    return invoke("fetch_models", { channelId });
 }
 
 export async function fetchModelsDirect(apiType: string, baseUrl: string, apiKey: string, verified = false): Promise<FetchModelsResult> {
-  return invoke("fetch_models_direct", { apiType, baseUrl, apiKey, verified });
-}
-
-export interface ModelCatalogMetaUpdate {
-  model: string;
-  provider_logo: string;
-  release_date: string;
-  model_meta_zh: string;
-  model_meta_en: string;
+    return invoke("fetch_models_direct", { apiType, baseUrl, apiKey, verified });
 }
 
 export async function selectModels(channelId: string, modelNames: string[], availableModels: ModelInfo[], catalogMeta: ModelCatalogMetaUpdate[] = []): Promise<void> {
@@ -259,19 +251,31 @@ export async function testChat(
   entryId: string,
   messages: { role: string; content: string }[]
 ): Promise<TestChatResponse> {
-  return invoke("test_chat", { entryId, messages });
+    return invoke("test_chat", { entryId, messages });
 }
 
 // --- URL Probe ---
 
-export interface ProbeResult {
-  reachable: boolean;
-  status_code: number | null;
-  latency_ms: number;
-  detected_type: string | null;
-  message: string;
+export async function probeUrl(url: string): Promise<ProbeResult> {
+    return invoke("probe_url", { url });
 }
 
-export async function probeUrl(url: string): Promise<ProbeResult> {
-  return invoke("probe_url", { url });
+// --- Pool Groups ---
+
+export async function getGroups(): Promise<string[]> {
+    return invoke("get_all_groups");
+}
+
+export async function updateGroup(id: string, groupName: string): Promise<void> {
+    return invoke("update_entry_group", { id, groupName });
+}
+
+// --- Translation Relay ---
+
+export async function translateAndRelay(request: TranslationRelayRequest): Promise<TranslationRelayPayload> {
+    return invoke("translate_and_relay", { request });
+}
+
+export async function getLatestTranslation(): Promise<TranslationRelayPayload | null> {
+    return invoke("get_translation_relay");
 }

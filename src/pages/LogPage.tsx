@@ -1,7 +1,7 @@
 import { useState, Fragment } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { useTauriEvent } from "@/lib/useTauriEvent";
+import { useEvent } from "@/lib/events";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { getUsageLogs } from "@/lib/api";
@@ -48,10 +48,10 @@ export function LogPage() {
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  // Desktop-only: Real-time log push via Tauri event.
-  // This hook is a no-op on web builds (isTauriRuntime() returns false).
+  // Desktop-only: Real-time log push via event abstraction.
+  // This hook is a no-op on web builds (isEventSystemActive() returns false).
   // Event: "new-usage-log" — triggered when backend writes a new usage log.
-  useTauriEvent("new-usage-log", () => {
+  useEvent("new-usage-log", () => {
     queryClient.invalidateQueries({ queryKey: ["usageLogs"] });
   });
 

@@ -1,5 +1,6 @@
 use super::circuit_breaker::CircuitBreaker;
 use super::handlers;
+use super::responses_handler;
 use crate::database::{AppSettings, Database};
 use axum::routing::{get, post};
 use axum::Router;
@@ -111,6 +112,11 @@ impl ProxyServer {
             .route(
                 "/openai/deployments/*rest",
                 post(handlers::handle_azure_chat),
+            )
+            // OpenAI Responses API (Chat Completions format under the hood)
+            .route(
+                "/v1/responses",
+                post(responses_handler::handle_responses),
             )
             .layer(cors)
             .with_state(self.state.clone());

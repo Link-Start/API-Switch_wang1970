@@ -1,5 +1,6 @@
 mod server;
 mod handlers;
+mod responses_handler;
 mod auth;
 mod router;
 mod forwarder;

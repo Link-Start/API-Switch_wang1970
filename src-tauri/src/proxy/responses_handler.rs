@@ -342,14 +342,40 @@ pub async fn handle_responses(
 
     // 5. Build SSE response stream
     let item_id = format!("msg_{}", Uuid::new_v4().to_string().replace('-', "")[..16].to_string());
+    let created_at = chrono::Utc::now().timestamp();
 
     // Collect all SSE frames into a Vec for streaming
     let mut frames: Vec<Bytes> = Vec::new();
 
-    // response.created
+    // response.created — full Response object (status: "in_progress")
+    let base_response = json!({
+        "id": &response_id,
+        "object": "response",
+        "created_at": created_at,
+        "status": "in_progress",
+        "error": null,
+        "incomplete_details": null,
+        "instructions": req_body.get("instructions"),
+        "max_output_tokens": req_body.get("max_output_tokens"),
+        "model": model,
+        "output": [],
+        "parallel_tool_calls": true,
+        "previous_response_id": null,
+        "reasoning": null,
+        "store": false,
+        "temperature": 1.0,
+        "text": { "format": { "type": "text" } },
+        "tool_choice": req_body.get("tool_choice").unwrap_or(&json!("auto")),
+        "tools": req_body.get("tools").unwrap_or(&json!([])),
+        "top_p": 1.0,
+        "truncation": "disabled",
+        "usage": null,
+        "metadata": {}
+    });
+
     frames.push(sse_line(&json!({
         "type": "response.created",
-        "response": { "id": &response_id }
+        "response": &base_response
     })));
 
     match upstream_response {
@@ -360,7 +386,13 @@ pub async fn handle_responses(
                 Err(_) => {
                     frames.push(sse_line(&json!({
                         "type": "response.failed",
-                        "response": { "id": &response_id, "error": { "message": "Failed to read upstream body", "type": "upstream_error" } }
+                        "response": {
+                            "id": &response_id,
+                            "object": "response",
+                            "created_at": created_at,
+                            "status": "failed",
+                            "error": { "message": "Failed to read upstream body", "type": "upstream_error" }
+                        }
                     })));
                     frames.push(sse_done());
                     return build_sse_response(frames);
@@ -371,7 +403,13 @@ pub async fn handle_responses(
                 let err_text = String::from_utf8_lossy(&body_bytes).chars().take(2000).collect::<String>();
                 frames.push(sse_line(&json!({
                     "type": "response.failed",
-                    "response": { "id": &response_id, "error": { "message": err_text, "type": "upstream_error" } }
+                    "response": {
+                        "id": &response_id,
+                        "object": "response",
+                        "created_at": created_at,
+                        "status": "failed",
+                        "error": { "message": err_text, "type": "upstream_error" }
+                    }
                 })));
                 frames.push(sse_done());
                 return build_sse_response(frames);
@@ -395,25 +433,37 @@ pub async fn handle_responses(
 
             let tool_calls = msg.get("tool_calls").and_then(|v| v.as_array());
 
+            // Build output items array for the final Response object
+            let mut output_items: Vec<Value> = Vec::new();
+
             // Text output
             if !content.is_empty() {
                 frames.push(sse_line(&json!({
                     "type": "response.output_text.delta",
+                    "response_id": &response_id,
                     "item_id": &item_id,
                     "output_index": 0,
                     "delta": content
                 })));
                 frames.push(sse_line(&json!({
                     "type": "response.output_item.done",
+                    "response_id": &response_id,
                     "output_index": 0,
                     "item": {
                         "type": "message",
                         "role": "assistant",
                         "id": &item_id,
                         "status": "completed",
-                        "content": [{ "type": "output_text", "text": content }]
+                        "content": [{ "type": "output_text", "text": content, "annotations": [] }]
                     }
                 })));
+                output_items.push(json!({
+                    "type": "message",
+                    "role": "assistant",
+                    "id": &item_id,
+                    "status": "completed",
+                    "content": [{ "type": "output_text", "text": content, "annotations": [] }]
+                }));
             }
 
             // Tool calls (function_call output)
@@ -427,6 +477,7 @@ pub async fn handle_responses(
 
                     frames.push(sse_line(&json!({
                         "type": "response.output_item.added",
+                        "response_id": &response_id,
                         "output_index": output_index,
                         "item": {
                             "id": tc_id,
@@ -439,18 +490,21 @@ pub async fn handle_responses(
                     })));
                     frames.push(sse_line(&json!({
                         "type": "response.function_call_arguments.delta",
+                        "response_id": &response_id,
                         "item_id": tc_id,
                         "output_index": output_index,
                         "delta": tc_args
                     })));
                     frames.push(sse_line(&json!({
                         "type": "response.function_call_arguments.done",
+                        "response_id": &response_id,
                         "item_id": tc_id,
                         "output_index": output_index,
                         "arguments": tc_args
                     })));
                     frames.push(sse_line(&json!({
                         "type": "response.output_item.done",
+                        "response_id": &response_id,
                         "output_index": output_index,
                         "item": {
                             "id": tc_id,
@@ -461,6 +515,14 @@ pub async fn handle_responses(
                             "status": "completed"
                         }
                     })));
+                    output_items.push(json!({
+                        "id": tc_id,
+                        "type": "function_call",
+                        "call_id": tc_id,
+                        "name": tc_name,
+                        "arguments": tc_args,
+                        "status": "completed"
+                    }));
                 }
             }
 
@@ -470,25 +532,51 @@ pub async fn handle_responses(
             let output_tokens = usage.get("completion_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
             let total_tokens = usage.get("total_tokens").and_then(|v| v.as_i64()).unwrap_or(input_tokens + output_tokens);
 
-            // response.completed
+            // response.completed — full Response object with output
             frames.push(sse_line(&json!({
                 "type": "response.completed",
                 "response": {
                     "id": &response_id,
+                    "object": "response",
+                    "created_at": created_at,
+                    "status": "completed",
+                    "error": null,
+                    "incomplete_details": null,
+                    "instructions": req_body.get("instructions"),
+                    "max_output_tokens": req_body.get("max_output_tokens"),
+                    "model": model,
+                    "output": output_items,
+                    "parallel_tool_calls": true,
+                    "previous_response_id": null,
+                    "reasoning": null,
+                    "store": false,
+                    "temperature": 1.0,
+                    "text": { "format": { "type": "text" } },
+                    "tool_choice": req_body.get("tool_choice").unwrap_or(&json!("auto")),
+                    "tools": req_body.get("tools").unwrap_or(&json!([])),
+                    "top_p": 1.0,
+                    "truncation": "disabled",
                     "usage": {
                         "input_tokens": input_tokens,
+                        "input_tokens_details": { "cached_tokens": 0 },
                         "output_tokens": output_tokens,
-                        "total_tokens": total_tokens,
-                        "input_tokens_details": null,
-                        "output_tokens_details": null
-                    }
+                        "output_tokens_details": { "reasoning_tokens": 0 },
+                        "total_tokens": total_tokens
+                    },
+                    "metadata": {}
                 }
             })));
         }
         Err(e) => {
             frames.push(sse_line(&json!({
                 "type": "response.failed",
-                "response": { "id": &response_id, "error": { "message": format!("{e}"), "type": "proxy_error" } }
+                "response": {
+                    "id": &response_id,
+                    "object": "response",
+                    "created_at": created_at,
+                    "status": "failed",
+                    "error": { "message": format!("{e}"), "type": "proxy_error" }
+                }
             })));
         }
     }

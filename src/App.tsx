@@ -5,6 +5,9 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useQuery } from "@tanstack/react-query";
 import { MainShell, type MainPage } from "@/features/shell/MainShell";
 import { useApiAdapter, isTauriRuntime } from "@/lib/useApiAdapter";
+import { LoginScreen } from "@/components/LoginScreen";
+
+const TOKEN_KEY = "api-switch-web-admin-token";
 
 const ApiPoolPage = lazy(() => import("@/pages/ApiPoolPage").then((m) => ({ default: m.ApiPoolPage })));
 const ChannelPage = lazy(() => import("@/pages/ChannelPage").then((m) => ({ default: m.ChannelPage })));
@@ -19,6 +22,17 @@ export default function App() {
   const api = useApiAdapter();
   const isDesktop = isTauriRuntime();
   const [currentPage, setCurrentPage] = useState<MainPage>("apiPool");
+  const [webToken, setWebToken] = useState(() =>
+    isDesktop ? "desktop" : localStorage.getItem(TOKEN_KEY)
+  );
+
+  // Web mode: show login if no token
+  if (!isDesktop && !webToken) {
+    return <LoginScreen onAuthenticated={(token) => {
+      localStorage.setItem(TOKEN_KEY, token);
+      setWebToken(token);
+    }} />;
+  }
 
   const { data: settings } = useQuery({
     queryKey: ["settings"],

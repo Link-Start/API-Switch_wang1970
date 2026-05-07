@@ -280,7 +280,7 @@ pub async fn handle_responses(
     let req_body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::Internal(format!("Failed to parse JSON: {e}")))?;
 
-    let response_id = format!("resp_{}", Uuid::new_v4().to_string().replace('-', "")[..24].to_string());
+    let response_id = format!("resp_{}", Uuid::new_v4().to_string().replace('-', ""));
     let model = req_body
         .get("model")
         .and_then(|m| m.as_str())
@@ -298,11 +298,24 @@ pub async fn handle_responses(
         "stream": false,
     });
 
+    // Passthrough temperature, top_p, max_output_tokens to upstream
+    if let Some(temp) = req_body.get("temperature") {
+        chat_body["temperature"] = temp.clone();
+    }
+    if let Some(top_p) = req_body.get("top_p") {
+        chat_body["top_p"] = top_p.clone();
+    }
+    if let Some(max_tokens) = req_body.get("max_output_tokens") {
+        chat_body["max_tokens"] = max_tokens.clone();
+    }
+
     // Convert tools if present
     if let Some(tools) = req_body.get("tools").and_then(|v| v.as_array()) {
         if let Some(converted) = convert_tools(tools) {
             chat_body["tools"] = converted;
-            chat_body["tool_choice"] = json!("auto");
+            chat_body["tool_choice"] = req_body.get("tool_choice")
+                .cloned()
+                .unwrap_or(json!("auto"));
         }
     }
 
@@ -340,14 +353,15 @@ pub async fn handle_responses(
     )
     .await;
 
-    // 5. Build SSE response stream
+    // 5. Build response based on stream mode
+    let is_stream = req_body.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
     let item_id = format!("msg_{}", Uuid::new_v4().to_string().replace('-', "")[..16].to_string());
     let created_at = chrono::Utc::now().timestamp();
 
     // Collect all SSE frames into a Vec for streaming
     let mut frames: Vec<Bytes> = Vec::new();
 
-    // response.created — full Response object (status: "in_progress")
+    // Build base response object
     let base_response = json!({
         "id": &response_id,
         "object": "response",
@@ -359,24 +373,37 @@ pub async fn handle_responses(
         "max_output_tokens": req_body.get("max_output_tokens"),
         "model": model,
         "output": [],
-        "parallel_tool_calls": true,
-        "previous_response_id": null,
-        "reasoning": null,
-        "store": false,
-        "temperature": 1.0,
+        "parallel_tool_calls": req_body.get("parallel_tool_calls").unwrap_or(&json!(true)),
+        "previous_response_id": req_body.get("previous_response_id"),
+        "reasoning": { "effort": null, "summary": null },
+        "store": req_body.get("store").unwrap_or(&json!(true)),
+        "temperature": req_body.get("temperature").unwrap_or(&json!(1.0)),
         "text": { "format": { "type": "text" } },
         "tool_choice": req_body.get("tool_choice").unwrap_or(&json!("auto")),
         "tools": req_body.get("tools").unwrap_or(&json!([])),
-        "top_p": 1.0,
-        "truncation": "disabled",
+        "top_p": req_body.get("top_p").unwrap_or(&json!(1.0)),
+        "truncation": req_body.get("truncation").unwrap_or(&json!("disabled")),
         "usage": null,
-        "metadata": {}
+        "metadata": req_body.get("metadata").unwrap_or(&json!({}))
     });
 
-    frames.push(sse_line(&json!({
-        "type": "response.created",
-        "response": &base_response
-    })));
+    if is_stream {
+        frames.push(sse_line(&json!({
+            "type": "response.created",
+            "response": &base_response
+        })));
+
+        frames.push(sse_line(&json!({
+            "type": "response.in_progress",
+            "response": {
+                "id": &response_id,
+                "object": "response",
+                "created_at": created_at,
+                "status": "in_progress",
+                "output": []
+            }
+        })));
+    }
 
     match upstream_response {
         Ok(resp) => {
@@ -443,6 +470,7 @@ pub async fn handle_responses(
                     "response_id": &response_id,
                     "item_id": &item_id,
                     "output_index": 0,
+                    "content_index": 0,
                     "delta": content
                 })));
                 frames.push(sse_line(&json!({
@@ -532,52 +560,63 @@ pub async fn handle_responses(
             let output_tokens = usage.get("completion_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
             let total_tokens = usage.get("total_tokens").and_then(|v| v.as_i64()).unwrap_or(input_tokens + output_tokens);
 
-            // response.completed — full Response object with output
-            frames.push(sse_line(&json!({
-                "type": "response.completed",
-                "response": {
-                    "id": &response_id,
-                    "object": "response",
-                    "created_at": created_at,
-                    "status": "completed",
-                    "error": null,
-                    "incomplete_details": null,
-                    "instructions": req_body.get("instructions"),
-                    "max_output_tokens": req_body.get("max_output_tokens"),
-                    "model": model,
-                    "output": output_items,
-                    "parallel_tool_calls": true,
-                    "previous_response_id": null,
-                    "reasoning": null,
-                    "store": false,
-                    "temperature": 1.0,
-                    "text": { "format": { "type": "text" } },
-                    "tool_choice": req_body.get("tool_choice").unwrap_or(&json!("auto")),
-                    "tools": req_body.get("tools").unwrap_or(&json!([])),
-                    "top_p": 1.0,
-                    "truncation": "disabled",
-                    "usage": {
-                        "input_tokens": input_tokens,
-                        "input_tokens_details": { "cached_tokens": 0 },
-                        "output_tokens": output_tokens,
-                        "output_tokens_details": { "reasoning_tokens": 0 },
-                        "total_tokens": total_tokens
-                    },
-                    "metadata": {}
-                }
-            })));
+            let completed_response = json!({
+                "id": &response_id,
+                "object": "response",
+                "created_at": created_at,
+                "status": "completed",
+                "error": null,
+                "incomplete_details": null,
+                "instructions": req_body.get("instructions"),
+                "max_output_tokens": req_body.get("max_output_tokens"),
+                "model": model,
+                "output": output_items,
+                "parallel_tool_calls": req_body.get("parallel_tool_calls").unwrap_or(&json!(true)),
+                "previous_response_id": req_body.get("previous_response_id"),
+                "reasoning": { "effort": null, "summary": null },
+                "store": req_body.get("store").unwrap_or(&json!(true)),
+                "temperature": req_body.get("temperature").unwrap_or(&json!(1.0)),
+                "text": { "format": { "type": "text" } },
+                "tool_choice": req_body.get("tool_choice").unwrap_or(&json!("auto")),
+                "tools": req_body.get("tools").unwrap_or(&json!([])),
+                "top_p": req_body.get("top_p").unwrap_or(&json!(1.0)),
+                "truncation": req_body.get("truncation").unwrap_or(&json!("disabled")),
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "input_tokens_details": { "cached_tokens": 0 },
+                    "output_tokens": output_tokens,
+                    "output_tokens_details": { "reasoning_tokens": 0 },
+                    "total_tokens": total_tokens
+                },
+                "metadata": req_body.get("metadata").unwrap_or(&json!({}))
+            });
+
+            if is_stream {
+                frames.push(sse_line(&json!({
+                    "type": "response.completed",
+                    "response": &completed_response
+                })));
+            } else {
+                return Ok(axum::Json(completed_response).into_response());
+            }
         }
         Err(e) => {
-            frames.push(sse_line(&json!({
-                "type": "response.failed",
-                "response": {
-                    "id": &response_id,
-                    "object": "response",
-                    "created_at": created_at,
-                    "status": "failed",
-                    "error": { "message": format!("{e}"), "type": "proxy_error" }
-                }
-            })));
+            let error_response = json!({
+                "id": &response_id,
+                "object": "response",
+                "created_at": created_at,
+                "status": "failed",
+                "error": { "message": format!("{e}"), "type": "proxy_error" }
+            });
+
+            if is_stream {
+                frames.push(sse_line(&json!({
+                    "type": "response.failed",
+                    "response": &error_response
+                })));
+            } else {
+                return Ok(axum::Json(error_response).into_response());
+            }
         }
     }
 

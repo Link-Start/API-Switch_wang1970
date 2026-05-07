@@ -5,9 +5,6 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useQuery } from "@tanstack/react-query";
 import { MainShell, type MainPage } from "@/features/shell/MainShell";
 import { useApiAdapter, isTauriRuntime } from "@/lib/useApiAdapter";
-import { LoginScreen } from "@/components/LoginScreen";
-
-const TOKEN_KEY = "api-switch-web-admin-token";
 
 const ApiPoolPage = lazy(() => import("@/pages/ApiPoolPage").then((m) => ({ default: m.ApiPoolPage })));
 const ChannelPage = lazy(() => import("@/pages/ChannelPage").then((m) => ({ default: m.ChannelPage })));
@@ -22,17 +19,6 @@ export default function App() {
   const api = useApiAdapter();
   const isDesktop = isTauriRuntime();
   const [currentPage, setCurrentPage] = useState<MainPage>("apiPool");
-  const [webToken, setWebToken] = useState(() =>
-    isDesktop ? "desktop" : localStorage.getItem(TOKEN_KEY)
-  );
-
-  // Web mode: show login if no token
-  if (!isDesktop && !webToken) {
-    return <LoginScreen onAuthenticated={(token) => {
-      localStorage.setItem(TOKEN_KEY, token);
-      setWebToken(token);
-    }} />;
-  }
 
   const { data: settings } = useQuery({
     queryKey: ["settings"],
@@ -70,15 +56,12 @@ export default function App() {
     }
   };
 
-  // Apply locale and theme
   useEffect(() => {
     if (!settings) return;
-
     const saved = localStorage.getItem("api-switch-locale");
     if (!saved && settings.locale) {
       i18n.changeLanguage(settings.locale);
     }
-
     const root = document.documentElement;
     if (settings.theme === "dark") {
       root.classList.add("dark");
@@ -104,26 +87,15 @@ export default function App() {
   const renderPage = () => {
     const page = (() => {
       switch (currentPage) {
-        case "apiPool":
-          return <ApiPoolPage />;
-        case "channels":
-          return <ChannelPage />;
-        case "tokens":
-          return <TokenPage />;
-        case "logs":
-          return <LogPage />;
-        case "dashboard":
-          return <DashboardPage />;
-        case "settings":
-          return <SettingsPage />;
+        case "apiPool": return <ApiPoolPage />;
+        case "channels": return <ChannelPage />;
+        case "tokens": return <TokenPage />;
+        case "logs": return <LogPage />;
+        case "dashboard": return <DashboardPage />;
+        case "settings": return <SettingsPage />;
       }
     })();
-
-    return (
-      <ErrorBoundary key={currentPage}>
-        {page}
-      </ErrorBoundary>
-    );
+    return <ErrorBoundary key={currentPage}>{page}</ErrorBoundary>;
   };
 
   return (
@@ -143,11 +115,7 @@ export default function App() {
       )}
     >
       {isDesktop && settings?.show_guide !== false && (
-        <WelcomeGuide
-          open={guideOpen}
-          onOpenChange={setGuideOpen}
-          onDismiss={handleGuideDismiss}
-        />
+        <WelcomeGuide open={guideOpen} onOpenChange={setGuideOpen} onDismiss={handleGuideDismiss} />
       )}
     </MainShell>
   );

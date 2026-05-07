@@ -11,7 +11,7 @@
     "dev:renderer": "vite",
     "build:renderer": "vite build",
     "dev:web-admin": "vite --config src/web-admin/vite.config.ts --host 127.0.0.1 --port 1430",
-    "build:web-admin": "vite build --config src/web-admin/vite.config.ts",
+    "build:web-admin": "vite build --config vite.config.web.ts",
     "tauri": "tauri",
     "typecheck": "tsc --noEmit"
   },

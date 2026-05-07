@@ -5,13 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import {
-  getDashboardStats,
-  getModelConsumption,
-  getCallTrend,
-  getModelDistribution,
-  getUserTrend,
-} from "@/lib/api";
+import { useApiAdapter } from "@/lib/useApiAdapter";
 import type { DashboardFilter } from "@/types";
 import {
   BarChart,
@@ -118,31 +112,32 @@ function StatCard({ title, value, totalLabel }: { title: string; value: number; 
 
 export function DashboardPage() {
   const { t } = useTranslation();
+  const api = useApiAdapter();
   const [filter, setFilter] = useState<DashboardFilter>({ granularity: "hour" });
 
   const { data: stats } = useQuery({
     queryKey: ["dashboardStats", filter],
-    queryFn: () => getDashboardStats(filter),
+    queryFn: () => api.usage.getDashboardStats(filter),
   });
 
   const { data: consumption } = useQuery({
     queryKey: ["modelConsumption", filter],
-    queryFn: () => getModelConsumption(filter),
+    queryFn: () => api.usage.getModelConsumption(filter),
   });
 
   const { data: callTrend } = useQuery({
     queryKey: ["callTrend", filter],
-    queryFn: () => getCallTrend(filter),
+    queryFn: () => api.usage.getCallTrend(filter),
   });
 
   const { data: distribution } = useQuery({
     queryKey: ["modelDistribution", filter],
-    queryFn: () => getModelDistribution(filter),
+    queryFn: () => api.usage.getModelDistribution(filter),
   });
 
   const { data: userTrend } = useQuery({
     queryKey: ["userTrend", filter],
-    queryFn: () => getUserTrend(filter),
+    queryFn: () => api.usage.getUserTrend(filter),
   });
 
   const totalTokens = (stats?.total_prompt_tokens ?? 0) + (stats?.total_completion_tokens ?? 0);

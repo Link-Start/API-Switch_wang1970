@@ -14,11 +14,12 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { listAccessKeys, createAccessKey, deleteAccessKey, toggleAccessKey } from "@/lib/api";
+import { useApiAdapter } from "@/lib/useApiAdapter";
 import type { AccessKey } from "@/types";
 
 export function TokenPage() {
   const { t } = useTranslation();
+  const api = useApiAdapter();
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
@@ -28,11 +29,11 @@ export function TokenPage() {
 
   const { data: keys, isLoading } = useQuery({
     queryKey: ["accessKeys"],
-    queryFn: listAccessKeys,
+    queryFn: () => api.tokens.list(),
   });
 
   const createMutation = useMutation({
-    mutationFn: createAccessKey,
+    mutationFn: (name: string) => api.tokens.create(name),
     onSuccess: (key) => {
       queryClient.invalidateQueries({ queryKey: ["accessKeys"] });
       setCreatedKey(key);
@@ -41,13 +42,13 @@ export function TokenPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: deleteAccessKey,
+    mutationFn: (id: string) => api.tokens.delete(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["accessKeys"] }),
   });
 
   const toggleMutation = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-      toggleAccessKey(id, enabled),
+      api.tokens.toggle(id, enabled),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["accessKeys"] }),
   });
 

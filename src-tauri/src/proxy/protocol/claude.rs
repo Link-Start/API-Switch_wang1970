@@ -112,8 +112,8 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
         return;
     };
 
-    // Extract system message
-    let mut system_content = String::new();
+    // Extract system message (as content block array for Claude 4.5+ compatibility)
+    let mut system_parts: Vec<Value> = Vec::new();
     let mut messages = Vec::new();
 
     if let Some(msgs) = obj
@@ -126,10 +126,13 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
             match role {
                 "system" => {
                     if let Some(content) = msg.get("content") {
-                        if !system_content.is_empty() {
-                            system_content.push_str("\n\n");
+                        let text = extract_text_content(content);
+                        if !text.is_empty() {
+                            system_parts.push(json!({
+                                "type": "text",
+                                "text": text
+                            }));
                         }
-                        system_content.push_str(&extract_text_content(content));
                     }
                 }
                 _ => {
@@ -152,8 +155,8 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
         "max_tokens": max_tokens,
     });
 
-    if !system_content.is_empty() {
-        anthropic["system"] = json!(system_content);
+    if !system_parts.is_empty() {
+        anthropic["system"] = json!(system_parts);
     }
 
     // Handle tools / function calling
@@ -162,7 +165,7 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
     }
 
     // Pass through common fields
-    for field in ["stream", "temperature", "top_p"] {
+    for field in ["stream", "temperature", "top_p", "top_k"] {
         if let Some(val) = obj.remove(field) {
             anthropic[field] = val;
         }
@@ -227,12 +230,37 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
         anthropic["thinking"] = thinking;
     }
 
-    // response_format → system prompt fallback (check BEFORE removing unsupported fields)
-    let has_json_format = obj
+    // response_format handling (check BEFORE removing unsupported fields)
+    let json_format = obj
         .get("response_format")
         .and_then(|f| f.get("type"))
-        .and_then(|t| t.as_str())
-        == Some("json_object");
+        .and_then(|t| t.as_str());
+
+    match json_format {
+        Some("json_schema") => {
+            // json_schema → add JSON instruction to system prompt
+            if !system_parts.is_empty() {
+                system_parts.push(json!({"type": "text", "text": ""}));
+            }
+            system_parts.push(json!({
+                "type": "text",
+                "text": "You must respond with valid JSON only. No markdown fences, no explanation — pure JSON."
+            }));
+            anthropic["system"] = json!(system_parts);
+        }
+        Some("json_object") => {
+            // json_object → add JSON instruction to system prompt
+            if !system_parts.is_empty() {
+                system_parts.push(json!({"type": "text", "text": ""}));
+            }
+            system_parts.push(json!({
+                "type": "text",
+                "text": "You must respond with valid JSON only. No markdown fences, no explanation — pure JSON."
+            }));
+            anthropic["system"] = json!(system_parts);
+        }
+        _ => {}
+    }
 
     // Remove unsupported OpenAI-specific fields to prevent Anthropic 400 errors
     for field in &[
@@ -247,34 +275,6 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
         "service_tier",
     ] {
         obj.remove(*field);
-    }
-
-    // Apply response_format fallback after removal
-    if has_json_format {
-        if !system_content.is_empty() {
-            system_content.push_str("\n\n");
-        }
-        system_content.push_str(
-            "You must respond with valid JSON only. No markdown fences, no explanation — pure JSON.",
-        );
-        anthropic["system"] = json!(system_content);
-    }
-    // Direct thinking passthrough (some clients set it directly)
-    if let Some(thinking) = obj.remove("thinking") {
-        anthropic["thinking"] = thinking;
-    }
-
-    // response_format → system prompt fallback (json_object → JSON instruction)
-    if let Some(format) = obj.get("response_format") {
-        if format.get("type").and_then(|t| t.as_str()) == Some("json_object") {
-            if !system_content.is_empty() {
-                system_content.push_str("\n\n");
-            }
-            system_content.push_str(
-                "You must respond with valid JSON only. No markdown fences, no explanation — pure JSON.",
-            );
-            anthropic["system"] = json!(system_content);
-        }
     }
 
     // user → metadata.user_id

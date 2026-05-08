@@ -36,10 +36,19 @@ pub fn claude_to_openai_request(claude: &Value) -> Value {
     });
 
     // Pass through common fields
-    for field in &["stream", "temperature", "top_p"] {
+    for field in &["stream", "temperature", "top_p", "top_k"] {
         if let Some(val) = claude.get(*field) {
             openai[*field] = val.clone();
         }
+    }
+
+    // metadata.user_id -> user (reverse mapping)
+    if let Some(user) = claude
+        .get("metadata")
+        .and_then(|m| m.get("user_id"))
+        .cloned()
+    {
+        openai["user"] = user;
     }
 
     // stop_sequences -> stop (Claude uses stop_sequences, OpenAI uses stop)
@@ -204,7 +213,7 @@ pub fn openai_to_claude_response(openai: &Value) -> Value {
         .and_then(|m| m.as_str())
         .unwrap_or("claude");
 
-    // Usage mapping
+    // Usage mapping (including cache fields per Anthropic spec)
     let usage = openai.get("usage").cloned().unwrap_or(json!({}));
     let input_tokens = usage
         .get("prompt_tokens")
@@ -214,6 +223,25 @@ pub fn openai_to_claude_response(openai: &Value) -> Value {
         .get("completion_tokens")
         .and_then(Value::as_i64)
         .unwrap_or(0);
+    let cache_read = usage
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let cache_creation = usage
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cache_creation_tokens"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+
+    let mut usage_json = json!({
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+    });
+    if cache_read > 0 || cache_creation > 0 {
+        usage_json["cache_creation_input_tokens"] = json!(cache_creation);
+        usage_json["cache_read_input_tokens"] = json!(cache_read);
+    }
 
     json!({
         "id": claude_id,
@@ -222,10 +250,7 @@ pub fn openai_to_claude_response(openai: &Value) -> Value {
         "model": model,
         "content": content,
         "stop_reason": stop_reason,
-        "usage": {
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens
-        }
+        "usage": usage_json
     })
 }
 
@@ -266,6 +291,8 @@ pub struct ClaudeSSETransformer {
     content_block_index: i64,
     in_tool_use: bool,
     tool_use_count: i64,
+    usage_input_tokens: i64,
+    usage_output_tokens: i64,
 }
 
 impl ClaudeSSETransformer {
@@ -278,6 +305,8 @@ impl ClaudeSSETransformer {
             content_block_index: 0,
             in_tool_use: false,
             tool_use_count: 0,
+            usage_input_tokens: 0,
+            usage_output_tokens: 0,
         }
     }
 
@@ -295,6 +324,11 @@ impl ClaudeSSETransformer {
         if let Some(delta) = chunk.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("delta")) {
             if delta.get("role").is_some() && !self.started {
                 self.started = true;
+                // Capture input_tokens from the first chunk if present
+                if let Some(u) = chunk.get("usage") {
+                    let input = u.get("prompt_tokens").and_then(Value::as_i64).unwrap_or(0);
+                    if input > 0 { self.usage_input_tokens = input; }
+                }
                 events.push(
                     serde_json::to_string(&json!({
                         "type": "message_start",
@@ -306,7 +340,7 @@ impl ClaudeSSETransformer {
                             "model": self.model,
                             "stop_reason": Value::Null,
                             "usage": {
-                                "input_tokens": 0,
+                                "input_tokens": self.usage_input_tokens,
                                 "output_tokens": 0
                             }
                         }
@@ -319,6 +353,14 @@ impl ClaudeSSETransformer {
         let Some(choice) = chunk.get("choices").and_then(|c| c.get(0)).cloned() else {
             return events;
         };
+
+        // Capture usage from the chunk if present (OpenAI stream_options.include_usage)
+        if let Some(u) = chunk.get("usage") {
+            let input = u.get("prompt_tokens").and_then(Value::as_i64).unwrap_or(0);
+            let output = u.get("completion_tokens").and_then(Value::as_i64).unwrap_or(0);
+            if input > 0 { self.usage_input_tokens = input; }
+            if output > 0 { self.usage_output_tokens = output; }
+        }
 
         let delta = choice.get("delta").cloned().unwrap_or(json!({}));
         let finish_reason = choice.get("finish_reason").and_then(|fr| fr.as_str());
@@ -471,13 +513,25 @@ impl ClaudeSSETransformer {
                 other => other,
             };
 
+            // Build usage section for message_delta (per Claude protocol spec)
+            let usage_json = if self.usage_output_tokens > 0 {
+                json!({
+                    "output_tokens": self.usage_output_tokens
+                })
+            } else {
+                json!({
+                    "output_tokens": 0
+                })
+            };
+
             events.push(
                 serde_json::to_string(&json!({
                     "type": "message_delta",
                     "delta": {
                         "stop_reason": stop_reason,
                         "stop_sequence": Value::Null
-                    }
+                    },
+                    "usage": usage_json
                 }))
                 .unwrap_or_default(),
             );

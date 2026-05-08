@@ -140,10 +140,16 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
     }
 
     // Build Anthropic request
+    // max_completion_tokens takes precedence over max_tokens (OpenAI new param name)
+    let max_tokens = obj
+        .remove("max_completion_tokens")
+        .or_else(|| obj.remove("max_tokens"))
+        .unwrap_or(json!(4096));
+
     let mut anthropic = json!({
         "model": actual_model,
         "messages": messages,
-        "max_tokens": obj.remove("max_tokens").unwrap_or(json!(4096)),
+        "max_tokens": max_tokens,
     });
 
     if !system_content.is_empty() {
@@ -165,6 +171,119 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
     // stop → stop_sequences
     if let Some(stop) = obj.remove("stop") {
         anthropic["stop_sequences"] = stop;
+    }
+
+    // tool_choice → Anthropic format
+    if let Some(tc) = obj.remove("tool_choice") {
+        let mapped = match &tc {
+            Value::String(s) => match s.as_str() {
+                "auto" => json!({"type": "auto"}),
+                "required" => json!({"type": "any"}),
+                "none" => json!({"type": "none"}),
+                _ => json!({"type": "auto"}),
+            },
+            Value::Object(o) => {
+                if let Some(func_name) = o
+                    .get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                {
+                    json!({"type": "tool", "name": func_name})
+                } else if o.get("type").and_then(|t| t.as_str()) == Some("required") {
+                    json!({"type": "any"})
+                } else {
+                    json!({"type": o.get("type").and_then(|t| t.as_str()).unwrap_or("auto")})
+                }
+            }
+            _ => json!({"type": "auto"}),
+        };
+        anthropic["tool_choice"] = mapped;
+    }
+
+    // parallel_tool_calls → disable_parallel_tool_use (logic is inverted)
+    if let Some(parallel) = obj.remove("parallel_tool_calls") {
+        if parallel == json!(false) {
+            if let Some(tc_obj) = anthropic.get_mut("tool_choice") {
+                if let Value::Object(ref mut tc_map) = tc_obj {
+                    tc_map.insert("disable_parallel_tool_use".to_string(), json!(true));
+                }
+            }
+        }
+    }
+
+    // reasoning_effort → thinking config
+    if let Some(effort) = obj.remove("reasoning_effort") {
+        let budget = match effort.as_str().unwrap_or("medium") {
+            "minimal" => 1024,
+            "low" => 2048,
+            "medium" => 10000,
+            "high" => 32768,
+            _ => 10000,
+        };
+        anthropic["thinking"] = json!({"type": "enabled", "budget_tokens": budget});
+    }
+    // Direct thinking passthrough (some clients set it directly)
+    if let Some(thinking) = obj.remove("thinking") {
+        anthropic["thinking"] = thinking;
+    }
+
+    // response_format → system prompt fallback (check BEFORE removing unsupported fields)
+    let has_json_format = obj
+        .get("response_format")
+        .and_then(|f| f.get("type"))
+        .and_then(|t| t.as_str())
+        == Some("json_object");
+
+    // Remove unsupported OpenAI-specific fields to prevent Anthropic 400 errors
+    for field in &[
+        "frequency_penalty",
+        "presence_penalty",
+        "logprobs",
+        "seed",
+        "logit_bias",
+        "n",
+        "response_format",
+        "top_logprobs",
+        "service_tier",
+    ] {
+        obj.remove(*field);
+    }
+
+    // Apply response_format fallback after removal
+    if has_json_format {
+        if !system_content.is_empty() {
+            system_content.push_str("\n\n");
+        }
+        system_content.push_str(
+            "You must respond with valid JSON only. No markdown fences, no explanation — pure JSON.",
+        );
+        anthropic["system"] = json!(system_content);
+    }
+    // Direct thinking passthrough (some clients set it directly)
+    if let Some(thinking) = obj.remove("thinking") {
+        anthropic["thinking"] = thinking;
+    }
+
+    // response_format → system prompt fallback (json_object → JSON instruction)
+    if let Some(format) = obj.get("response_format") {
+        if format.get("type").and_then(|t| t.as_str()) == Some("json_object") {
+            if !system_content.is_empty() {
+                system_content.push_str("\n\n");
+            }
+            system_content.push_str(
+                "You must respond with valid JSON only. No markdown fences, no explanation — pure JSON.",
+            );
+            anthropic["system"] = json!(system_content);
+        }
+    }
+
+    // user → metadata.user_id
+    if let Some(user) = obj.remove("user") {
+        if let Value::Object(ref mut meta) = anthropic["metadata"] {
+            meta.insert("user_id".to_string(), user);
+        } else {
+            anthropic["metadata"] = json!({ "user_id": user });
+        }
     }
 
     *body = anthropic;
@@ -295,8 +414,17 @@ fn convert_message_to_anthropic(msg: &Value) -> Value {
                                         }
                                     }));
                                 }
+                            } else if url.starts_with("http://") || url.starts_with("https://") {
+                                // Claude 4+ supports URL source directly
+                                return Some(json!({
+                                    "type": "image",
+                                    "source": {
+                                        "type": "url",
+                                        "url": url
+                                    }
+                                }));
                             }
-                            None // URL-based images need download — skip for now
+                            None
                         }
                         "tool_calls" | "tool_call_id" => None, // handled separately below
                         _ => None,
@@ -347,7 +475,8 @@ fn convert_message_to_anthropic(msg: &Value) -> Value {
 
             if anthropic_parts.is_empty() {
                 json!({"role": anthropic_role, "content": ""})
-            } else if anthropic_parts.len() == 1 {
+            } else if anthropic_parts.len() == 1 && anthropic_parts[0].get("type").and_then(|t| t.as_str()) == Some("text") {
+                // Single text block → collapse to string for backward compat
                 json!({"role": anthropic_role, "content": anthropic_parts[0]["text"].clone()})
             } else {
                 json!({"role": anthropic_role, "content": anthropic_parts})
@@ -406,6 +535,7 @@ fn transform_response_from_anthropic(body: &mut Value) {
     let content = obj.get("content").and_then(|c| c.as_array());
     let mut tool_calls = Vec::new();
     let mut text_parts = Vec::new();
+    let mut thinking_parts = Vec::new();
 
     if let Some(content_arr) = content {
         for block in content_arr {
@@ -426,6 +556,11 @@ fn transform_response_from_anthropic(body: &mut Value) {
                             ).unwrap_or_default()
                         }
                     }));
+                }
+                Some("thinking") => {
+                    if let Some(thinking) = block.get("thinking").and_then(|t| t.as_str()) {
+                        thinking_parts.push(thinking.to_string());
+                    }
                 }
                 _ => {}
             }
@@ -456,29 +591,48 @@ fn transform_response_from_anthropic(body: &mut Value) {
     }
 
     // Usage: Anthropic uses input_tokens/output_tokens → OpenAI prompt_tokens/completion_tokens
-    let input_tokens = obj
-        .get("usage")
+    let usage = obj.get("usage");
+    let input_tokens = usage
         .and_then(|u| u.get("input_tokens"))
         .and_then(Value::as_i64)
         .unwrap_or(0);
-    let output_tokens = obj
-        .get("usage")
+    let output_tokens = usage
         .and_then(|u| u.get("output_tokens"))
         .and_then(Value::as_i64)
         .unwrap_or(0);
+    let cache_read = usage
+        .and_then(|u| u.get("cache_read_input_tokens"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
 
-    *body = json!({
+    let mut usage_json = json!({
+        "prompt_tokens": input_tokens,
+        "completion_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    });
+    if cache_read > 0 {
+        usage_json["prompt_tokens_details"] = json!({
+            "cached_tokens": cache_read
+        });
+    }
+
+    let mut response_body = json!({
         "id": obj.get("id").cloned().unwrap_or_else(|| json!("chatcmpl-anthropic")),
         "object": "chat.completion",
         "created": chrono::Utc::now().timestamp(),
         "model": model,
         "choices": [choice],
-        "usage": {
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": input_tokens + output_tokens,
-        }
+        "usage": usage_json,
     });
+
+    // Include thinking content if present
+    if !thinking_parts.is_empty() {
+        response_body["provider_specific"] = json!({
+            "thinking": thinking_parts.join("")
+        });
+    }
+
+    *body = response_body;
 }
 
 /// Transform a single Anthropic SSE event data line into an OpenAI chunk.
@@ -599,6 +753,30 @@ fn transform_anthropic_sse_line(data_line: &str) -> Option<String> {
                     .unwrap_or_default(),
                 )
                     }
+            "thinking" => {
+                // Thinking block started — emit as provider_specific delta
+                let thinking = content_block
+                    .get("thinking")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("");
+                if !thinking.is_empty() {
+                    return Some(
+                        serde_json::to_string(&json!({
+                            "id": "chatcmpl-anthropic",
+                            "object": "chat.completion.chunk",
+                            "created": chrono::Utc::now().timestamp(),
+                            "model": "claude",
+                            "choices": [{
+                                "index": index,
+                                "delta": {"provider_specific": {"thinking": thinking}},
+                                "finish_reason": null
+                            }]
+                        }))
+                        .unwrap_or_default(),
+                    );
+                }
+                None
+            }
                     _ => None,
                 }
             } else {
@@ -653,6 +831,29 @@ fn transform_anthropic_sse_line(data_line: &str) -> Option<String> {
                                     "function": {"arguments": partial_json}
                                 }]
                             },
+                            "finish_reason": null
+                        }]
+                    }))
+                    .unwrap_or_default(),
+                )
+                }
+            "thinking_delta" => {
+                let thinking = delta
+                    .get("thinking")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("");
+                if thinking.is_empty() {
+                    return None;
+                }
+                Some(
+                    serde_json::to_string(&json!({
+                        "id": "chatcmpl-anthropic",
+                        "object": "chat.completion.chunk",
+                        "created": chrono::Utc::now().timestamp(),
+                        "model": "claude",
+                        "choices": [{
+                            "index": index,
+                            "delta": {"provider_specific": {"thinking": thinking}},
                             "finish_reason": null
                         }]
                     }))
@@ -728,5 +929,250 @@ fn transform_anthropic_sse_line(data_line: &str) -> Option<String> {
             )
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── tool_choice mapping tests (Phase 1.1) ────────────────────────
+
+    #[test]
+    fn test_tool_choice_auto() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": "auto"
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        assert_eq!(body["tool_choice"], json!({"type": "auto"}));
+    }
+
+    #[test]
+    fn test_tool_choice_required() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": "required"
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        assert_eq!(body["tool_choice"], json!({"type": "any"}));
+    }
+
+    #[test]
+    fn test_tool_choice_none() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": "none"
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        assert_eq!(body["tool_choice"], json!({"type": "none"}));
+    }
+
+    #[test]
+    fn test_tool_choice_named_function() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": {"type": "function", "function": {"name": "get_weather"}}
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        assert_eq!(body["tool_choice"], json!({"type": "tool", "name": "get_weather"}));
+    }
+
+    #[test]
+    fn test_tool_choice_with_parallel_false() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": "auto",
+            "parallel_tool_calls": false
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        assert_eq!(body["tool_choice"]["type"], "auto");
+        assert_eq!(body["tool_choice"]["disable_parallel_tool_use"], true);
+    }
+
+    // ─── unsupported param filtering tests (Phase 1.3) ────────────────
+
+    #[test]
+    fn test_unsupported_params_filtered() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "frequency_penalty": 0.5,
+            "presence_penalty": 0.3,
+            "seed": 42,
+            "logit_bias": {"1": 100},
+            "logprobs": true,
+            "n": 2,
+            "response_format": {"type": "json_object"},
+            "top_logprobs": 5,
+            "service_tier": "auto"
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        assert!(body.get("frequency_penalty").is_none());
+        assert!(body.get("presence_penalty").is_none());
+        assert!(body.get("seed").is_none());
+        assert!(body.get("logit_bias").is_none());
+        assert!(body.get("logprobs").is_none());
+        assert!(body.get("n").is_none());
+        assert!(body.get("response_format").is_none());
+        assert!(body.get("top_logprobs").is_none());
+        assert!(body.get("service_tier").is_none());
+        // core fields must survive
+        assert!(body.get("model").is_some());
+        assert!(body.get("messages").is_some());
+    }
+
+    // ─── stop_sequences mapping ───────────────────────────────────────
+
+    #[test]
+    fn test_stop_to_stop_sequences() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "stop": ["END", "STOP"]
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        assert_eq!(body["stop_sequences"], json!(["END", "STOP"]));
+        assert!(body.get("stop").is_none());
+    }
+
+    // ─── image URL support ─────────────────────────────────────────────
+
+    #[test]
+    fn test_http_image_url_to_anthropic() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "describe this"},
+                    {"type": "image_url", "image_url": {"url": "https://example.com/photo.png"}}
+                ]
+            }]
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        let msgs = body["messages"].as_array().unwrap();
+        let content = msgs[0]["content"].as_array().unwrap();
+        let img = content.iter().find(|b| b["type"] == "image").unwrap();
+        assert_eq!(img["source"]["type"], "url");
+        assert_eq!(img["source"]["url"], "https://example.com/photo.png");
+    }
+
+    #[test]
+    fn test_base64_image_still_works() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc123"}}
+                ]
+            }]
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        let msgs = body["messages"].as_array().unwrap();
+        let content = msgs[0]["content"].as_array().unwrap();
+        let img = content.iter().find(|b| b["type"] == "image").unwrap();
+        assert_eq!(img["source"]["type"], "base64");
+        assert_eq!(img["source"]["data"], "abc123");
+    }
+
+    // ─── user → metadata.user_id (2.3) ────────────────────────────────
+
+    #[test]
+    fn test_user_to_metadata_user_id() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "user": "user-123"
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        assert_eq!(body["metadata"]["user_id"], "user-123");
+        assert!(body.get("user").is_none());
+    }
+
+    // ─── reasoning_effort → thinking (2.4) ─────────────────────────────
+
+    #[test]
+    fn test_reasoning_effort_high() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "reasoning_effort": "high"
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["thinking"]["budget_tokens"], 32768);
+    }
+
+    #[test]
+    fn test_reasoning_effort_low() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "reasoning_effort": "low"
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["thinking"]["budget_tokens"], 2048);
+    }
+
+    #[test]
+    fn test_thinking_passthrough() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "thinking": {"type": "enabled", "budget_tokens": 5000}
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        assert_eq!(body["thinking"]["budget_tokens"], 5000);
+    }
+
+    // ─── max_completion_tokens alias (3.1) ─────────────────────────────
+
+    #[test]
+    fn test_max_completion_tokens_alias() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "max_completion_tokens": 2048
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        assert_eq!(body["max_tokens"], 2048);
+    }
+
+    #[test]
+    fn test_max_completion_tokens_precedence() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "max_tokens": 1024,
+            "max_completion_tokens": 4096
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        assert_eq!(body["max_tokens"], 4096);
+    }
+
+    // ─── response_format fallback (3.4) ────────────────────────────────
+
+    #[test]
+    fn test_response_format_json_object_adds_system_instruction() {
+        let mut body = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [
+                {"role": "system", "content": "You are a helper."},
+                {"role": "user", "content": "Hi"}
+            ],
+            "response_format": {"type": "json_object"}
+        });
+        transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
+        let system = body["system"].as_str().unwrap();
+        assert!(system.contains("You are a helper."));
+        assert!(system.contains("valid JSON only"));
     }
 }

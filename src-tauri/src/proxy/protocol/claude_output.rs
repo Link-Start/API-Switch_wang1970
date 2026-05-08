@@ -9,7 +9,8 @@
 /// - system (top-level) -> first message with role: "system"
 /// - max_tokens kept as-is (default 4096)
 /// - Claude tools input_schema -> OpenAI parameters
-/// - Pass through: model, stream, temperature, top_p, tool_choice
+/// - Pass through: model, stream, temperature, top_p
+/// - tool_choice: mapped from Claude format (auto/any/none/tool) to OpenAI format
 pub fn claude_to_openai_request(claude: &Value) -> Value {
     let mut messages = Vec::new();
 
@@ -48,9 +49,42 @@ pub fn claude_to_openai_request(claude: &Value) -> Value {
         openai["stop"] = stop.clone();
     }
 
-    // tool_choice pass-through
+    // tool_choice: Claude format -> OpenAI format
     if let Some(tc) = claude.get("tool_choice") {
-        openai["tool_choice"] = tc.clone();
+        match tc {
+            Value::Object(o) => {
+                let disable_parallel = o
+                    .get("disable_parallel_tool_use")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
+                let tc_type = o
+                    .get("type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("auto");
+                let mapped = match tc_type {
+                    "auto" => json!("auto"),
+                    "any" => json!("required"),
+                    "none" => json!("none"),
+                    "tool" => {
+                        if let Some(name) = o.get("name").and_then(|n| n.as_str()) {
+                            json!({"type": "function", "function": {"name": name}})
+                        } else {
+                            json!("auto")
+                        }
+                    }
+                    _ => json!("auto"),
+                };
+                openai["tool_choice"] = mapped;
+
+                if disable_parallel {
+                    openai["parallel_tool_calls"] = json!(false);
+                }
+            }
+            _ => {
+                openai["tool_choice"] = tc.clone();
+            }
+        }
     }
 
     // Convert Claude tools (input_schema -> parameters)
@@ -502,10 +536,11 @@ fn convert_claude_message_to_openai(msg: &Value) -> Vec<Value> {
                 })];
             }
 
-            // If content is an array, extract text and tool_use blocks
+            // If content is an array, extract text, tool_use, and image blocks
             if let Some(Value::Array(blocks)) = content {
                 let mut text_parts = Vec::new();
                 let mut tool_calls = Vec::new();
+                let mut image_parts = Vec::new();
 
                 for block in blocks {
                     match block.get("type").and_then(|t| t.as_str()) {
@@ -527,14 +562,49 @@ fn convert_claude_message_to_openai(msg: &Value) -> Vec<Value> {
                                 }
                             }));
                         }
+                        Some("image") => {
+                            let source = match block.get("source") {
+                                Some(s) => s,
+                                None => continue,
+                            };
+                            let source_type = source.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                            let image_url = match source_type {
+                                "base64" => {
+                                    let media_type = source.get("media_type").and_then(|t| t.as_str()).unwrap_or("application/octet-stream");
+                                    let data = source.get("data").and_then(|d| d.as_str()).unwrap_or("");
+                                    format!("data:{};base64,{}", media_type, data)
+                                }
+                                "url" => {
+                                    source.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string()
+                                }
+                                _ => continue,
+                            };
+                            if !image_url.is_empty() {
+                                image_parts.push(json!({
+                                    "type": "image_url",
+                                    "image_url": { "url": image_url }
+                                }));
+                            }
+                        }
                         _ => {}
                     }
                 }
 
                 let mut result = json!({"role": "assistant"});
 
-                if !text_parts.is_empty() {
-                    result["content"] = json!(text_parts.join(""));
+                if image_parts.is_empty() {
+                    // No images — simple string content (backward compatible)
+                    if !text_parts.is_empty() {
+                        result["content"] = json!(text_parts.join(""));
+                    }
+                } else {
+                    // Has images — build structured content array
+                    let mut content_parts: Vec<Value> = text_parts
+                        .iter()
+                        .map(|t| json!({"type": "text", "text": t}))
+                        .collect();
+                    content_parts.extend(image_parts);
+                    result["content"] = json!(content_parts);
                 }
 
                 if !tool_calls.is_empty() {
@@ -553,6 +623,7 @@ fn convert_claude_message_to_openai(msg: &Value) -> Vec<Value> {
             if let Some(Value::Array(blocks)) = content {
                 let mut tool_results = Vec::new();
                 let mut text_parts = Vec::new();
+                let mut image_parts = Vec::new();
 
                 for block in blocks {
                     match block.get("type").and_then(|t| t.as_str()) {
@@ -576,14 +647,51 @@ fn convert_claude_message_to_openai(msg: &Value) -> Vec<Value> {
                                 text_parts.push(text.to_string());
                             }
                         }
+                        Some("image") => {
+                            let source = match block.get("source") {
+                                Some(s) => s,
+                                None => continue,
+                            };
+                            let source_type = source.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                            let image_url = match source_type {
+                                "base64" => {
+                                    let media_type = source.get("media_type").and_then(|t| t.as_str()).unwrap_or("application/octet-stream");
+                                    let data = source.get("data").and_then(|d| d.as_str()).unwrap_or("");
+                                    format!("data:{};base64,{}", media_type, data)
+                                }
+                                "url" => {
+                                    source.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string()
+                                }
+                                _ => continue,
+                            };
+                            if !image_url.is_empty() {
+                                image_parts.push(json!({
+                                    "type": "image_url",
+                                    "image_url": { "url": image_url }
+                                }));
+                            }
+                        }
                         _ => {}
                     }
                 }
 
                 let mut messages = Vec::new();
 
-                if !text_parts.is_empty() {
-                    messages.push(json!({"role": "user", "content": text_parts.join("")}));
+                if image_parts.is_empty() {
+                    // No images — simple string content
+                    if !text_parts.is_empty() {
+                        messages.push(json!({"role": "user", "content": text_parts.join("")}));
+                    }
+                } else {
+                    // Has images — build structured content array
+                    let mut content_parts: Vec<Value> = text_parts
+                        .iter()
+                        .map(|t| json!({"type": "text", "text": t}))
+                        .collect();
+                    content_parts.extend(image_parts);
+                    if !content_parts.is_empty() {
+                        messages.push(json!({"role": "user", "content": content_parts}));
+                    }
                 }
 
                 messages.extend(tool_results);
@@ -975,5 +1083,121 @@ mod tests {
             "Should have message_delta with stop_reason=tool_use"
         );
         assert!(has_msg_stop, "Should have message_stop");
+    }
+
+    // ─── tool_choice reverse mapping tests ───────────────────────────
+
+    #[test]
+    fn test_tool_choice_auto_reverse() {
+        let claude = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": {"type": "auto"}
+        });
+        let openai = claude_to_openai_request(&claude);
+        assert_eq!(openai["tool_choice"], "auto");
+        assert!(openai.get("parallel_tool_calls").is_none());
+    }
+
+    #[test]
+    fn test_tool_choice_any_reverse() {
+        let claude = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": {"type": "any"}
+        });
+        let openai = claude_to_openai_request(&claude);
+        assert_eq!(openai["tool_choice"], "required");
+        assert!(openai.get("parallel_tool_calls").is_none());
+    }
+
+    #[test]
+    fn test_tool_choice_none_reverse() {
+        let claude = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": {"type": "none"}
+        });
+        let openai = claude_to_openai_request(&claude);
+        assert_eq!(openai["tool_choice"], "none");
+        assert!(openai.get("parallel_tool_calls").is_none());
+    }
+
+    #[test]
+    fn test_tool_choice_tool_reverse() {
+        let claude = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": {"type": "tool", "name": "get_weather"}
+        });
+        let openai = claude_to_openai_request(&claude);
+        assert_eq!(openai["tool_choice"]["type"], "function");
+        assert_eq!(openai["tool_choice"]["function"]["name"], "get_weather");
+        assert!(openai.get("parallel_tool_calls").is_none());
+    }
+
+    #[test]
+    fn test_tool_choice_disable_parallel() {
+        let claude = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": {"type": "auto", "disable_parallel_tool_use": true}
+        });
+        let openai = claude_to_openai_request(&claude);
+        assert_eq!(openai["tool_choice"], "auto");
+        assert_eq!(openai["parallel_tool_calls"], false);
+    }
+
+    #[test]
+    fn test_tool_choice_passthrough_string() {
+        let claude = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{"role": "user", "content": "Hi"}],
+            "tool_choice": "auto"
+        });
+        let openai = claude_to_openai_request(&claude);
+        assert_eq!(openai["tool_choice"], "auto");
+    }
+
+    // ─── image reverse conversion tests ────────────────────────────────
+
+    #[test]
+    fn test_claude_base64_image_to_openai() {
+        let claude = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "describe"},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "abc123"}}
+                ]
+            }]
+        });
+        let openai = claude_to_openai_request(&claude);
+        let msg = &openai["messages"][0];
+        let content = msg["content"].as_array().expect("content should be array");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "describe");
+        assert_eq!(content[1]["type"], "image_url");
+        assert_eq!(content[1]["image_url"]["url"], "data:image/png;base64,abc123");
+    }
+
+    #[test]
+    fn test_claude_url_image_to_openai() {
+        let claude = json!({
+            "model": "claude-3-sonnet-20240229",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "url", "url": "https://example.com/img.png"}}
+                ]
+            }]
+        });
+        let openai = claude_to_openai_request(&claude);
+        let msg = &openai["messages"][0];
+        let content = msg["content"].as_array().expect("content should be array");
+        assert_eq!(content[0]["type"], "image_url");
+        assert_eq!(content[0]["image_url"]["url"], "https://example.com/img.png");
     }
 }

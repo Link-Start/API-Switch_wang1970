@@ -125,6 +125,10 @@ impl ProxyServer {
                 get(responses_handler::get_response)
                     .delete(responses_handler::delete_response),
             )
+            .route(
+                "/v1/responses/:response_id/cancel",
+                post(responses_handler::cancel_response),
+            )
             .layer(cors)
             .with_state(self.state.clone());
 

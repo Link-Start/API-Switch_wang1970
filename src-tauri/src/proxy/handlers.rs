@@ -481,6 +481,9 @@ pub enum ProxyError {
 
     #[error("Upstream error {status}: {message}")]
     Upstream { status: u16, message: String },
+
+    #[error("Bad request: {0}")]
+    BadRequest(String),
 }
 
 impl IntoResponse for ProxyError {
@@ -500,6 +503,7 @@ impl IntoResponse for ProxyError {
                 let code = StatusCode::from_u16(*status).unwrap_or(StatusCode::BAD_GATEWAY);
                 (code, message.clone())
             }
+            ProxyError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
         };
 
         let body = json!({

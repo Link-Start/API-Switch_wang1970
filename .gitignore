@@ -62,3 +62,7 @@ design/
 /star.jpg
 /logo/
 四款程序ICON设计方案*
+
+# Temp / tool dirs
+tmp/
+.claude/

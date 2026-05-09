@@ -25,6 +25,7 @@ pub struct AppSettings {
     pub web_admin_username: String,
     pub web_admin_password: String,
     pub web_admin_port: i32,
+    pub show_conversation_model: bool,
     #[serde(skip_serializing, skip_deserializing, default)]
     pub updated_at: i64,
 }
@@ -50,6 +51,7 @@ impl Default for AppSettings {
             web_admin_username: "admin".to_string(),
             web_admin_password: "admin".to_string(),
             web_admin_port: 9099,
+            show_conversation_model: true,
             locale: String::new(),
             theme: String::new(),
             updated_at: 0,
@@ -131,6 +133,9 @@ if let Some(v) = kv.get("web_admin_enabled") {
         if let Some(v) = kv.get("web_admin_port") {
             settings.web_admin_port = v.parse().unwrap_or(9099);
         }
+        if let Some(v) = kv.get("show_conversation_model") {
+            settings.show_conversation_model = v == "1";
+        }
         if let Some(v) = kv.get("updated_at") {
             settings.updated_at = v.parse().unwrap_or(0);
         }
@@ -188,6 +193,7 @@ if let Some(v) = kv.get("web_admin_enabled") {
             ("web_admin_username", &updates.web_admin_username),
             ("web_admin_password", &updates.web_admin_password),
             ("web_admin_port", &updates.web_admin_port.to_string()),
+("show_conversation_model", if updates.show_conversation_model { "1" } else { "0" }),
             ("updated_at", &updated_at.to_string()),
         ];
 

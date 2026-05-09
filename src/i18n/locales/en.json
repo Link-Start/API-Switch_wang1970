@@ -353,6 +353,8 @@
       "defaultGroupDesc": "Remember the default API Management group to open in the UI",
       "defaultSortMode": "Default Sort Mode",
       "defaultSortModeDesc": "Default model sort order for the API Management page",
+      "showConversationModel": "Show conversation model",
+      "showConversationModelDesc": "Append the resolved model name at the end of streamed replies",
       "currentVersion": "Version"
     },
     "guide": {

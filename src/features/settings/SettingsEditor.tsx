@@ -194,36 +194,27 @@ export function SettingsEditor({
               </SelectContent>
             </Select>
           </div>
-          <div className="flex items-center justify-between">
-            <Label>{t("settings.general.theme")}</Label>
-            <Select value={s.theme} onValueChange={(value) => onChange("theme", value as AppSettings["theme"])}>
-              <SelectTrigger className="w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="light">{t("settings.general.themeLight")}</SelectItem>
-                <SelectItem value="dark">{t("settings.general.themeDark")}</SelectItem>
-                <SelectItem value="system">{t("settings.general.themeSystem")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <Label>{t("settings.general.defaultGroup")}</Label>
-              <p className="text-xs text-muted-foreground">{t("settings.general.defaultGroupDesc")}</p>
-            </div>
-            <Select value={s.active_group || "auto"} onValueChange={(value) => onChange("active_group", value)}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {groupOptions.map((group) => (
-                  <SelectItem key={group} value={group}>{group}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {!isWeb && (
+<div className="flex items-center justify-between">
+                <Label>{t("settings.general.defaultSortMode")}</Label>
+                <Select value={s.default_sort_mode} onValueChange={(value) => onChange("default_sort_mode", value as AppSettings["default_sort_mode"])}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="latest">{t("apiPool.sort.latest")}</SelectItem>
+                    <SelectItem value="fastest">{t("apiPool.sort.fastest")}</SelectItem>
+                    <SelectItem value="custom">{t("apiPool.sort.custom")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label>{t("settings.general.showConversationModel")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("settings.general.showConversationModelDesc")}</p>
+                </div>
+                <Switch checked={s.show_conversation_model} onCheckedChange={(value) => onChange("show_conversation_model", value)} />
+              </div>
+              {!isWeb && (
             <>
               <div className="flex items-center justify-between">
                 <Label>{t("settings.tray.autostart")}</Label>

@@ -41,6 +41,19 @@ impl StreamEndReason {
     }
 }
 
+fn is_completed_stream_success(
+    status_code: i32,
+    has_sse_error: bool,
+    chunk_count: i64,
+    streamed_bytes: i64,
+) -> bool {
+    status_code == 200 && !has_sse_error && chunk_count > 0 && streamed_bytes > 0
+}
+
+fn is_dropped_stream_success(status_code: i32, prompt_tokens: i64, completion_tokens: i64) -> bool {
+    status_code == 200 && (prompt_tokens > 0 || completion_tokens > 0)
+}
+
 #[derive(Debug, Clone)]
 struct AttemptInfo {
     entry_id: String,
@@ -244,9 +257,6 @@ struct StreamLogGuard {
     status_code: i32,
     start: Instant,
     prior_attempts: Vec<AttemptInfo>,
-    circuit_breakers: Arc<tokio::sync::RwLock<std::collections::HashMap<String, CircuitBreaker>>>,
-    failure_counts: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
-    settings: Arc<tokio::sync::RwLock<AppSettings>>,
 }
 
 impl Drop for StreamLogGuard {
@@ -254,7 +264,7 @@ impl Drop for StreamLogGuard {
         if !self.logged.swap(true, Ordering::SeqCst) {
             let prompt_tokens = self.prompt_tokens.load(Ordering::SeqCst);
             let completion_tokens = self.completion_tokens.load(Ordering::SeqCst);
-            let success = self.status_code == 200 && (prompt_tokens > 0 || completion_tokens > 0);
+            let success = is_dropped_stream_success(self.status_code, prompt_tokens, completion_tokens);
             let attempt_path = attempt_path_with_current(
                 &self.prior_attempts,
                 &self.entry,
@@ -270,10 +280,6 @@ impl Drop for StreamLogGuard {
             let first_token_ms = self.first_token_ms.load(Ordering::SeqCst);
             let latency_ms = self.start.elapsed().as_millis() as i64;
             let status_code = self.status_code;
-            let circuit_breakers = self.circuit_breakers.clone();
-            let failure_counts = self.failure_counts.clone();
-            let settings = self.settings.clone();
-            let entry_id = entry.id.clone();
             tokio::spawn(async move {
                 log_usage(
                     &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
@@ -282,25 +288,6 @@ impl Drop for StreamLogGuard {
                     status_code, success, None,
                     Some(attempt_path.as_str()), Some(StreamEndReason::Dropped),
                 );
-                if success {
-                    spawn_record_circuit_success(
-                        circuit_breakers,
-                        failure_counts,
-                        settings,
-                        db.clone(),
-                        app_handle.clone(),
-                        entry_id,
-                    );
-                } else {
-                    spawn_cool_down_entry(
-                        circuit_breakers,
-                        failure_counts,
-                        settings,
-                        db.clone(),
-                        app_handle.clone(),
-                        entry_id,
-                    );
-                }
             });
         }
     }
@@ -513,6 +500,11 @@ fn build_streaming_response(
 ) -> axum::response::Response {
     let response_headers = response.headers().clone();
     let upstream_url = upstream_url.to_string();
+    let append_model_info = state
+        .settings
+        .try_read()
+        .map(|settings| settings.show_conversation_model)
+        .unwrap_or(true);
     let start = request_start;
     let db = state.db.clone();
     let app_handle = state.app_handle.clone();
@@ -525,6 +517,7 @@ fn build_streaming_response(
     let has_sse_error = Arc::new(AtomicBool::new(false));
     let chunk_count = Arc::new(AtomicI64::new(0));
     let streamed_bytes = Arc::new(AtomicI64::new(0));
+    let has_text_delta = Arc::new(AtomicBool::new(false));
     let seen_first_chunk = Arc::new(AtomicBool::new(false));
     let logged = Arc::new(AtomicBool::new(false));
     let mut sse_buffer = String::new();
@@ -553,9 +546,6 @@ fn build_streaming_response(
         status_code,
         start,
         prior_attempts: prior_attempts.clone(),
-        circuit_breakers: circuit_breakers.clone(),
-        failure_counts: failure_counts.clone(),
-        settings: settings_cache.clone(),
     };
 
     let body_stream = futures::stream::poll_fn(move |cx| -> Poll<Option<Result<Bytes, std::io::Error>>> {
@@ -623,6 +613,8 @@ fn build_streaming_response(
                     if let Some(transformed) = transform_sse_chunk(
                         &chunk, &mut sse_buffer, &adapter,
                         &prompt_tokens, &completion_tokens,
+                        &has_text_delta,
+                        append_model_info.then_some(entry.model.as_str()),
                     ) {
                         return Poll::Ready(Some(Ok(transformed)));
                     } else {
@@ -630,13 +622,17 @@ fn build_streaming_response(
                         return Poll::Pending;
                     }
                 } else {
-                    append_and_parse_sse(
+                    if let Some(with_model_info) = append_and_parse_sse(
                         &mut sse_buffer,
                         &chunk,
                         &prompt_tokens,
                         &completion_tokens,
                         &has_sse_error,
-                    );
+                        &has_text_delta,
+                        append_model_info.then_some(entry.model.as_str()),
+                    ) {
+                        return Poll::Ready(Some(Ok(with_model_info)));
+                    }
                 }
 
                 Poll::Ready(Some(Ok(chunk)))
@@ -702,7 +698,8 @@ fn build_streaming_response(
                     let chunk_total = chunk_count.load(Ordering::SeqCst);
                     let byte_total = streamed_bytes.load(Ordering::SeqCst);
                     let ft = first_token_ms.load(Ordering::SeqCst);
-                    let success = status_code == 200 && !has_error && (pt > 0 || ct > 0);
+                    let sc = status_code;
+                    let success = is_completed_stream_success(sc, has_error, chunk_total, byte_total);
                     let attempt_path = attempt_path_with_current(
                         &prior_attempts,
                         &entry,
@@ -766,12 +763,40 @@ fn build_streaming_response(
         .unwrap()
 }
 
+fn stream_chunk_has_text_delta(value: &Value) -> bool {
+    value
+        .get("choices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|choice| {
+            choice
+                .get("delta")
+                .and_then(|delta| delta.get("content"))
+                .and_then(Value::as_str)
+                .is_some_and(|content| !content.is_empty())
+        })
+}
+
+fn model_info_delta(model: &str) -> Vec<u8> {
+    let payload = serde_json::json!({
+        "choices": [{
+            "delta": {
+                "content": format!("\n\nmodel: {model}")
+            }
+        }]
+    });
+    format!("data: {payload}\n\n").into_bytes()
+}
+
 fn transform_sse_chunk(
     chunk: &Bytes,
     buffer: &mut String,
     adapter: &Box<dyn super::protocol::ProtocolAdapter + Send + Sync>,
     prompt_tokens: &Arc<AtomicI64>,
     completion_tokens: &Arc<AtomicI64>,
+    has_text_delta: &Arc<AtomicBool>,
+    model_info: Option<&str>,
 ) -> Option<Bytes> {
     buffer.push_str(&String::from_utf8_lossy(chunk));
     let mut output = Vec::new();
@@ -783,6 +808,9 @@ fn transform_sse_chunk(
 
         let Some(payload) = line.strip_prefix("data: ") else { continue };
         if payload == "[DONE]" {
+            if let Some(model) = model_info.filter(|_| has_text_delta.load(Ordering::Relaxed)) {
+                output.push(model_info_delta(model));
+            }
             output.push(b"data: [DONE]\n\n".to_vec());
             continue;
         }
@@ -792,6 +820,11 @@ fn transform_sse_chunk(
         if completion > 0 { completion_tokens.store(completion, Ordering::Relaxed); }
 
         if let Some(transformed) = adapter.transform_sse_line(payload) {
+            if let Ok(value) = serde_json::from_str::<Value>(&transformed) {
+                if stream_chunk_has_text_delta(&value) {
+                    has_text_delta.store(true, Ordering::Relaxed);
+                }
+            }
             output.push(format!("data: {transformed}\n\n").into_bytes());
         }
     }
@@ -805,8 +838,11 @@ fn append_and_parse_sse(
     prompt_tokens: &Arc<AtomicI64>,
     completion_tokens: &Arc<AtomicI64>,
     has_sse_error: &Arc<AtomicBool>,
-) {
+    has_text_delta: &Arc<AtomicBool>,
+    model_info: Option<&str>,
+) -> Option<Bytes> {
     buffer.push_str(&String::from_utf8_lossy(chunk));
+    let mut saw_done = false;
 
     while let Some(line_end) = buffer.find('\n') {
         let mut line = buffer.drain(..=line_end).collect::<String>();
@@ -814,17 +850,37 @@ fn append_and_parse_sse(
         if line.ends_with('\r') { line.pop(); }
 
         let Some(payload) = line.strip_prefix("data: ") else { continue };
-        if payload == "[DONE]" { continue }
+        if payload == "[DONE]" {
+            saw_done = true;
+            continue;
+        }
 
         let Ok(value) = serde_json::from_str::<Value>(payload) else { continue };
         if value.get("error").is_some() {
             has_sse_error.store(true, Ordering::Relaxed);
-            continue;
+        }
+        if stream_chunk_has_text_delta(&value) {
+            has_text_delta.store(true, Ordering::Relaxed);
         }
         let (prompt, completion) = extract_usage_tokens(&value);
         if prompt > 0 { prompt_tokens.store(prompt, Ordering::Relaxed); }
         if completion > 0 { completion_tokens.store(completion, Ordering::Relaxed); }
     }
+
+    let Some(model) = model_info.filter(|_| saw_done && has_text_delta.load(Ordering::Relaxed)) else {
+        return None;
+    };
+
+    let marker = b"data: [DONE]";
+    let Some(pos) = chunk.windows(marker.len()).position(|window| window == marker) else {
+        return None;
+    };
+
+    let mut output = Vec::with_capacity(chunk.len() + 64 + model.len());
+    output.extend_from_slice(&chunk[..pos]);
+    output.extend_from_slice(&model_info_delta(model));
+    output.extend_from_slice(&chunk[pos..]);
+    Some(Bytes::from(output))
 }
 
 fn refresh_tray(app_handle: &tauri::AppHandle) {
@@ -1095,6 +1151,8 @@ data: [DONE]\n"
             &adapter,
             &prompt_tokens,
             &completion_tokens,
+            &Arc::new(AtomicBool::new(false)),
+            None,
         )
         .expect("transformed output");
         let output = String::from_utf8(output.to_vec()).expect("valid utf8");
@@ -1102,5 +1160,26 @@ data: [DONE]\n"
         assert!(output.contains("\n\n"));
         assert!(output.ends_with("data: [DONE]\n\n"));
         assert!(!output.contains("data: [DONE]\n\ndata: [DONE]"));
+    }
+
+    #[test]
+    fn completed_stream_success_allows_zero_usage_tokens() {
+        assert!(is_completed_stream_success(200, false, 1, 128));
+    }
+
+    #[test]
+    fn completed_stream_success_rejects_empty_or_error_streams() {
+        assert!(!is_completed_stream_success(200, false, 0, 128));
+        assert!(!is_completed_stream_success(200, false, 1, 0));
+        assert!(!is_completed_stream_success(200, true, 1, 128));
+        assert!(!is_completed_stream_success(502, false, 1, 128));
+    }
+
+    #[test]
+    fn dropped_stream_success_still_requires_usage_tokens() {
+        assert!(is_dropped_stream_success(200, 1, 0));
+        assert!(is_dropped_stream_success(200, 0, 1));
+        assert!(!is_dropped_stream_success(200, 0, 0));
+        assert!(!is_dropped_stream_success(502, 1, 1));
     }
 }

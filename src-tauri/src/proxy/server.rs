@@ -59,7 +59,7 @@ impl ProxyServer {
             app_handle,
             http_client: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(connect_timeout_secs))
-                .read_timeout(Duration::from_secs(60))
+                .read_timeout(Duration::from_secs(120))
                 .gzip(true)
                 .build()
                 .expect("failed to build proxy HTTP client"),

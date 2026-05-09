@@ -195,6 +195,7 @@ fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
                                 Some(Value::Array(parts)) => {
                                     let mut texts: Vec<String> = Vec::new();
                                     let mut image_parts: Vec<Value> = Vec::new();
+                                    let mut raw_parts: Vec<Value> = Vec::new();
 
                                     for p in parts {
                                         match p {
@@ -218,6 +219,8 @@ fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
                                                                 "detail": detail
                                                             }
                                                         }));
+                                                    } else {
+                                                        raw_parts.push(p.clone());
                                                     }
                                                 } else {
                                                     let t = o.get("text")
@@ -225,23 +228,28 @@ fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
                                                         .or_else(|| o.get("output_text"))
                                                         .and_then(|v| v.as_str())
                                                         .unwrap_or("");
-                                                    if !t.is_empty() { texts.push(t.to_string()); }
+                                                    if !t.is_empty() {
+                                                        texts.push(t.to_string());
+                                                    } else {
+                                                        raw_parts.push(p.clone());
+                                                    }
                                                 }
                                             }
-                                            _ => {}
+                                            _ => raw_parts.push(p.clone()),
                                         }
                                     }
 
-                                    if image_parts.is_empty() {
-                                        // No images — join text as plain string (backward compat)
+                                    if image_parts.is_empty() && raw_parts.is_empty() {
+                                        // No structured parts — join text as plain string (backward compat)
                                         let joined = texts.join("\n");
                                         if joined.is_empty() { None } else { Some(json!(joined)) }
                                     } else {
-                                        // Has images — build structured content array
+                                        // Has images or unknown parts — build structured content array
                                         let mut content_parts: Vec<Value> = texts.iter()
                                             .map(|t| json!({"type": "text", "text": t}))
                                             .collect();
                                         content_parts.extend(image_parts);
+                                        content_parts.extend(raw_parts);
                                         if content_parts.is_empty() { None } else { Some(json!(content_parts)) }
                                     }
                                 }
@@ -252,6 +260,10 @@ fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
                                 msgs.push(json!({ "role": role, "content": content }));
                             } else if matches!(typ, "function_call" | "function_call_output") {
                                 // Already handled above; skip empty message fallback
+                            } else if !typ.is_empty() {
+                                // Preserve unknown structured Responses input items instead of dropping
+                                // or stringifying them. Upstream can decide whether it supports them.
+                                msgs.push(json!({ "role": role, "content": obj.clone() }));
                             }
 
                             i += 1;
@@ -313,25 +325,34 @@ fn convert_tools(tools: &[Value]) -> Option<Value> {
                 return t.clone();
             }
 
-            // Convert Responses format function tool to Chat format
+            // Convert Responses format function tool to Chat format while preserving
+            // unknown top-level fields for passthrough-first compatibility.
             if typ == "function" {
-                let name = t.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
-                let description = t.get("description").and_then(|v| v.as_str()).unwrap_or("");
-                let parameters = t.get("parameters").cloned().unwrap_or_else(|| {
-                    json!({ "type": "object", "properties": {} })
-                });
+                let mut tool = t.clone();
+                let Some(tool_obj) = tool.as_object_mut() else {
+                    return t.clone();
+                };
 
-                let mut function = json!({
-                    "name": name,
-                    "description": description,
-                    "parameters": parameters,
-                });
-
-                if let Some(strict) = t.get("strict") {
-                    function["strict"] = strict.clone();
+                let mut function = serde_json::Map::new();
+                if let Some(name) = tool_obj.remove("name") {
+                    function.insert("name".to_string(), name);
+                } else {
+                    function.insert("name".to_string(), json!("tool"));
+                }
+                if let Some(description) = tool_obj.remove("description") {
+                    function.insert("description".to_string(), description);
+                }
+                if let Some(parameters) = tool_obj.remove("parameters") {
+                    function.insert("parameters".to_string(), parameters);
+                } else {
+                    function.insert("parameters".to_string(), json!({ "type": "object", "properties": {} }));
+                }
+                if let Some(strict) = tool_obj.remove("strict") {
+                    function.insert("strict".to_string(), strict);
                 }
 
-                return json!({ "type": "function", "function": function });
+                tool_obj.insert("function".to_string(), Value::Object(function));
+                return tool;
             }
 
             // Non-function tools (web_search, local_shell, image_generation, etc.)
@@ -344,6 +365,65 @@ fn convert_tools(tools: &[Value]) -> Option<Value> {
         None
     } else {
         Some(Value::Array(converted))
+    }
+}
+
+fn is_function_tool_call(tc: &Value) -> bool {
+    tc.get("function").is_some()
+        && (tc.get("type").and_then(|v| v.as_str()) == Some("function") || tc.get("type").is_none())
+}
+
+fn passthrough_output_item(tc: &Value, status: Option<&str>) -> Value {
+    let mut item = tc.clone();
+    if let Some(obj) = item.as_object_mut() {
+        obj.remove("index");
+        if !obj.contains_key("type") {
+            obj.insert("type".to_string(), json!("tool_call"));
+        }
+        if let Some(status) = status {
+            obj.insert("status".to_string(), json!(status));
+        }
+    }
+    item
+}
+
+fn merge_tool_delta(item: &mut Value, delta: &Value) {
+    if let (Some(item_obj), Some(delta_obj)) = (item.as_object_mut(), delta.as_object()) {
+        for (key, value) in delta_obj {
+            if key == "index" {
+                continue;
+            }
+            if key == "function" {
+                match (item_obj.get_mut("function"), value) {
+                    (Some(Value::Object(existing)), Value::Object(delta_fn)) => {
+                        for (fn_key, fn_value) in delta_fn {
+                            if fn_key == "arguments" {
+                                let existing_args = existing
+                                    .get("arguments")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let delta_args = match fn_value {
+                                    Value::String(s) => s.clone(),
+                                    Value::Object(_) | Value::Array(_) => serde_json::to_string(fn_value).unwrap_or_else(|_| String::new()),
+                                    _ => String::new(),
+                                };
+                                if !delta_args.is_empty() {
+                                    existing.insert("arguments".to_string(), json!(format!("{}{}", existing_args, delta_args)));
+                                }
+                            } else if !fn_value.is_null() {
+                                existing.insert(fn_key.clone(), fn_value.clone());
+                            }
+                        }
+                    }
+                    _ => {
+                        item_obj.insert(key.clone(), value.clone());
+                    }
+                }
+            } else if !value.is_null() {
+                item_obj.insert(key.clone(), value.clone());
+            }
+        }
     }
 }
 
@@ -665,24 +745,33 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                         send!(frame);
                     }
 
-                    let upstream_stream = upstream_body.into_data_stream();
-                    let mut buffer = String::new();
-                    let mut full_content = String::new();
-                    let mut usage = json!({});
-                    let mut finish_reason: Option<String> = None;
-                    let mut upstream_model: Option<String> = None;
-                    let mut content_len: usize = 0;
-                    let mut text_added_emitted = false;
+        let upstream_stream = upstream_body.into_data_stream();
+        let mut buffer = String::new();
+        let mut full_content = String::new();
+        let mut usage = json!({});
+        let mut finish_reason: Option<String> = None;
+        let mut upstream_model: Option<String> = None;
+        let mut content_len: usize = 0;
+        
+        // Index tracking for output items
+        // Start at 1 because we assume text will exist at index 0
+        // If no text is present, we'll adjust in response.completed
+        let mut next_content_index: u32 = 1;
+        let mut index_by_key: HashMap<String, u32> = HashMap::new();
+        let mut tool_index_by_item_id: HashMap<String, u32> = HashMap::new();
+        let mut last_tool_index: Option<u32> = None;
 
-                    // ToolCallAccum: index → accumulated state across chunks
-                    struct ToolCallEntry {
-                        id: String,
-                        name: String,
-                        arguments: String,
-                        added_emitted: bool,
-                    }
-                    let mut tool_accum: HashMap<usize, ToolCallEntry> = HashMap::new();
-                    const MAX_CONTENT_LEN: usize = 10 * 1024 * 1024; // 10MB cap
+        // ToolCallAccum: index → accumulated state across chunks
+        struct ToolCallEntry {
+            id: String,
+            name: String,
+            arguments: String,
+            passthrough_item: Option<Value>,
+            added_emitted: bool,
+            assigned_index: u32,
+        }
+        let mut tool_accum: HashMap<usize, ToolCallEntry> = HashMap::new();
+        const MAX_CONTENT_LEN: usize = 10 * 1024 * 1024; // 10MB cap
 
                     let mut stream = upstream_stream;
 
@@ -734,31 +823,40 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                         })));
                                     }
 
-                                    // Emit function_call_arguments.done + output_item.done for each tool call
+                                    // Emit final events for each accumulated tool call
                                     let mut sorted_indices: Vec<usize> = tool_accum.keys().copied().collect();
                                     sorted_indices.sort();
                                     for &idx in &sorted_indices {
                                         let entry = &tool_accum[&idx];
-                                        send!(sse_line(&json!({
-                                            "type": "response.function_call_arguments.done",
-                                            "response_id": &response_id_task,
-                                            "item_id": entry.id,
-                                            "output_index": idx + 1,
-                                            "arguments": entry.arguments
-                                        })));
-                                        send!(sse_line(&json!({
-                                            "type": "response.output_item.done",
-                                            "response_id": &response_id_task,
-                                            "output_index": idx + 1,
-                                            "item": {
-                                                "id": entry.id,
-                                                "type": "function_call",
-                                                "call_id": entry.id,
-                                                "name": entry.name,
-                                                "arguments": entry.arguments,
-                                                "status": "completed"
-                                            }
-                                        })));
+                                        if let Some(item) = &entry.passthrough_item {
+                                            send!(sse_line(&json!({
+                                                "type": "response.output_item.done",
+                                                "response_id": &response_id_task,
+                                                "output_index": entry.assigned_index,
+                                                "item": passthrough_output_item(item, Some("completed"))
+                                            })));
+                                        } else {
+                                            send!(sse_line(&json!({
+                                                "type": "response.function_call_arguments.done",
+                                                "response_id": &response_id_task,
+                                                "item_id": entry.id,
+                                                "output_index": entry.assigned_index,
+                                                "arguments": entry.arguments
+                                            })));
+                                            send!(sse_line(&json!({
+                                                "type": "response.output_item.done",
+                                                "response_id": &response_id_task,
+                                                "output_index": entry.assigned_index,
+                                                "item": {
+                                                    "id": entry.id,
+                                                    "type": "function_call",
+                                                    "call_id": entry.id,
+                                                    "name": entry.name,
+                                                    "arguments": entry.arguments,
+                                                    "status": "completed"
+                                                }
+                                            })));
+                                        }
                                     }
 
                                     // Determine status based on finish_reason
@@ -772,7 +870,7 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                     };
                                     let resolved_model = upstream_model.as_deref().unwrap_or(&model_task);
 
-                                    // Build output items for response.completed (text + function_call)
+                                    // Build output items for response.completed (text + tool calls)
                                     let mut final_items: Vec<Value> = Vec::new();
                                     if !full_content.is_empty() {
                                         final_items.push(json!({
@@ -785,14 +883,18 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                     }
                                     for &idx in &sorted_indices {
                                         let entry = &tool_accum[&idx];
-                                        final_items.push(json!({
-                                            "id": entry.id,
-                                            "type": "function_call",
-                                            "call_id": entry.id,
-                                            "name": entry.name,
-                                            "arguments": entry.arguments,
-                                            "status": "completed"
-                                        }));
+                                        if let Some(item) = &entry.passthrough_item {
+                                            final_items.push(passthrough_output_item(item, Some("completed")));
+                                        } else {
+                                            final_items.push(json!({
+                                                "id": entry.id,
+                                                "type": "function_call",
+                                                "call_id": entry.id,
+                                                "name": entry.name,
+                                                "arguments": entry.arguments,
+                                                "status": "completed"
+                                            }));
+                                        }
                                     }
 
                                     // Usage
@@ -879,6 +981,8 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                             let tc_id_new = tc_delta.get("id").and_then(|v| v.as_str()).unwrap_or("");
                                             let tc_fn = tc_delta.get("function").cloned().unwrap_or_else(|| json!({}));
                                             let tc_name_delta = tc_fn.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                                            let is_function_delta = tc_delta.get("type").and_then(|v| v.as_str()) == Some("function")
+                                                || (tc_delta.get("type").is_none() && tc_delta.get("function").is_some());
                                             // Handle arguments as both string and object (for streaming deltas)
                                             let tc_args_delta = match tc_fn.get("arguments") {
                                                 Some(Value::String(s)) => s.clone(),
@@ -892,49 +996,102 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                                 id: String::new(),
                                                 name: String::new(),
                                                 arguments: String::new(),
+                                                passthrough_item: None,
                                                 added_emitted: false,
+                                                assigned_index: 0,
                                             });
 
-                                            if !tc_id_new.is_empty() {
-                                                entry.id = tc_id_new.to_string();
-                                            }
-                                            if !tc_name_delta.is_empty() {
-                                                entry.name = tc_name_delta.to_string();
-                                            }
-                                            if !tc_args_delta.is_empty() {
-                                                entry.arguments.push_str(&tc_args_delta);
-                                            }
-
-                                            // Emit output_item.added only on first occurrence
-                                            if !entry.added_emitted && !entry.name.is_empty() {
-                                                send!(sse_line(&json!({
-                                                    "type": "response.output_item.added",
-                                                    "response_id": &response_id_task,
-                                                    "output_index": tc_idx + 1,
-                                                    "item": {
-                                                        "id": entry.id,
-                                                        "type": "function_call",
-                                                        "call_id": entry.id,
-                                                        "name": entry.name,
-                                                        "arguments": "",
-                                                        "status": "in_progress"
-                                                    }
-                                                })));
-                                                entry.added_emitted = true;
+                                            if !is_function_delta || entry.passthrough_item.is_some() {
+                                                let item = entry.passthrough_item.get_or_insert_with(|| passthrough_output_item(tc_delta, None));
+                                                merge_tool_delta(item, tc_delta);
+                                                if !tc_id_new.is_empty() {
+                                                    entry.id = tc_id_new.to_string();
+                                                }
+                                                if !entry.added_emitted {
+                                                    send!(sse_line(&json!({
+                                                        "type": "response.output_item.added",
+                                                        "response_id": &response_id_task,
+                                                        "output_index": tc_idx + 1,
+                                                        "item": passthrough_output_item(item, Some("in_progress"))
+                                                    })));
+                                                    entry.added_emitted = true;
+                                                }
+                                                continue;
                                             }
 
-                                            // Emit argument deltas incrementally
-                                            if !tc_args_delta.is_empty() {
-                                                send!(sse_line(&json!({
-                                                    "type": "response.function_call_arguments.delta",
-                                                    "response_id": &response_id_task,
-                                                    "item_id": entry.id,
-                                                    "output_index": tc_idx + 1,
-                                                    "delta": tc_args_delta
-                                                })));
-                                            }
-                                        }
-                                    }
+                if !tc_id_new.is_empty() {
+                    entry.id = tc_id_new.to_string();
+                }
+                if !tc_name_delta.is_empty() {
+                    entry.name = tc_name_delta.to_string();
+                }
+                if !tc_args_delta.is_empty() {
+                    entry.arguments.push_str(&tc_args_delta);
+                }
+
+                // Calculate stable index for this tool call
+                let tool_key = if !entry.id.is_empty() {
+                    Some(format!("tool:{}", entry.id))
+                } else {
+                    None
+                };
+
+                let assigned_index = if let Some(ref k) = tool_key {
+                    if let Some(existing) = index_by_key.get(k).copied() {
+                        existing
+                    } else {
+                        let assigned = next_content_index;
+                        next_content_index += 1;
+                        index_by_key.insert(k.clone(), assigned);
+                        assigned
+                    }
+                } else {
+                    let assigned = next_content_index;
+                    next_content_index += 1;
+                    assigned
+                };
+
+                // Store index by item_id for later lookups
+                entry.assigned_index = assigned_index;
+                if !entry.id.is_empty() {
+                    tool_index_by_item_id.insert(entry.id.clone(), assigned_index);
+                    last_tool_index = Some(assigned_index);
+                }
+
+                // Emit output_item.added only on first occurrence
+                if !entry.added_emitted && !entry.name.is_empty() {
+                    send!(sse_line(&json!({
+                        "type": "response.output_item.added",
+                        "response_id": &response_id_task,
+                        "output_index": assigned_index,
+                        "item": {
+                            "id": entry.id,
+                            "type": "function_call",
+                            "call_id": entry.id,
+                            "name": entry.name,
+                            "arguments": "",
+                            "status": "in_progress"
+                        }
+                    })));
+                    entry.added_emitted = true;
+                }
+
+                // Emit argument deltas incrementally
+                if !tc_args_delta.is_empty() {
+                    let delta_index = tool_index_by_item_id.get(&entry.id).copied()
+                        .or(last_tool_index)
+                        .unwrap_or(assigned_index);
+
+                    send!(sse_line(&json!({
+                        "type": "response.function_call_arguments.delta",
+                        "response_id": &response_id_task,
+                        "item_id": entry.id,
+                        "output_index": delta_index,
+                        "delta": tc_args_delta
+                    })));
+                }
+            }
+        }
 
                                     // Parse content delta incrementally
                                     if let Some(content) = chunk_obj.get("choices")
@@ -944,33 +1101,32 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                         .and_then(|d| d.get("content"))
                                         .and_then(|c| c.as_str())
                                     {
-                                        if !content.is_empty() {
-                                            // Emit output_item.added for text message once
-                                            if !text_added_emitted {
-                                                send!(sse_line(&json!({
-                                                    "type": "response.output_item.added",
-                                                    "response_id": &response_id_task,
-                                                    "output_index": 0,
-                                                    "item": {
-                                                        "type": "message",
-                                                        "role": "assistant",
-                                                        "id": &item_id_task,
-                                                        "status": "in_progress",
-                                                        "content": []
-                                                    }
-                                                })));
-                                                text_added_emitted = true;
-                                            }
-                                            full_content.push_str(content);
-                                            send!(sse_line(&json!({
-                                                "type": "response.output_text.delta",
-                                                "response_id": &response_id_task,
-                                                "item_id": &item_id_task,
-                                                "output_index": 0,
-                                                "content_index": 0,
-                                                "delta": content
-                                            })));
-                                        }
+            if !content.is_empty() {
+                // Emit output_item.added for text message on first content
+                if full_content.is_empty() {
+                    send!(sse_line(&json!({
+                        "type": "response.output_item.added",
+                        "response_id": &response_id_task,
+                        "output_index": 0,
+                        "item": {
+                            "type": "message",
+                            "role": "assistant",
+                            "id": &item_id_task,
+                            "status": "in_progress",
+                            "content": []
+                        }
+                    })));
+                }
+                full_content.push_str(content);
+                send!(sse_line(&json!({
+                    "type": "response.output_text.delta",
+                    "response_id": &response_id_task,
+                    "item_id": &item_id_task,
+                    "output_index": 0,
+                    "content_index": 0,
+                    "delta": content
+                })));
+            }
                                     }
                                 }
                             }
@@ -1068,10 +1224,29 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                 }));
             }
 
-            // Tool calls (function_call output)
+            // Tool calls (function_call output or passthrough output items)
             if let Some(tc_array) = tool_calls {
                 for (idx, tc) in tc_array.iter().enumerate() {
                     let output_index = if content.is_empty() { idx as u32 } else { (idx + 1) as u32 };
+
+                    if !is_function_tool_call(tc) {
+                        let item = passthrough_output_item(tc, Some("completed"));
+                        frames.push(sse_line(&json!({
+                            "type": "response.output_item.added",
+                            "response_id": &response_id,
+                            "output_index": output_index,
+                            "item": passthrough_output_item(tc, Some("in_progress"))
+                        })));
+                        frames.push(sse_line(&json!({
+                            "type": "response.output_item.done",
+                            "response_id": &response_id,
+                            "output_index": output_index,
+                            "item": item
+                        })));
+                        output_items.push(item);
+                        continue;
+                    }
+
                     let tc_id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
                     let tc_fn = tc.get("function").cloned().unwrap_or_else(|| json!({}));
                     let tc_name = tc_fn.get("name").and_then(|v| v.as_str()).unwrap_or("");
@@ -1428,6 +1603,32 @@ mod tests {
     }
 
     #[test]
+    fn test_convert_tools_function_preserves_extra_fields() {
+        let tools = vec![json!({
+            "type": "function",
+            "name": "my_fn",
+            "parameters": { "type": "object" },
+            "x-provider": { "mode": "raw" }
+        })];
+        let result = convert_tools(&tools).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "function");
+        assert_eq!(arr[0]["function"]["name"], "my_fn");
+        assert_eq!(arr[0]["x-provider"]["mode"], "raw");
+        assert!(arr[0].get("name").is_none());
+    }
+
+    #[test]
+    fn test_passthrough_output_item_removes_index_and_adds_type() {
+        let item = passthrough_output_item(&json!({ "id": "call_1", "index": 2, "custom": true }), Some("completed"));
+        assert_eq!(item["id"], "call_1");
+        assert_eq!(item["type"], "tool_call");
+        assert_eq!(item["custom"], true);
+        assert_eq!(item["status"], "completed");
+        assert!(item.get("index").is_none());
+    }
+
+    #[test]
     fn test_convert_tools_empty() {
         let tools: Vec<Value> = vec![];
         assert!(convert_tools(&tools).is_none());
@@ -1534,7 +1735,18 @@ mod tests {
         let msgs = input_to_messages(&input, None);
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0]["role"], "user");
-        // Without images, content remains a plain string
+        // Without images or unknown parts, content remains a plain string
         assert_eq!(msgs[0]["content"], "hello");
+    }
+
+    #[test]
+    fn test_input_to_messages_preserves_unknown_structured_item() {
+        let input = json!([{ "type": "custom_tool_result", "id": "item_1", "payload": { "ok": true } }]);
+        let msgs = input_to_messages(&input, None);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["role"], "user");
+        assert_eq!(msgs[0]["content"]["type"], "custom_tool_result");
+        assert_eq!(msgs[0]["content"]["id"], "item_1");
+        assert_eq!(msgs[0]["content"]["payload"]["ok"], true);
     }
 }

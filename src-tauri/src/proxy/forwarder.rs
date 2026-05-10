@@ -662,6 +662,7 @@ fn build_streaming_response(
     let seen_first_chunk = Arc::new(AtomicBool::new(false));
     let logged = Arc::new(AtomicBool::new(false));
     let mut sse_buffer = String::new();
+    let mut sse_utf8_remainder: Vec<u8> = Vec::new();
     let mut done_state = SseDoneState::default();
     let mut upstream_stream = Box::pin(response.bytes_stream());
     let mut idle_timeout = Box::pin(sleep(STREAMING_IDLE_TIMEOUT));
@@ -773,6 +774,7 @@ fn build_streaming_response(
                         if let Some(transformed) = transform_sse_chunk(
                             &chunk,
                             &mut sse_buffer,
+                            &mut sse_utf8_remainder,
                             &adapter,
                             &prompt_tokens,
                             &completion_tokens,
@@ -789,6 +791,7 @@ fn build_streaming_response(
                     } else {
                         if let Some(with_model_info) = append_and_parse_sse(
                             &mut sse_buffer,
+                            &mut sse_utf8_remainder,
                             &chunk,
                             &prompt_tokens,
                             &completion_tokens,
@@ -1043,6 +1046,7 @@ fn model_info_delta(model: &str) -> Vec<u8> {
 fn transform_sse_chunk(
     chunk: &Bytes,
     buffer: &mut String,
+    remainder: &mut Vec<u8>,
     adapter: &Box<dyn super::protocol::ProtocolAdapter + Send + Sync>,
     prompt_tokens: &Arc<AtomicI64>,
     completion_tokens: &Arc<AtomicI64>,
@@ -1051,7 +1055,7 @@ fn transform_sse_chunk(
     model_info: Option<&str>,
     done_state: &mut SseDoneState,
 ) -> Option<Bytes> {
-    buffer.push_str(&String::from_utf8_lossy(chunk));
+    super::sse::append_utf8_safe(buffer, remainder, chunk);
     let mut output = Vec::new();
 
     while let Some(line_end) = buffer.find('\n') {
@@ -1117,6 +1121,7 @@ fn transform_sse_chunk(
 
 fn append_and_parse_sse(
     buffer: &mut String,
+    remainder: &mut Vec<u8>,
     chunk: &Bytes,
     prompt_tokens: &Arc<AtomicI64>,
     completion_tokens: &Arc<AtomicI64>,
@@ -1126,7 +1131,7 @@ fn append_and_parse_sse(
     model_info: Option<&str>,
     done_state: &mut SseDoneState,
 ) -> Option<Bytes> {
-    buffer.push_str(&String::from_utf8_lossy(chunk));
+    super::sse::append_utf8_safe(buffer, remainder, chunk);
     let mut saw_done = false;
 
     while let Some(line_end) = buffer.find('\n') {
@@ -1486,9 +1491,11 @@ data: [DONE]\n"
         let prompt_tokens = Arc::new(AtomicI64::new(0));
         let completion_tokens = Arc::new(AtomicI64::new(0));
 
+        let mut remainder = Vec::new();
         let output = transform_sse_chunk(
             &chunk,
             &mut buffer,
+            &mut remainder,
             &adapter,
             &prompt_tokens,
             &completion_tokens,
@@ -1521,8 +1528,10 @@ data: [DONE]\n"
         let has_text_delta = Arc::new(AtomicBool::new(false));
         let mut done_state = SseDoneState::default();
 
+        let mut remainder = Vec::new();
         let output = append_and_parse_sse(
             &mut buffer,
+            &mut remainder,
             &chunk,
             &prompt_tokens,
             &completion_tokens,
@@ -1547,8 +1556,10 @@ data: [DONE]\n"
         let has_text_delta = Arc::new(AtomicBool::new(false));
         let mut done_state = SseDoneState::default();
 
+        let mut remainder = Vec::new();
         let output = append_and_parse_sse(
             &mut buffer,
+            &mut remainder,
             &chunk,
             &prompt_tokens,
             &completion_tokens,
@@ -1577,8 +1588,10 @@ data: [DONE]\n",
         let has_text_delta = Arc::new(AtomicBool::new(false));
         let mut done_state = SseDoneState::default();
 
+        let mut remainder = Vec::new();
         let first_output = append_and_parse_sse(
             &mut buffer,
+            &mut remainder,
             &first_chunk,
             &prompt_tokens,
             &completion_tokens,
@@ -1591,6 +1604,7 @@ data: [DONE]\n",
         .expect("first done should append model once");
         let second_output = append_and_parse_sse(
             &mut buffer,
+            &mut remainder,
             &second_chunk,
             &prompt_tokens,
             &completion_tokens,
@@ -1620,8 +1634,10 @@ data: [DONE]\n",
         let has_text_delta = Arc::new(AtomicBool::new(false));
         let mut done_state = SseDoneState::default();
 
+        let mut remainder = Vec::new();
         let output = append_and_parse_sse(
             &mut buffer,
+            &mut remainder,
             &chunk,
             &prompt_tokens,
             &completion_tokens,
@@ -1650,9 +1666,11 @@ data: [DONE]\n"
         let has_text_delta = Arc::new(AtomicBool::new(false));
         let mut done_state = SseDoneState::default();
 
+        let mut remainder = Vec::new();
         let output = transform_sse_chunk(
             &chunk,
             &mut buffer,
+            &mut remainder,
             &adapter,
             &prompt_tokens,
             &completion_tokens,
@@ -1682,9 +1700,11 @@ data: [DONE]\n",
         let has_text_delta = Arc::new(AtomicBool::new(false));
         let mut done_state = SseDoneState::default();
 
+        let mut remainder = Vec::new();
         let output = transform_sse_chunk(
             &chunk,
             &mut buffer,
+            &mut remainder,
             &adapter,
             &prompt_tokens,
             &completion_tokens,
@@ -1762,8 +1782,10 @@ data: [DONE]\n"
         let has_tool_calls = Arc::new(AtomicBool::new(false));
         let mut done_state = SseDoneState::default();
 
+        let mut remainder = Vec::new();
         let output = append_and_parse_sse(
             &mut buffer,
+            &mut remainder,
             &chunk,
             &prompt_tokens,
             &completion_tokens,
@@ -1800,8 +1822,10 @@ data: [DONE]\n"
         let has_tool_calls = Arc::new(AtomicBool::new(false));
         let mut done_state = SseDoneState::default();
 
+        let mut remainder = Vec::new();
         let output = append_and_parse_sse(
             &mut buffer,
+            &mut remainder,
             &chunk,
             &prompt_tokens,
             &completion_tokens,
@@ -1838,8 +1862,10 @@ data: [DONE]\n",
         let has_tool_calls = Arc::new(AtomicBool::new(false));
         let mut done_state = SseDoneState::default();
 
+        let mut remainder = Vec::new();
         let output = append_and_parse_sse(
             &mut buffer,
+            &mut remainder,
             &chunk,
             &prompt_tokens,
             &completion_tokens,
@@ -1879,9 +1905,11 @@ data: [DONE]\n"
         let has_tool_calls = Arc::new(AtomicBool::new(false));
         let mut done_state = SseDoneState::default();
 
+        let mut remainder = Vec::new();
         let output = transform_sse_chunk(
             &chunk,
             &mut buffer,
+            &mut remainder,
             &adapter,
             &prompt_tokens,
             &completion_tokens,
@@ -1918,8 +1946,10 @@ data: [DONE]\n",
         let has_tool_calls = Arc::new(AtomicBool::new(false));
         let mut done_state = SseDoneState::default();
 
+        let mut remainder = Vec::new();
         let output = append_and_parse_sse(
             &mut buffer,
+            &mut remainder,
             &chunk,
             &prompt_tokens,
             &completion_tokens,
@@ -1956,8 +1986,10 @@ data: [DONE]\n",
         let has_tool_calls = Arc::new(AtomicBool::new(false));
         let mut done_state = SseDoneState::default();
 
+        let mut remainder = Vec::new();
         let output = append_and_parse_sse(
             &mut buffer,
+            &mut remainder,
             &chunk,
             &prompt_tokens,
             &completion_tokens,
@@ -1992,8 +2024,10 @@ data: [DONE]\n"
         let has_tool_calls = Arc::new(AtomicBool::new(false));
         let mut done_state = SseDoneState::default();
 
+        let mut remainder = Vec::new();
         let output = append_and_parse_sse(
             &mut buffer,
+            &mut remainder,
             &chunk,
             &prompt_tokens,
             &completion_tokens,

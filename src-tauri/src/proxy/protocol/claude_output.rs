@@ -1,5 +1,11 @@
 use serde_json::{json, Value};
 
+/// 穿透开关：true = 未知字段保留穿透，false = 只保留已知白名单字段
+///
+/// 默认 true，贯彻「中转翻译器不丢信息」的公理。
+/// 如果发现某个上游/客户端对未知字段返回 400，可临时改为 false 发布紧急版本。
+const ENABLE_UNKNOWN_FIELD_PASSTHROUGH: bool = true;
+
 // ═══════════════════════════════════════════════════════════════════
 //  Public API: Claude <-> OpenAI format conversion
 // ═══════════════════════════════════════════════════════════════════
@@ -117,6 +123,19 @@ pub fn claude_to_openai_request(claude: &Value) -> Value {
 
         if !openai_tools.is_empty() {
             openai["tools"] = json!(openai_tools);
+        }
+    }
+
+    // 公理二：未知字段穿透。上面手动处理了所有已知字段，
+    // 这里把 claude 顶层剩余的（未知/未来的）字段也带过去，
+    // 避免"中转翻译器"丢信息。
+    if ENABLE_UNKNOWN_FIELD_PASSTHROUGH {
+        if let (Some(src), Some(dst)) = (claude.as_object(), openai.as_object_mut()) {
+            for (key, value) in src {
+                if !dst.contains_key(key) {
+                    dst.insert(key.clone(), value.clone());
+                }
+            }
         }
     }
 
@@ -239,15 +258,46 @@ pub fn openai_to_claude_response(openai: &Value) -> Value {
         usage_json["cache_read_input_tokens"] = json!(cache_read);
     }
 
-    json!({
-        "id": claude_id,
-        "type": "message",
-        "role": "assistant",
-        "model": model,
-        "content": content,
-        "stop_reason": stop_reason,
-        "usage": usage_json
-    })
+    // 公理二：clone openai 作为基底，然后 edit-in-place 改写 Claude 特有字段。
+    // 避免白名单 json!({...}) 构造新对象把上游其他字段（已知但非白名单/未来新增）丢掉。
+    let mut out = openai.clone();
+    if let Some(obj) = out.as_object_mut() {
+        // 改写/设置 Claude 特有字段
+        obj.insert("id".to_string(), json!(claude_id));
+        obj.insert("type".to_string(), json!("message"));
+        obj.insert("role".to_string(), json!("assistant"));
+        // model 字段 OpenAI 和 Claude 共用，用 openai 里的即可；但仍显式写一份保证值正确
+        obj.insert("model".to_string(), json!(model));
+        obj.insert("content".to_string(), json!(content));
+        obj.insert("stop_reason".to_string(), json!(stop_reason));
+        obj.insert("usage".to_string(), usage_json);
+
+        // 移除 OpenAI 特有但 Claude 不应出现的字段
+        obj.remove("object"); // "chat.completion" 不是 Claude 语义
+        obj.remove("choices"); // Claude 没有 choices 结构
+        obj.remove("created"); // Claude 用 id 而不是时间戳
+        obj.remove("system_fingerprint"); // OpenAI 特有
+
+        // 如果关了穿透，只保留 Claude 官方文档已知字段
+        if !ENABLE_UNKNOWN_FIELD_PASSTHROUGH {
+            let claude_known: std::collections::HashSet<&str> = [
+                "id",
+                "type",
+                "role",
+                "model",
+                "content",
+                "stop_reason",
+                "stop_sequence",
+                "usage",
+                "container",
+            ]
+            .into_iter()
+            .collect();
+            obj.retain(|k, _| claude_known.contains(k.as_str()));
+        }
+        // 否则（默认）保留所有其他字段作为 passthrough
+    }
+    out
 }
 
 /// Transform an error into Claude error format.

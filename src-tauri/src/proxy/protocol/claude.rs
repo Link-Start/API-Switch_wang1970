@@ -8,6 +8,12 @@ use super::{join_url, ProtocolAdapter};
 /// - SSE streaming format conversion (Anthropic events → OpenAI chunks)
 use serde_json::{json, Value};
 
+/// 穿透开关：true = 未知字段保留穿透，false = 只保留已知白名单字段
+///
+/// 默认 true，贯彻「中转翻译器不丢信息」的公理。
+/// 如果发现某个上游/客户端对未知字段返回 400，可临时改为 false 发布紧急版本。
+const ENABLE_UNKNOWN_FIELD_PASSTHROUGH: bool = true;
+
 pub struct ClaudeAdapter;
 
 impl ProtocolAdapter for ClaudeAdapter {
@@ -510,7 +516,7 @@ fn convert_tools_to_anthropic(openai_tools: &Value) -> Value {
 }
 
 fn transform_response_from_anthropic(body: &mut Value) {
-    let Some(obj) = body.as_object_mut() else {
+    let Some(obj) = body.as_object() else {
         return;
     };
 
@@ -612,14 +618,49 @@ fn transform_response_from_anthropic(body: &mut Value) {
         });
     }
 
-    let mut response_body = json!({
-        "id": obj.get("id").cloned().unwrap_or_else(|| json!("chatcmpl-anthropic")),
-        "object": "chat.completion",
-        "created": chrono::Utc::now().timestamp(),
-        "model": model,
-        "choices": [choice],
-        "usage": usage_json,
-    });
+    // 公理二：clone body 作为基底然后 edit-in-place，避免 json!({...}) 白名单构造
+    // 丢掉上游 Claude 响应里的其他字段（container、stop_sequence、官方新增字段等）。
+    let mut response_body = body.clone();
+    if let Some(out) = response_body.as_object_mut() {
+        // 改写/设置 OpenAI 特有字段
+        out.insert(
+            "id".to_string(),
+            obj.get("id")
+                .cloned()
+                .unwrap_or_else(|| json!("chatcmpl-anthropic")),
+        );
+        out.insert("object".to_string(), json!("chat.completion"));
+        out.insert("created".to_string(), json!(chrono::Utc::now().timestamp()));
+        out.insert("model".to_string(), json!(model));
+        out.insert("choices".to_string(), json!([choice]));
+        out.insert("usage".to_string(), usage_json);
+
+        // 移除 Claude 特有但 OpenAI chat.completion 不应出现的顶层字段
+        out.remove("type"); // Claude 顶层 "type": "message"，OpenAI 用 "object"
+        out.remove("role"); // OpenAI 把 role 塞在 choices[0].message.role
+        out.remove("stop_reason"); // OpenAI 用 choices[0].finish_reason
+        out.remove("stop_sequence"); // 同上
+        out.remove("content"); // OpenAI 没有顶层 content 数组，全在 choices 里
+
+        // 如果关了穿透，只保留 OpenAI 官方 chat.completion 已知字段
+        if !ENABLE_UNKNOWN_FIELD_PASSTHROUGH {
+            let openai_known: std::collections::HashSet<&str> = [
+                "id",
+                "object",
+                "created",
+                "model",
+                "choices",
+                "usage",
+                "system_fingerprint",
+                "service_tier",
+                "provider_specific",
+            ]
+            .into_iter()
+            .collect();
+            out.retain(|k, _| openai_known.contains(k.as_str()));
+        }
+        // 否则（默认）其他字段（container、x_anthropic_future_field 等）自然保留
+    }
 
     // Include thinking content if present
     if !thinking_parts.is_empty() {

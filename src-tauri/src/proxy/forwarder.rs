@@ -786,6 +786,62 @@ fn build_streaming_response(
                     chunk_count.fetch_add(1, Ordering::SeqCst);
                     streamed_bytes.fetch_add(chunk.len() as i64, Ordering::SeqCst);
 
+                    if super::sse::stream_buffer_exceeded(
+                        &sse_buffer,
+                        &sse_utf8_remainder,
+                        streamed_bytes.load(Ordering::SeqCst) as usize,
+                    ) {
+                        if !logged.swap(true, Ordering::SeqCst) {
+                            let attempt_path = attempt_path_with_current(
+                                &prior_attempts,
+                                &entry,
+                                413,
+                                false,
+                                Some("stream buffer exceeds 10MB limit".to_string()),
+                            );
+                            let db2 = db.clone();
+                            let ah2 = app_handle.clone();
+                            let ak2 = access_key.clone();
+                            let e2 = entry.clone();
+                            let rm2 = requested_model.clone();
+                            let pt = prompt_tokens.load(Ordering::SeqCst);
+                            let ct = completion_tokens.load(Ordering::SeqCst);
+                            let ft = first_token_ms.load(Ordering::SeqCst);
+                            let lat = start.elapsed().as_millis() as i64;
+                            tokio::spawn(async move {
+                                log_usage(
+                                    &db2,
+                                    &ah2,
+                                    ak2.as_ref(),
+                                    &e2,
+                                    &rm2,
+                                    true,
+                                    pt,
+                                    ct,
+                                    ft,
+                                    lat,
+                                    413,
+                                    false,
+                                    Some("stream buffer exceeds 10MB limit"),
+                                    Some(attempt_path.as_str()),
+                                    Some(StreamEndReason::Dropped),
+                                );
+                            });
+                            spawn_cool_down_entry(
+                                circuit_breakers.clone(),
+                                failure_counts.clone(),
+                                settings_cache.clone(),
+                                db.clone(),
+                                entries_app_handle.clone(),
+                                entry_id.clone(),
+                            );
+                        }
+                        return Poll::Ready(Some(Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "stream buffer exceeds 10MB limit",
+                        ))));
+                    }
+
                     if needs_transform {
                         if let Some(transformed) = transform_sse_chunk(
                             &chunk,

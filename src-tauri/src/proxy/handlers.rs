@@ -2,17 +2,14 @@ use super::auth;
 use super::forwarder;
 use super::protocol::{
     azure_to_openai_request, claude_to_openai_request, gemini_to_openai_request,
-    openai_to_claude_response, openai_to_gemini_response, ClaudeSSETransformer,
+    openai_to_claude_response, openai_to_gemini_response, transform_openai_sse_to_claude_stream,
 };
 use super::router;
 use super::server::ProxyState;
-use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
-use bytes::Bytes;
-use futures::StreamExt;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -186,88 +183,8 @@ pub async fn handle_messages(
 
     // Convert the response from OpenAI format back to Claude format
     if is_stream {
-        // Streaming: transform each SSE chunk from OpenAI to Claude format
-        let upstream_stream = response.into_body().into_data_stream();
-
-        let message_id = format!("msg_{}", chrono::Utc::now().timestamp());
-        let transformer = ClaudeSSETransformer::new(message_id, requested_model.clone());
-        let sse_buffer = String::new();
-        let sse_utf8_remainder: Vec<u8> = Vec::new();
-
-        let transformed_stream = futures::stream::unfold(
-            (upstream_stream, transformer, sse_buffer, sse_utf8_remainder),
-            |(mut stream, mut transformer, mut sse_buffer, mut sse_utf8_remainder)| async move {
-                loop {
-                    // Process any buffered SSE lines first
-                    if let Some(line_end) = sse_buffer.find('\n') {
-                        let mut line = sse_buffer.drain(..=line_end).collect::<String>();
-                        if line.ends_with('\n') {
-                            line.pop();
-                        }
-                        if line.ends_with('\r') {
-                            line.pop();
-                        }
-
-                        if let Some(payload) = line.strip_prefix("data: ") {
-                            if payload == "[DONE]" {
-                                let output = Bytes::from("data: [DONE]\n\n");
-                                return Some((
-                                    Ok::<_, std::io::Error>(output),
-                                    (stream, transformer, sse_buffer, sse_utf8_remainder),
-                                ));
-                            }
-
-                            let events = transformer.transform_chunk(payload);
-                            if !events.is_empty() {
-                                let mut output = Vec::new();
-                                for event in &events {
-                                    output
-                                        .extend_from_slice(format!("data: {event}\n\n").as_bytes());
-                                }
-                                return Some((
-                                    Ok(Bytes::from(output)),
-                                    (stream, transformer, sse_buffer, sse_utf8_remainder),
-                                ));
-                            }
-                        }
-                        continue; // skip non-data lines or empty-transform chunks
-                    }
-
-                    // Need more data from upstream
-                    match stream.next().await {
-                        Some(Ok(chunk)) => {
-                            super::sse::append_utf8_safe(
-                                &mut sse_buffer,
-                                &mut sse_utf8_remainder,
-                                &chunk,
-                            );
-                            // Continue loop to process buffered data
-                        }
-                        Some(Err(e)) => {
-                            return Some((
-                                Err(std::io::Error::new(
-                                    std::io::ErrorKind::Other,
-                                    format!("Stream read error: {e}"),
-                                )),
-                                (stream, transformer, sse_buffer, sse_utf8_remainder),
-                            ));
-                        }
-                        None => {
-                            return None; // stream ended
-                        }
-                    }
-                }
-            },
-        );
-
-        Ok(axum::http::Response::builder()
-            .status(StatusCode::OK)
-            .header("content-type", "text/event-stream")
-            .header("cache-control", "no-cache")
-            .header("connection", "keep-alive")
-            .header("x-accel-buffering", "no")
-            .body(Body::from_stream(transformed_stream))
-            .unwrap())
+        transform_openai_sse_to_claude_stream(response, requested_model.clone())
+            .map_err(ProxyError::from)
     } else {
         // Non-streaming: read the body, convert JSON from OpenAI to Claude format
         let body_bytes = axum::body::to_bytes(response.into_body(), 32 * 1024 * 1024)

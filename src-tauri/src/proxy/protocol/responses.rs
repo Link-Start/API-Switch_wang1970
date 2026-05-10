@@ -9,8 +9,844 @@
 //!
 //! 公理：这边进来什么，那边出去一样。已知字段按文档翻译，未知字段穿透。
 
+use axum::body::Body;
+use bytes::Bytes;
+use futures::StreamExt;
 use super::{join_url, ProtocolAdapter};
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::time::Duration;
+
+pub fn responses_sse_line(obj: &Value) -> bytes::Bytes {
+    let line = format!(
+        "data: {}\n\n",
+        serde_json::to_string(obj).unwrap_or_default()
+    );
+    bytes::Bytes::from(line)
+}
+
+pub fn responses_sse_done() -> bytes::Bytes {
+    bytes::Bytes::from("data: [DONE]\n\n")
+}
+
+pub fn responses_function_call_done_event(
+    response_id: &str,
+    item_id: &str,
+    output_index: u32,
+    arguments: &str,
+) -> Value {
+    json!({
+        "type": "response.function_call_arguments.done",
+        "response_id": response_id,
+        "item_id": item_id,
+        "output_index": output_index,
+        "arguments": arguments
+    })
+}
+
+pub fn responses_function_call_output_item(
+    id: &str,
+    name: &str,
+    arguments: &str,
+    status: &str,
+) -> Value {
+    json!({
+        "id": id,
+        "type": "function_call",
+        "call_id": id,
+        "name": name,
+        "arguments": arguments,
+        "status": status
+    })
+}
+
+pub fn responses_message_output_item(item_id: &str, text: &str, status: &str) -> Value {
+    json!({
+        "type": "message",
+        "role": "assistant",
+        "id": item_id,
+        "status": status,
+        "content": [{ "type": "output_text", "text": text, "annotations": [] }]
+    })
+}
+
+pub fn responses_output_item_added_event(response_id: &str, output_index: u32, item: Value) -> Value {
+    json!({
+        "type": "response.output_item.added",
+        "response_id": response_id,
+        "output_index": output_index,
+        "item": item
+    })
+}
+
+pub fn responses_output_item_done_event(response_id: &str, output_index: u32, item: Value) -> Value {
+    json!({
+        "type": "response.output_item.done",
+        "response_id": response_id,
+        "output_index": output_index,
+        "item": item
+    })
+}
+
+pub fn responses_output_text_delta_event(
+    response_id: &str,
+    item_id: &str,
+    output_index: u32,
+    content_index: u32,
+    delta: &str,
+) -> Value {
+    json!({
+        "type": "response.output_text.delta",
+        "response_id": response_id,
+        "item_id": item_id,
+        "output_index": output_index,
+        "content_index": content_index,
+        "delta": delta
+    })
+}
+
+pub fn responses_incomplete_details(finish_reason: Option<&str>) -> Value {
+    match finish_reason {
+        Some("length") | Some("content_filter") => json!({ "reason": finish_reason }),
+        _ => json!(null),
+    }
+}
+
+pub fn responses_final_status(finish_reason: Option<&str>) -> &'static str {
+    match finish_reason {
+        Some("length") | Some("content_filter") => "incomplete",
+        _ => "completed",
+    }
+}
+
+pub fn responses_usage_object(usage: &Value) -> Value {
+    let input_tokens = usage
+        .get("prompt_tokens")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let output_tokens = usage
+        .get("completion_tokens")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let total_tokens = usage
+        .get("total_tokens")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(input_tokens + output_tokens);
+    let cached_tokens = usage
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let reasoning_tokens = usage
+        .get("completion_tokens_details")
+        .and_then(|d| d.get("reasoning_tokens"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+
+    json!({
+        "input_tokens": input_tokens,
+        "input_tokens_details": { "cached_tokens": cached_tokens },
+        "output_tokens": output_tokens,
+        "output_tokens_details": { "reasoning_tokens": reasoning_tokens },
+        "total_tokens": total_tokens
+    })
+}
+
+pub fn responses_completed_response(
+    response_id: &str,
+    created_at: i64,
+    final_status: &str,
+    incomplete_details: Value,
+    req_body: &Value,
+    model: &str,
+    output: Vec<Value>,
+    output_text: Option<&str>,
+    usage: Value,
+) -> Value {
+    json!({
+        "id": response_id,
+        "object": "response",
+        "created_at": created_at,
+        "status": final_status,
+        "error": null,
+        "incomplete_details": incomplete_details,
+        "instructions": req_body.get("instructions"),
+        "max_output_tokens": req_body.get("max_output_tokens"),
+        "model": model,
+        "output": output,
+        "output_text": output_text,
+        "parallel_tool_calls": req_body.get("parallel_tool_calls").unwrap_or(&json!(true)),
+        "reasoning": req_body.get("reasoning").cloned().unwrap_or(json!({"effort": null, "summary": null})),
+        "temperature": req_body.get("temperature").unwrap_or(&json!(1.0)),
+        "text": req_body.get("text").cloned().unwrap_or(json!({"format": {"type": "text"}})),
+        "tool_choice": req_body.get("tool_choice").unwrap_or(&json!("auto")),
+        "tools": req_body.get("tools").unwrap_or(&json!([])),
+        "top_p": req_body.get("top_p").unwrap_or(&json!(1.0)),
+        "truncation": req_body.get("truncation").unwrap_or(&json!("disabled")),
+        "previous_response_id": null,
+        "store": req_body.get("store").unwrap_or(&json!(true)),
+        "usage": usage,
+        "user": req_body.get("user"),
+        "metadata": req_body.get("metadata").unwrap_or(&json!({}))
+    })
+}
+
+pub fn responses_failed_response(response_id: &str, created_at: i64, message: &str, error_type: &str) -> Value {
+    json!({
+        "id": response_id,
+        "object": "response",
+        "created_at": created_at,
+        "status": "failed",
+        "error": { "message": message, "type": error_type }
+    })
+}
+
+pub fn responses_to_openai_chat_request(req_body: &Value) -> (Value, bool, String) {
+    let is_stream = req_body
+        .get("stream")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let model = req_body
+        .get("model")
+        .and_then(|m| m.as_str())
+        .unwrap_or("auto")
+        .to_string();
+
+    let messages = input_to_messages(
+        req_body.get("input").unwrap_or(&Value::Null),
+        req_body.get("instructions").and_then(|v| v.as_str()),
+    );
+
+    let mut chat_body = json!({
+        "model": model,
+        "messages": messages,
+        "stream": is_stream,
+    });
+
+    for field in [
+        ("temperature", "temperature"),
+        ("top_p", "top_p"),
+        ("reasoning", "reasoning"),
+        ("service_tier", "service_tier"),
+        ("text", "text"),
+        ("top_logprobs", "top_logprobs"),
+        ("stream_options", "stream_options"),
+        ("max_tool_calls", "max_tool_calls"),
+        ("include", "include"),
+        ("prompt", "prompt"),
+        ("prompt_cache_key", "prompt_cache_key"),
+        ("prompt_cache_retention", "prompt_cache_retention"),
+        ("safety_identifier", "safety_identifier"),
+        ("tool_choice", "tool_choice"),
+        ("parallel_tool_calls", "parallel_tool_calls"),
+    ] {
+        if let Some(value) = req_body.get(field.0) {
+            chat_body[field.1] = value.clone();
+        }
+    }
+
+    if let Some(max_tokens) = req_body.get("max_output_tokens") {
+        chat_body["max_tokens"] = max_tokens.clone();
+    }
+
+    if let Some(tools) = req_body.get("tools").and_then(|v| v.as_array()) {
+        if let Some(converted) = convert_tools(tools) {
+            chat_body["tools"] = converted;
+        }
+    }
+
+    if let (Some(req_obj), Some(chat_obj)) = (req_body.as_object(), chat_body.as_object_mut()) {
+        for (key, value) in req_obj {
+            if !chat_obj.contains_key(key) {
+                chat_obj.insert(key.clone(), value.clone());
+            }
+        }
+    }
+
+    (chat_body, is_stream, model)
+}
+
+pub fn build_responses_base_response(req_body: &Value, response_id: &str, created_at: i64, model: &str) -> Value {
+    json!({
+        "id": response_id,
+        "object": "response",
+        "created_at": created_at,
+        "status": "in_progress",
+        "error": null,
+        "incomplete_details": null,
+        "instructions": req_body.get("instructions"),
+        "max_output_tokens": req_body.get("max_output_tokens"),
+        "model": model,
+        "output": [],
+        "parallel_tool_calls": req_body.get("parallel_tool_calls").unwrap_or(&json!(true)),
+        "reasoning": req_body.get("reasoning").cloned().unwrap_or(json!({"effort": null, "summary": null})),
+        "temperature": req_body.get("temperature").unwrap_or(&json!(1.0)),
+        "text": req_body.get("text").cloned().unwrap_or(json!({"format": {"type": "text"}})),
+        "tool_choice": req_body.get("tool_choice").unwrap_or(&json!("auto")),
+        "tools": req_body.get("tools").unwrap_or(&json!([])),
+        "top_p": req_body.get("top_p").unwrap_or(&json!(1.0)),
+        "truncation": req_body.get("truncation").unwrap_or(&json!("disabled")),
+        "previous_response_id": null,
+        "store": req_body.get("store").unwrap_or(&json!(true)),
+        "usage": null,
+        "user": req_body.get("user"),
+        "metadata": req_body.get("metadata").unwrap_or(&json!({}))
+    })
+}
+
+pub fn wrap_openai_response_as_responses(
+    req_body: &Value,
+    response_id: &str,
+    item_id: &str,
+    created_at: i64,
+    model_fallback: &str,
+    obj: &Value,
+) -> (Vec<Bytes>, Value) {
+    let msg = obj
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|c| c.get("message"))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+
+    let content = msg.get("content").and_then(|v| v.as_str()).unwrap_or("");
+    let tool_calls = msg.get("tool_calls").and_then(|v| v.as_array());
+    let mut frames: Vec<Bytes> = Vec::new();
+    let mut output_items: Vec<Value> = Vec::new();
+
+    if !content.is_empty() {
+        frames.push(responses_sse_line(&responses_output_text_delta_event(
+            response_id,
+            item_id,
+            0,
+            0,
+            content,
+        )));
+        let completed_message = responses_message_output_item(item_id, content, "completed");
+        frames.push(responses_sse_line(&responses_output_item_done_event(
+            response_id,
+            0,
+            completed_message.clone(),
+        )));
+        output_items.push(completed_message);
+    }
+
+    if let Some(tc_array) = tool_calls {
+        for (idx, tc) in tc_array.iter().enumerate() {
+            let output_index = if content.is_empty() { idx as u32 } else { (idx + 1) as u32 };
+
+            if !is_function_tool_call(tc) {
+                let item = passthrough_output_item(tc, Some("completed"));
+                frames.push(responses_sse_line(&responses_output_item_added_event(
+                    response_id,
+                    output_index,
+                    passthrough_output_item(tc, Some("in_progress")),
+                )));
+                frames.push(responses_sse_line(&responses_output_item_done_event(
+                    response_id,
+                    output_index,
+                    item.clone(),
+                )));
+                output_items.push(item);
+                continue;
+            }
+
+            let tc_id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let tc_fn = tc.get("function").cloned().unwrap_or_else(|| json!({}));
+            let tc_name = tc_fn.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let tc_args = match tc_fn.get("arguments") {
+                Some(Value::String(s)) => s.clone(),
+                Some(Value::Object(_)) | Some(Value::Array(_)) => {
+                    serde_json::to_string(tc_fn.get("arguments").unwrap())
+                        .unwrap_or_else(|_| "{}".to_string())
+                }
+                _ => "{}".to_string(),
+            };
+
+            frames.push(responses_sse_line(&responses_output_item_added_event(
+                response_id,
+                output_index,
+                json!({
+                    "id": tc_id,
+                    "type": "function_call",
+                    "call_id": tc_id,
+                    "name": tc_name,
+                    "arguments": "",
+                    "status": "in_progress"
+                }),
+            )));
+            frames.push(responses_sse_line(&json!({
+                "type": "response.function_call_arguments.delta",
+                "response_id": response_id,
+                "item_id": tc_id,
+                "output_index": output_index,
+                "delta": tc_args
+            })));
+            frames.push(responses_sse_line(&responses_function_call_done_event(
+                response_id,
+                tc_id,
+                output_index,
+                &tc_args,
+            )));
+            let completed_item = responses_function_call_output_item(
+                tc_id,
+                tc_name,
+                &tc_args,
+                "completed",
+            );
+            frames.push(responses_sse_line(&responses_output_item_done_event(
+                response_id,
+                output_index,
+                completed_item.clone(),
+            )));
+            output_items.push(completed_item);
+        }
+    }
+
+    let finish_reason = obj
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|c| c.get("finish_reason"))
+        .and_then(|f| f.as_str());
+
+    let incomplete_details = responses_incomplete_details(finish_reason);
+    let final_status = responses_final_status(finish_reason);
+    let upstream_model = obj.get("model").and_then(|m| m.as_str()).unwrap_or(model_fallback);
+    let usage = obj.get("usage").cloned().unwrap_or_else(|| json!({}));
+    let usage_obj = responses_usage_object(&usage);
+
+    let completed_response = responses_completed_response(
+        response_id,
+        created_at,
+        final_status,
+        incomplete_details,
+        req_body,
+        upstream_model,
+        output_items,
+        if content.is_empty() { None } else { Some(content) },
+        usage_obj,
+    );
+
+    (frames, completed_response)
+}
+
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+
+struct ToolCallEntry {
+    id: String,
+    name: String,
+    arguments: String,
+    passthrough_item: Option<Value>,
+    added_emitted: bool,
+    assigned_index: u32,
+}
+
+pub fn build_responses_sse_http_response(
+    frames: Vec<Bytes>,
+) -> Result<axum::response::Response, crate::error::AppError> {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(frames.len().max(1));
+
+    tokio::spawn(async move {
+        for frame in frames {
+            if tx.send(Ok(frame)).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let stream = futures::stream::unfold(rx, |mut rx| async move {
+        let item = rx.recv().await?;
+        Some((item, rx))
+    });
+
+    axum::http::Response::builder()
+        .status(axum::http::StatusCode::OK)
+        .header(axum::http::header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
+        .header(axum::http::header::CACHE_CONTROL, "no-cache")
+        .header(axum::http::header::CONNECTION, "close")
+        .body(Body::from_stream(stream))
+        .map_err(|e| crate::error::AppError::Internal(format!("Failed to build Responses SSE response: {e}")))
+}
+
+pub fn transform_openai_sse_to_responses_stream(
+    response: axum::response::Response,
+    initial_frames: Vec<Bytes>,
+    response_id: String,
+    item_id: String,
+    model: String,
+    req_body: Value,
+    created_at: i64,
+) -> Result<axum::response::Response, crate::error::AppError> {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(256);
+    let upstream_body = response.into_body();
+
+    tokio::spawn(async move {
+        macro_rules! send {
+            ($frame:expr) => {
+                if tx.send(Ok($frame)).await.is_err() {
+                    return;
+                }
+            };
+        }
+
+        for frame in initial_frames {
+            send!(frame);
+        }
+
+        let upstream_stream = upstream_body.into_data_stream();
+        let mut buffer = String::new();
+        let mut utf8_remainder: Vec<u8> = Vec::new();
+        let mut full_content = String::new();
+        let mut usage = json!({});
+        let mut finish_reason: Option<String> = None;
+        let mut upstream_model: Option<String> = None;
+        let mut content_len: usize = 0;
+        let mut next_content_index: u32 = 1;
+        let mut index_by_key: HashMap<String, u32> = HashMap::new();
+        let mut tool_index_by_item_id: HashMap<String, u32> = HashMap::new();
+        let mut last_tool_index: Option<u32> = None;
+        let mut tool_accum: HashMap<usize, ToolCallEntry> = HashMap::new();
+        let mut stream = upstream_stream;
+        let mut idle_timeout = Box::pin(tokio::time::sleep(STREAM_IDLE_TIMEOUT));
+
+        loop {
+            let chunk_result = tokio::select! {
+                _ = &mut idle_timeout => {
+                    send!(responses_sse_line(&json!({
+                        "type": "error",
+                        "code": "stream_idle_timeout",
+                        "message": "Stream idle timeout"
+                    })));
+                    break;
+                }
+                next = stream.next() => match next {
+                    Some(result) => result,
+                    None => break,
+                }
+            };
+
+            let bytes = match chunk_result {
+                Ok(b) => {
+                    idle_timeout.as_mut().reset(tokio::time::Instant::now() + STREAM_IDLE_TIMEOUT);
+                    b
+                }
+                Err(_) => break,
+            };
+
+            content_len += bytes.len();
+            if content_len > crate::proxy::sse::MAX_STREAM_BUFFER_BYTES {
+                send!(responses_sse_line(&json!({
+                    "type": "error",
+                    "code": "content_too_large",
+                    "message": "Stream content exceeds 10MB limit"
+                })));
+                break;
+            }
+
+            crate::proxy::sse::append_utf8_safe(&mut buffer, &mut utf8_remainder, &bytes);
+
+            while let Some(newline_pos) = buffer.find('\n') {
+                let line = buffer[..newline_pos].to_string();
+                buffer = buffer[newline_pos + 1..].to_string();
+                let line = line.trim();
+
+                if line.is_empty() {
+                    continue;
+                }
+
+                if let Some(data) = crate::proxy::sse::sse_data_payload(line) {
+                    if data == "[DONE]" {
+                        if !full_content.is_empty() {
+                            send!(responses_sse_line(&responses_output_item_done_event(
+                                &response_id,
+                                0,
+                                responses_message_output_item(&item_id, &full_content, "completed"),
+                            )));
+                        }
+
+                        let mut sorted_indices: Vec<usize> = tool_accum.keys().copied().collect();
+                        sorted_indices.sort();
+                        for &idx in &sorted_indices {
+                            let entry = &tool_accum[&idx];
+                            if let Some(item) = &entry.passthrough_item {
+                                send!(responses_sse_line(&responses_output_item_done_event(
+                                    &response_id,
+                                    entry.assigned_index,
+                                    passthrough_output_item(item, Some("completed")),
+                                )));
+                            } else {
+                                send!(responses_sse_line(&responses_function_call_done_event(
+                                    &response_id,
+                                    &entry.id,
+                                    entry.assigned_index,
+                                    &entry.arguments,
+                                )));
+                                send!(responses_sse_line(&responses_output_item_done_event(
+                                    &response_id,
+                                    entry.assigned_index,
+                                    responses_function_call_output_item(
+                                        &entry.id,
+                                        &entry.name,
+                                        &entry.arguments,
+                                        "completed",
+                                    ),
+                                )));
+                            }
+                        }
+
+                        let final_status = responses_final_status(finish_reason.as_deref());
+                        let incomplete_details = responses_incomplete_details(finish_reason.as_deref());
+                        let resolved_model = upstream_model.as_deref().unwrap_or(&model);
+
+                        let mut final_items: Vec<Value> = Vec::new();
+                        if !full_content.is_empty() {
+                            final_items.push(responses_message_output_item(&item_id, &full_content, final_status));
+                        }
+                        for &idx in &sorted_indices {
+                            let entry = &tool_accum[&idx];
+                            if let Some(item) = &entry.passthrough_item {
+                                final_items.push(passthrough_output_item(item, Some("completed")));
+                            } else {
+                                final_items.push(responses_function_call_output_item(
+                                    &entry.id,
+                                    &entry.name,
+                                    &entry.arguments,
+                                    "completed",
+                                ));
+                            }
+                        }
+
+                        let completed_response = responses_completed_response(
+                            &response_id,
+                            created_at,
+                            final_status,
+                            incomplete_details,
+                            &req_body,
+                            resolved_model,
+                            final_items,
+                            if full_content.is_empty() { None } else { Some(full_content.as_str()) },
+                            responses_usage_object(&usage),
+                        );
+                        send!(responses_sse_line(&json!({
+                            "type": "response.completed",
+                            "response": completed_response
+                        })));
+                        send!(responses_sse_done());
+                        return;
+                    }
+
+                    if let Ok(chunk_obj) = serde_json::from_str::<Value>(data) {
+                        if upstream_model.is_none() {
+                            if let Some(m) = chunk_obj.get("model").and_then(|m| m.as_str()) {
+                                upstream_model = Some(m.to_string());
+                            }
+                        }
+
+                        if let Some(u) = chunk_obj.get("usage") {
+                            usage = u.clone();
+                        }
+
+                        if let Some(fr) = chunk_obj
+                            .get("choices")
+                            .and_then(|c| c.as_array())
+                            .and_then(|a| a.first())
+                            .and_then(|c| c.get("finish_reason"))
+                            .and_then(|f| f.as_str())
+                        {
+                            if !fr.is_empty() {
+                                finish_reason = Some(fr.to_string());
+                            }
+                        }
+
+                        if let Some(tool_calls_delta) = chunk_obj
+                            .get("choices")
+                            .and_then(|c| c.as_array())
+                            .and_then(|a| a.first())
+                            .and_then(|c| c.get("delta"))
+                            .and_then(|d| d.get("tool_calls"))
+                            .and_then(|t| t.as_array())
+                        {
+                            for tc_delta in tool_calls_delta {
+                                let tc_idx = tc_delta
+                                    .get("index")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0) as usize;
+                                let tc_id_new = tc_delta
+                                    .get("id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let tc_fn = tc_delta
+                                    .get("function")
+                                    .cloned()
+                                    .unwrap_or_else(|| json!({}));
+                                let tc_name_delta = tc_fn
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let is_function_delta = tc_delta.get("type").and_then(|v| v.as_str())
+                                    == Some("function")
+                                    || (tc_delta.get("type").is_none() && tc_delta.get("function").is_some());
+                                let tc_args_delta = match tc_fn.get("arguments") {
+                                    Some(Value::String(s)) => s.clone(),
+                                    Some(Value::Object(_)) | Some(Value::Array(_)) => {
+                                        serde_json::to_string(tc_fn.get("arguments").unwrap())
+                                            .unwrap_or_else(|_| String::new())
+                                    }
+                                    _ => String::new(),
+                                };
+
+                                let entry = tool_accum.entry(tc_idx).or_insert_with(|| ToolCallEntry {
+                                    id: String::new(),
+                                    name: String::new(),
+                                    arguments: String::new(),
+                                    passthrough_item: None,
+                                    added_emitted: false,
+                                    assigned_index: 0,
+                                });
+
+                                if !is_function_delta || entry.passthrough_item.is_some() {
+                                    let item = entry
+                                        .passthrough_item
+                                        .get_or_insert_with(|| passthrough_output_item(tc_delta, None));
+                                    merge_tool_delta(item, tc_delta);
+                                    if !tc_id_new.is_empty() {
+                                        entry.id = tc_id_new.to_string();
+                                    }
+                                    if !entry.added_emitted {
+                                        entry.assigned_index = (tc_idx + 1) as u32;
+                                        send!(responses_sse_line(&responses_output_item_added_event(
+                                            &response_id,
+                                            entry.assigned_index,
+                                            passthrough_output_item(item, Some("in_progress")),
+                                        )));
+                                        entry.added_emitted = true;
+                                    }
+                                    continue;
+                                }
+
+                                if !tc_id_new.is_empty() {
+                                    entry.id = tc_id_new.to_string();
+                                }
+                                if !tc_name_delta.is_empty() {
+                                    entry.name = tc_name_delta.to_string();
+                                }
+                                if !tc_args_delta.is_empty() {
+                                    entry.arguments.push_str(&tc_args_delta);
+                                }
+
+                                let tool_key = if !entry.id.is_empty() {
+                                    Some(format!("tool:{}", entry.id))
+                                } else {
+                                    None
+                                };
+
+                                let assigned_index = if let Some(ref k) = tool_key {
+                                    if let Some(existing) = index_by_key.get(k).copied() {
+                                        existing
+                                    } else {
+                                        let assigned = next_content_index;
+                                        next_content_index += 1;
+                                        index_by_key.insert(k.clone(), assigned);
+                                        assigned
+                                    }
+                                } else {
+                                    let assigned = next_content_index;
+                                    next_content_index += 1;
+                                    assigned
+                                };
+
+                                entry.assigned_index = assigned_index;
+                                if !entry.id.is_empty() {
+                                    tool_index_by_item_id.insert(entry.id.clone(), assigned_index);
+                                    last_tool_index = Some(assigned_index);
+                                }
+
+                                if !entry.added_emitted && !entry.name.is_empty() {
+                                    send!(responses_sse_line(&responses_output_item_added_event(
+                                        &response_id,
+                                        assigned_index,
+                                        responses_function_call_output_item(
+                                            &entry.id,
+                                            &entry.name,
+                                            "",
+                                            "in_progress",
+                                        ),
+                                    )));
+                                    entry.added_emitted = true;
+                                }
+
+                                if !tc_args_delta.is_empty() {
+                                    let delta_index = tool_index_by_item_id
+                                        .get(&entry.id)
+                                        .copied()
+                                        .or(last_tool_index)
+                                        .unwrap_or(assigned_index);
+                                    send!(responses_sse_line(&json!({
+                                        "type": "response.function_call_arguments.delta",
+                                        "response_id": &response_id,
+                                        "item_id": &entry.id,
+                                        "output_index": delta_index,
+                                        "delta": tc_args_delta
+                                    })));
+                                }
+                            }
+                        }
+
+                        if let Some(content) = chunk_obj
+                            .get("choices")
+                            .and_then(|c| c.as_array())
+                            .and_then(|a| a.first())
+                            .and_then(|c| c.get("delta"))
+                            .and_then(|d| d.get("content"))
+                            .and_then(|c| c.as_str())
+                        {
+                            if !content.is_empty() {
+                                if full_content.is_empty() {
+                                    send!(responses_sse_line(&responses_output_item_added_event(
+                                        &response_id,
+                                        0,
+                                        json!({
+                                            "type": "message",
+                                            "role": "assistant",
+                                            "id": &item_id,
+                                            "status": "in_progress",
+                                            "content": []
+                                        }),
+                                    )));
+                                }
+                                full_content.push_str(content);
+                                send!(responses_sse_line(&responses_output_text_delta_event(
+                                    &response_id,
+                                    &item_id,
+                                    0,
+                                    0,
+                                    content,
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        send!(responses_sse_done());
+    });
+
+    let stream = futures::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    });
+
+    axum::http::Response::builder()
+        .status(axum::http::StatusCode::OK)
+        .header(axum::http::header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
+        .header(axum::http::header::CACHE_CONTROL, "no-cache")
+        .header(axum::http::header::CONNECTION, "close")
+        .body(Body::from_stream(stream))
+        .map_err(|e| crate::error::AppError::Internal(format!("Failed to build Responses stream response: {e}")))
+}
 
 /// 未知字段穿透开关。
 ///

@@ -66,3 +66,7 @@ design/
 # Temp / tool dirs
 tmp/
 .claude/
+
+# Other agents' build artifacts
+src-tauri/target-codex*/
+

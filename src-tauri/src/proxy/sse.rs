@@ -3,12 +3,21 @@
 //! 把多处散落的 SSE 处理基础代码收敛到一处：
 //! - UTF-8 跨 chunk 切分安全拼接（`append_utf8_safe`）
 //! - SSE `data:` 前缀解析（`sse_data_payload`）
+//! - 流式缓冲区统一上限（`MAX_STREAM_BUFFER_BYTES`）
 //!
 //! 在阶段 1 之前，这些逻辑在 4 处各写一份（其中 3 处用 `from_utf8_lossy`
 //! 导致多字节字符被切分时变成 `�`）。本模块把它们收敛到一处，所有入口
 //! 和转发层共用，消除 P3（UTF-8 切字）和重复代码。
 //!
 //! 参考公理：我们是中转和翻译器，字节流在传输过程中不应被污染。
+
+/// 统一的流式缓冲区上限（10MB）。
+pub const MAX_STREAM_BUFFER_BYTES: usize = 10 * 1024 * 1024;
+
+/// 判断当前缓冲状态是否超过统一上限。
+pub fn stream_buffer_exceeded(buffer: &str, remainder: &[u8], streamed_bytes: usize) -> bool {
+    buffer.len() + remainder.len() + streamed_bytes > MAX_STREAM_BUFFER_BYTES
+}
 
 /// 把 `bytes` 追加到 `buffer`（UTF-8 字符串），保证多字节字符不被切坏。
 ///

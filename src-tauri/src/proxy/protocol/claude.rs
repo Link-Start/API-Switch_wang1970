@@ -1,3 +1,6 @@
+use axum::body::Body;
+use bytes::Bytes;
+use futures::StreamExt;
 use super::{join_url, ProtocolAdapter};
 /// Anthropic (Claude) protocol adapter.
 ///
@@ -7,12 +10,14 @@ use super::{join_url, ProtocolAdapter};
 /// - Request/response body translation
 /// - SSE streaming format conversion (Anthropic events → OpenAI chunks)
 use serde_json::{json, Value};
+use std::time::Duration;
 
 /// 穿透开关：true = 未知字段保留穿透，false = 只保留已知白名单字段
 ///
 /// 默认 true，贯彻「中转翻译器不丢信息」的公理。
 /// 如果发现某个上游/客户端对未知字段返回 400，可临时改为 false 发布紧急版本。
 const ENABLE_UNKNOWN_FIELD_PASSTHROUGH: bool = true;
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub struct ClaudeAdapter;
 
@@ -1593,6 +1598,170 @@ impl ClaudeSSETransformer {
 // ═══════════════════════════════════════════════════════════════════
 //  Private helpers for downstream conversion
 // ═══════════════════════════════════════════════════════════════════
+
+/// 把 OpenAI SSE 流转换成 Claude SSE 流。
+///
+/// 这属于 Claude 协议机的下游流式行为，不应留在 handler 中维护。
+pub fn transform_openai_sse_to_claude_stream(
+    response: axum::response::Response,
+    requested_model: String,
+) -> Result<axum::response::Response, crate::error::AppError> {
+    let upstream_stream = response.into_body().into_data_stream();
+
+    let message_id = format!("msg_{}", chrono::Utc::now().timestamp());
+    let transformer = ClaudeSSETransformer::new(message_id, requested_model);
+    let sse_buffer = String::new();
+    let sse_utf8_remainder: Vec<u8> = Vec::new();
+
+    let transformed_stream = futures::stream::unfold(
+        (
+            upstream_stream,
+            transformer,
+            sse_buffer,
+            sse_utf8_remainder,
+            0usize,
+            Box::pin(tokio::time::sleep(STREAM_IDLE_TIMEOUT)),
+        ),
+        |(
+            mut stream,
+            mut transformer,
+            mut sse_buffer,
+            mut sse_utf8_remainder,
+            mut streamed_bytes,
+            mut idle_timeout,
+        )| async move {
+            loop {
+                if crate::proxy::sse::stream_buffer_exceeded(
+                    &sse_buffer,
+                    &sse_utf8_remainder,
+                    streamed_bytes,
+                ) {
+                    return Some((
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "stream buffer exceeds 10MB limit",
+                        )),
+                        (
+                            stream,
+                            transformer,
+                            sse_buffer,
+                            sse_utf8_remainder,
+                            streamed_bytes,
+                            idle_timeout,
+                        ),
+                    ));
+                }
+
+                tokio::select! {
+                    _ = &mut idle_timeout => {
+                        return Some((
+                            Err(std::io::Error::new(
+                                std::io::ErrorKind::TimedOut,
+                                "stream idle timeout",
+                            )),
+                            (
+                                stream,
+                                transformer,
+                                sse_buffer,
+                                sse_utf8_remainder,
+                                streamed_bytes,
+                                idle_timeout,
+                            ),
+                        ));
+                    }
+                    chunk_result = stream.next() => {
+                        match chunk_result {
+                            Some(Ok(chunk)) => {
+                                idle_timeout.as_mut().reset(tokio::time::Instant::now() + STREAM_IDLE_TIMEOUT);
+                                streamed_bytes += chunk.len();
+                                crate::proxy::sse::append_utf8_safe(
+                                    &mut sse_buffer,
+                                    &mut sse_utf8_remainder,
+                                    &chunk,
+                                );
+                            }
+                            Some(Err(e)) => {
+                                return Some((
+                                    Err(std::io::Error::new(
+                                        std::io::ErrorKind::Other,
+                                        format!("Stream read error: {e}"),
+                                    )),
+                                    (
+                                        stream,
+                                        transformer,
+                                        sse_buffer,
+                                        sse_utf8_remainder,
+                                        streamed_bytes,
+                                        idle_timeout,
+                                    ),
+                                ));
+                            }
+                            None => {
+                                return None;
+                            }
+                        }
+                    }
+                }
+
+                if let Some(line_end) = sse_buffer.find('\n') {
+                    let mut line = sse_buffer.drain(..=line_end).collect::<String>();
+                    if line.ends_with('\n') {
+                        line.pop();
+                    }
+                    if line.ends_with('\r') {
+                        line.pop();
+                    }
+
+                    if let Some(payload) = line.strip_prefix("data: ") {
+                        if payload == "[DONE]" {
+                            let output = Bytes::from("data: [DONE]\n\n");
+                            return Some((
+                                Ok::<_, std::io::Error>(output),
+                                (
+                                    stream,
+                                    transformer,
+                                    sse_buffer,
+                                    sse_utf8_remainder,
+                                    streamed_bytes,
+                                    idle_timeout,
+                                ),
+                            ));
+                        }
+
+                        let events = transformer.transform_chunk(payload);
+                        if !events.is_empty() {
+                            let mut output = Vec::new();
+                            for event in &events {
+                                output.extend_from_slice(format!("data: {event}\n\n").as_bytes());
+                            }
+                            return Some((
+                                Ok(Bytes::from(output)),
+                                (
+                                    stream,
+                                    transformer,
+                                    sse_buffer,
+                                    sse_utf8_remainder,
+                                    streamed_bytes,
+                                    idle_timeout,
+                                ),
+                            ));
+                        }
+                    }
+                    continue;
+                }
+            }
+        },
+    );
+
+    axum::http::Response::builder()
+        .status(axum::http::StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .header("cache-control", "no-cache")
+        .header("connection", "keep-alive")
+        .header("x-accel-buffering", "no")
+        .body(Body::from_stream(transformed_stream))
+        .map_err(|e| crate::error::AppError::Internal(format!("Failed to build Claude SSE response: {e}")))
+}
 
 /// Extract text from Claude content (string or array of text blocks).
 fn extract_text_from_content(content: &Value) -> String {

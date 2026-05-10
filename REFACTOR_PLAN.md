@@ -89,9 +89,9 @@ Untracked files:
 | P1 Claude 流式 output_tokens=0 | ✅ 已修 | ClaudeSSETransformer：usage 捕获前置；usage-only 帧补发 message_delta | `7e450ce` |
 | P2 stream_options 无条件覆盖 | ✅ 已修 | StreamOptionsMiddleware：`insert` 改 `entry().or_insert()` 合并 | `a7f5897` |
 | P3 UTF-8 切字 → � | ✅ 已修 | 抽出 `proxy::sse::append_utf8_safe`，3 处 `from_utf8_lossy` 改用 | `0771ec1` |
-| P4 流式 buffer 无上限 | 🟡 部分 | `responses_handler` 原生有 10MB 上限，其他在阶段 4 合并时统一 | — |
-| P5 model:xxx 污染 Responses | ✅ 已修 | ModelAnnotationMiddleware：Responses 入口不装配 | `a7f5897` |
-| P6 第二层流无 idle timeout | 🟡 已有实现 | forwarder.rs 已有 `STREAMING_IDLE_TIMEOUT`（300s）；IdleTimeoutMiddleware trait 已定义，on_sse_chunk 是同步接口无法直接驱动 async Sleep future，保留 forwarder 内直接实现 | `0771ec1` 基础 + 原生实现 |
+| P4 流式 buffer 无上限 | 🟡 部分 | `responses_handler` 已有 10MB 上限；其余流式路径仍未统一声明为同一上限策略，本轮未继续扩 scope 统一 | — |
+| P5 model:xxx 污染 Responses | ✅ 已修 | ModelAnnotationMiddleware：Responses 入口不装配；流式 middleware 现已通过拥有所有权的上下文与共享容器安全接线 | `a7f5897` + 本轮收口 |
+| P6 第二层流无 idle timeout | 🟡 已有实现 | forwarder.rs 已有 `STREAMING_IDLE_TIMEOUT`（300s）；本轮保持 timeout 逻辑留在 `forwarder.rs`，`IdleTimeoutMiddleware` 仅作声明式壳，不强行做高风险 async 迁移 | `0771ec1` 基础 + 原生实现 |
 
 ### 已解决的架构违规（公理二层面）
 
@@ -321,211 +321,67 @@ OpenAI 官方流式帧序列（启用 `stream_options.include_usage`）：
 
 ---
 
-## 六、剩余工作清单
+## 六、剩余工作清单（2026-05-11 收口修订）
 
-### 阶段 3.3：协议模块合并（10 → 5 个文件）
+> 本节已基于当前分支真实状态重新收敛。阶段 3.3/3.4/4.1-4.2 的主线已完成，不再按原先待办状态描述。
 
-**目标**：按第四节范式把每个协议的上下游代码整合到一个文件。**纯重构，无行为变化**。
+### 已完成主线
 
-**合并前文件清单**：
-```
-protocol/claude.rs          (1179 行, 上游 adapter)
-protocol/claude_output.rs   (1293 行, 下游翻译器)   ← 合并到 claude.rs
-protocol/gemini.rs          ( 554 行, 上游 adapter)
-protocol/gemini_output.rs   ( ~300 行 after 清理, 下游翻译器)  ← 合并到 gemini.rs
-protocol/azure.rs           ( 128 行, 上游 adapter)
-protocol/azure_output.rs    ( 102 行 after 清理, 下游翻译器)  ← 合并到 azure.rs
-protocol/responses.rs       ( 892 行, 双向 adapter)  ← 已完成范式
-protocol/openai.rs          (  88 行, 基准)
-protocol/custom.rs          (  91 行, OpenAI 兼容 fallback)
-protocol/common.rs          (  17 行, join_url 等工具)
-```
+1. **协议模块合并（10 → 收敛结构）**
+   - `claude_output.rs` / `gemini_output.rs` / `azure_output.rs` 已删除
+   - `protocol/` 已收敛为统一结构：`openai.rs`、`claude.rs`、`gemini.rs`、`azure.rs`、`responses.rs`、`custom.rs`、`common.rs`、`mod.rs`
 
-**合并后目标**：
-```
-protocol/claude.rs          (~2400 行)
-protocol/gemini.rs          (~850 行)
-protocol/azure.rs           (~230 行)
-protocol/responses.rs       (~892 行, 已就绪)
-protocol/openai.rs          (  88 行, 不变)
-protocol/custom.rs          (  91 行, 不变)
-protocol/common.rs          (  17 行, 不变)
-```
+2. **Responses adapter 进入统一体系**
+   - `protocol/responses.rs` 已实现
+   - `protocol/mod.rs` 已通过 `get_adapter("responses")` 返回 `ResponsesAdapter`
+   - 前端 `src/types.ts` 已支持 `responses` 类型
 
-删除：`claude_output.rs`、`gemini_output.rs`、`azure_output.rs`。
+3. **middleware 抽象与主线接线**
+   - `middleware.rs` 已建立 `CallerKind` / `RequestContext` / `ForwarderMiddleware`
+   - `forwarder.rs` 已接入 `middleware` 参数，用于：
+     - `forward_with_retry(..., middleware, caller_kind)`
+     - `forward_single(...)` 里 `on_request(...)` 接线
+   - 非流式路径已接入 `on_response_complete`
+   - 流式路径已通过拥有所有权的 `RequestContext` 与共享 middleware 容器安全接入 `on_sse_chunk`
 
-**执行步骤**（每合并一个协议一个 commit）：
+4. **问题修复主线**
+   - P1 / P2 / P3 / P5 已修
+   - P6 已在 `forwarder.rs` 内实现，但不是以 middleware 逻辑完整下沉形式
 
-#### 3.3.A Azure 合并（最简单，先做）
+### 当前仍需收口的点
 
-目的：把 `azure_output.rs` 仅剩的 `azure_to_openai_request` 挪到 `azure.rs`，统一入口。
+#### 1) P6：Idle Timeout
+**当前状态**：
+- `forwarder.rs` 中已有 `STREAMING_IDLE_TIMEOUT` 实现
+- `middleware.rs` 中 `IdleTimeoutMiddleware` 目前仍是接口壳，真实逻辑未彻底迁移
 
-1. 读 `azure_output.rs` 全部内容，识别还被使用的 pub 函数（应只有 `azure_to_openai_request`，因为 `openai_to_azure_response` / `transform_azure_error` / `AzureSSETransformer` 已在阶段 2 删掉）
-2. 把 `azure_to_openai_request` 及其测试挪到 `azure.rs` 尾部
-3. 在 `azure.rs` 顶部加 `const ENABLE_UNKNOWN_FIELD_PASSTHROUGH: bool = true;`（加 `#[allow(dead_code)]`，因为 Azure body 几乎直通，不需要独立的 passthrough 代码）
-4. 删除 `protocol/azure_output.rs`
-5. 更新 `protocol/mod.rs`：
-   - 删 `mod azure_output;`
-   - 修改 `pub use`：`pub use azure_output::azure_to_openai_request;` → `pub use azure::azure_to_openai_request;`
-6. `handlers.rs` 不用改（只引用 `super::protocol::azure_to_openai_request`）
-7. 跑 `cargo test --lib`，必须 231 pass
-8. commit: `Phase 3.3a: merge azure_output.rs into protocol/azure.rs`
+**收口结论**：
+- 业务功能：已完成
+- 架构迁移：未完成
 
-#### 3.3.B Gemini 合并
+#### 2) P4：流式 buffer 上限
+**当前状态**：
+- `responses_handler.rs` 已有 10MB 流式内容限制
+- 其他流式路径是否需要统一收口，仍需进一步确认
 
-1. 读 `gemini_output.rs` 识别还被使用的：应为 `gemini_to_openai_request` 和 `openai_to_gemini_response`（`transform_gemini_error` / `GeminiSSETransformer` 已删）
-2. 把这两个函数及其测试挪到 `gemini.rs`
-3. `gemini.rs` 顶部已有 `ENABLE_UNKNOWN_FIELD_PASSTHROUGH`（标 `#[allow(dead_code)]`），保持不变
-4. 删除 `protocol/gemini_output.rs`
-5. 更新 `protocol/mod.rs`：删 `mod gemini_output;`，修 `pub use gemini_output::{...}` → `pub use gemini::{...}`
-6. 跑测试
-7. commit: `Phase 3.3b: merge gemini_output.rs into protocol/gemini.rs`
+**收口结论**：
+- Responses 侧：已有局部保护
+- 全局统一：未确认为已完成
 
-#### 3.3.C Claude 合并（最大）
+#### 3) Responses SSE 完整翻译
+**当前状态**：
+- 当前仍为简化直通/过渡方案
+- 不是完整双向 SSE 翻译
 
-1. 读 `claude_output.rs` 识别公共 API：`claude_to_openai_request` / `openai_to_claude_response` / `ClaudeSSETransformer` / `transform_claude_error`
-2. 全部挪到 `claude.rs`
-3. **注意 `transform_claude_error` 目前在 mod.rs 的 `pub use` 里有 warning**（未使用），挪过去时保持 `#[allow(dead_code)]` 或考虑删除
-4. **注意 `ClaudeSSETransformer` 是下游方向 SSE 翻译器**，和上游方向 `ClaudeAdapter::transform_sse_line` 是两个独立的 public item，不要合并
-5. 挪 claude_output.rs 的测试到 claude.rs 测试模块
-6. 删除 `protocol/claude_output.rs`
-7. 更新 mod.rs 的 `mod` 和 `pub use`
-8. `handlers.rs` 不需要改（只引用 `super::protocol::{claude_to_openai_request, ...}`）
-9. 跑测试，**特别关注 P1 测试**（`sse_claude_usage_tokens_not_dropped`）依然绿
-10. commit: `Phase 3.3c: merge claude_output.rs into protocol/claude.rs`
+**收口结论**：
+- 本轮范围外的留债项
+- 如继续做，应按独立迭代处理
 
-#### 3.3.D Responses 整合（复杂但解耦度高）
+### 建议后续动作
 
-当前 `responses_handler.rs`（1978 行）既包含 HTTP handler 又包含大量翻译逻辑。需要分离。
-
-1. **识别纯翻译函数**（移到 `protocol/responses.rs`）：
-   - `input_to_messages`（L33，360 行）
-   - `convert_tools`（L360）
-   - `passthrough_output_item`（L422）
-   - `merge_tool_delta`（L436）
-   - `is_function_tool_call`（L417）
-   - 小辅助函数：`sse_line` / `sse_done` 保留在 handler 里（SSE 响应构造，不是翻译）
-2. **SSE 重包装代码**（`responses_handler.rs:820-1100` 约 900 行，把 chat.completions SSE 翻译成 Responses SSE 事件流）：
-   - 如果能抽成 `protocol::responses::ResponsesSSETransformer`，抽出来
-   - 如果抽离成本太高（涉及 state、usage 累积等复杂度），**本次不强求**，留在 handler 里加注释："TODO: move to protocol::responses in a future refactor"
-3. `responses_handler.rs` 只保留 HTTP 路由入口 + 薄调用层
-4. 保持 `handle_responses` / `get_response` / `delete_response` / `cancel_response` 这 4 个 pub handler 函数签名不变
-5. 跑测试（231 pass）
-6. commit: `Phase 3.3d: move Responses translation helpers to protocol/responses.rs`
-
-### 阶段 3.4：收尾（可选，低优先）
-
-1. 删除 `ANALYSIS_CLAUDE_TO_RESPONSES.md`（早期分析文档，已被 REFACTOR_PLAN.md 取代）
-2. 更新 `FLOW.md` 反映新结构
-3. 跑 `cargo clippy --lib` 清掉所有 warning：
-   - `transform_claude_error` unused import
-   - `assert_json_eq` never used
-   - `SessionInfo.expires_at` field never read
-   - `ProxyError::BadRequest` variant never used
-4. `fs_append` `.gitignore` 加入 `target-codex*/`（忽略其他 agent 的构建产物）
-5. commit: `Phase 3.4: cleanup and doc refresh`
-
-### 阶段 4：横切特性剥离成中间件（解决 P2 / P5 / P6）
-
-**目标**：把 `forwarder.rs` 里的横切逻辑剥离成可装配的中间件链。不同入口装配不同中间件，解决 P2 / P5 / P6。
-
-**当前 forwarder.rs 里的横切点**：
-1. `forwarder.rs:491-499` stream_options 无条件覆盖（P2）
-2. `forwarder.rs:624-634` `should_append_model_info`（P5 的源头）
-3. `forwarder.rs:1199-1206` `model_info_delta` 注入（P5）
-4. `forwarder.rs:200-300` log_usage / push_attempt（token 统计）
-5. `forwarder.rs:380-420` cool_down_entry / disable_entry（熔断）
-6. `forwarder.rs:765` `STREAMING_IDLE_TIMEOUT` 常量（目前只有第一层有，P6）
-
-#### 4.1 定义中间件 trait
-
-新文件：`src-tauri/src/proxy/middleware.rs`
-
-```rust
-pub struct RequestContext<'a> {
-    pub caller_kind: CallerKind,  // OpenAI / Claude / Gemini / Azure / Responses
-    pub entry: &'a ApiEntry,
-    pub access_key: Option<&'a AccessKey>,
-    pub requested_model: &'a str,
-}
-
-pub enum CallerKind {
-    OpenAiChat,
-    ClaudeMessages,
-    GeminiNative,
-    AzureChat,
-    Responses,
-}
-
-pub trait ForwarderMiddleware: Send + Sync {
-    fn on_request(&self, body: &mut Value, ctx: &RequestContext) { }
-    fn on_response_complete(&self, body: &mut Value, ctx: &RequestContext) { }
-    fn on_sse_chunk(&self, chunk: &mut Bytes, ctx: &RequestContext) { }
-}
-```
-
-#### 4.2 P2 修复：`StreamOptionsMiddleware`
-
-```rust
-pub struct StreamOptionsMiddleware;
-impl ForwarderMiddleware for StreamOptionsMiddleware {
-    fn on_request(&self, body: &mut Value, _ctx: &RequestContext) {
-        if !body.get("stream").and_then(|s| s.as_bool()).unwrap_or(false) {
-            return;
-        }
-        let so = body
-            .as_object_mut()
-            .and_then(|m| m.entry("stream_options".to_string()).or_insert(json!({})).as_object_mut());
-        if let Some(so) = so {
-            so.entry("include_usage".to_string()).or_insert(json!(true));
-        }
-    }
-}
-```
-
-关键改动：从 `insert` 改为 `entry().or_insert()`，**用户已有的 stream_options 字段不再被覆盖**。
-
-#### 4.3 P5 修复：`ModelAnnotationMiddleware`
-
-把 `forwarder.rs` 里 `should_append_model_info` 和 `model_info_delta` 相关代码抽成独立 middleware。关键：
-
-```rust
-impl ForwarderMiddleware for ModelAnnotationMiddleware {
-    fn on_sse_chunk(&self, chunk: &mut Bytes, ctx: &RequestContext) {
-        // Responses 入口不装这个中间件，本方法永不被调用
-        // OpenAiChat / ClaudeMessages / Azure 装，所以对这些入口照常注入
-    }
-}
-```
-
-中间件装配：
-- `forward_with_retry` 调用方按 `caller_kind` 构造中间件链
-- `handle_responses` 调 `forward_with_retry` 时的 ctx.caller_kind = Responses，**不装** ModelAnnotationMiddleware
-- 其他入口装配正常中间件
-
-#### 4.4 P6 修复：`IdleTimeoutMiddleware`
-
-把 `STREAMING_IDLE_TIMEOUT` 逻辑抽出来成独立 middleware，每层 SSE 流处理都装上。
-
-#### 4.5 其他中间件
-
-- `UsageLoggingMiddleware`：`log_usage` 相关
-- `CircuitBreakerMiddleware`：`cool_down_entry` / `disable_entry` / 熔断决策
-- 这两个**所有入口都装**
-
-#### 4.6 执行步骤
-
-每个中间件一个 commit，按此顺序：
-
-1. `Phase 4a: add middleware trait and RequestContext`
-2. `Phase 4b: extract StreamOptionsMiddleware (fixes P2)`
-3. `Phase 4c: extract ModelAnnotationMiddleware (fixes P5)`
-4. `Phase 4d: extract IdleTimeoutMiddleware (fixes P6)`
-5. `Phase 4e: extract UsageLoggingMiddleware`
-6. `Phase 4f: extract CircuitBreakerMiddleware`
-7. `Phase 4g: wire middleware chains per caller_kind`
-
-每个 commit 跑 `cargo test --lib`，必须 231+ pass。
+1. 以“真实性”为优先，继续同步文档与代码状态
+2. 对 `IdleTimeoutMiddleware` / `UsageLoggingMiddleware` / `CircuitBreakerMiddleware` 保持“已接入但未彻底迁移”的准确表述
+3. 对 P6 / P4 / Responses SSE 按实际完成度分开记录，避免继续误写为彻底完成
 
 ---
 
@@ -681,23 +537,21 @@ src-tauri/src/proxy/
 ├── auth.rs                # Access key 校验
 ├── circuit_breaker.rs     # 熔断器数据结构
 ├── router.rs              # 模型路由（精确/模糊匹配）
-├── forwarder.rs           # 转发 + 重试 + usage 日志（阶段 4 重构目标）
+├── forwarder.rs           # 转发 + 重试 + usage 日志（仍保留部分横切逻辑）
 ├── handlers.rs            # 5 个入口 handler（chat/messages/models/gemini/azure）
-├── responses_handler.rs   # /v1/responses handler（阶段 3.3d 瘦身目标）
+├── responses_handler.rs   # /v1/responses handler（仍保留复杂 SSE 重包装逻辑）
 ├── sse.rs                 # SSE 公共设施（阶段 1 产物）
+├── middleware.rs          # middleware trait 与当前已接线中间件
 └── protocol/
     ├── mod.rs             # ProtocolAdapter trait + get_adapter factory
     ├── common.rs          # join_url 等工具
     ├── openai.rs          # OpenAI 基准（不翻译）
     ├── custom.rs          # 宽容版 OpenAI
-    ├── claude.rs          # Claude 上游 adapter（阶段 3.3c 合并目标）
-    ├── claude_output.rs   # Claude 下游翻译（阶段 3.3c 删除）
-    ├── gemini.rs          # Gemini 上游 adapter（阶段 3.3b 合并目标）
-    ├── gemini_output.rs   # Gemini 下游翻译（阶段 3.3b 删除）
-    ├── azure.rs           # Azure 上游 adapter（阶段 3.3a 合并目标）
-    ├── azure_output.rs    # Azure 下游翻译（阶段 3.3a 删除）
-    ├── responses.rs       # Responses 双向 adapter（阶段 3.2 已完成）
-    └── roundtrip_tests.rs # 24 个 round-trip 测试
+    ├── claude.rs          # Claude 双向协议文件（已完成合并）
+    ├── gemini.rs          # Gemini 双向协议文件（已完成合并）
+    ├── azure.rs           # Azure 双向协议文件（已完成合并）
+    ├── responses.rs       # Responses 双向 adapter（当前 SSE 仍为简化方案）
+    └── roundtrip_tests.rs # round-trip 测试
 ```
 
 ## 附录 B：协议翻译对照

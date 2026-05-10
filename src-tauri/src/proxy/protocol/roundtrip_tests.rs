@@ -624,7 +624,6 @@ mod azure_roundtrip {
 
 mod openai_roundtrip {
     use super::*;
-    use crate::proxy::protocol::ProtocolAdapter;
 
     /// OpenAI adapter 的 transform_request 只应修改 model 字段，其他保持原样
     #[test]

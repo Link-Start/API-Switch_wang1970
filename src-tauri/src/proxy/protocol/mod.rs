@@ -18,18 +18,13 @@ mod openai;
 #[cfg(test)]
 mod roundtrip_tests;
 
-pub use azure_output::{
-    azure_to_openai_request, openai_to_azure_response, transform_azure_error, AzureSSETransformer,
-};
+pub use azure_output::azure_to_openai_request;
 pub use claude_output::{
     claude_to_openai_request, openai_to_claude_response, transform_claude_error,
     ClaudeSSETransformer,
 };
 pub use common::join_url;
-pub use gemini_output::{
-    gemini_to_openai_request, openai_to_gemini_response, transform_gemini_error,
-    GeminiSSETransformer,
-};
+pub use gemini_output::{gemini_to_openai_request, openai_to_gemini_response};
 
 use serde_json::Value;
 

@@ -33,7 +33,7 @@
 
 ---
 
-## 三、当前状态（2026-05-10，14 个 commit 后）
+## 三、当前状态（2026-05-10，17 个 commit 后）
 
 ### 分支
 
@@ -57,6 +57,9 @@
 | 12 | `d455211` | chore | 清理 Phase 2 遗留的 stale imports |
 | 13 | `6577844` | 3.2 | Responses 前端：`ApiType` 加 `"responses"` + UI 选项 |
 | 14 | `3a3caf6` | 3.2 | Responses 上游 adapter Rust 实现 + 启用 4 占位测试 |
+| 15 | `75c8ed4` | docs | REFACTOR_PLAN.md 更新至 Phase 3.2 完成 |
+| 16 | `ec81f69` | 3.3+3.4+4.1 | 协议文件合并（10→7）+ middleware trait + Responses 翻译搬迁 + 收尾清理 |
+| 17 | `a7f5897` | 4.2 | forwarder 接线：middleware 接入 forward_with_retry，修复 P2/P5 |
 
 ### 测试状态
 
@@ -65,31 +68,30 @@ cargo test --lib
 → 231 passed / 0 failed / 0 ignored
 ```
 
-**关键里程碑**：所有占位测试全绿，P1 已修，核心字段穿透完备。
+**关键里程碑**：协议合并完成，middleware trait 定义并接入 forwarder，P1/P2/P3/P5 已修。
 
 ### Working tree 状态
 
 ```
 Untracked files:
-  ANALYSIS_CLAUDE_TO_RESPONSES.md    # 早期分析文档，可留可删
   FLOW.md                            # 架构流程图，保留
   docs/                              # 用户文档目录（与重构无关）
   src-tauri/target-codex-testrlicDz/ # 其他 agent 的构建产物，忽略
   src-tauri/target-codexu64YjE/      # 其他 agent 的构建产物，忽略
 ```
 
-**没有未提交代码改动**。阶段 3.2 彻底收口。
+**没有未提交代码改动**。
 
 ### 6 个原问题状态
 
 | 问题 | 状态 | 修复方式 | commit |
 |---|---|---|---|
 | P1 Claude 流式 output_tokens=0 | ✅ 已修 | ClaudeSSETransformer：usage 捕获前置；usage-only 帧补发 message_delta | `7e450ce` |
-| P2 stream_options 无条件覆盖 | ⏳ 待修 | 阶段 4：`insert` 改 `entry().or_insert_with()` 合并 | — |
+| P2 stream_options 无条件覆盖 | ✅ 已修 | StreamOptionsMiddleware：`insert` 改 `entry().or_insert()` 合并 | `a7f5897` |
 | P3 UTF-8 切字 → � | ✅ 已修 | 抽出 `proxy::sse::append_utf8_safe`，3 处 `from_utf8_lossy` 改用 | `0771ec1` |
 | P4 流式 buffer 无上限 | 🟡 部分 | `responses_handler` 原生有 10MB 上限，其他在阶段 4 合并时统一 | — |
-| P5 model:xxx 污染 Responses | ⏳ 待修 | 阶段 4：`ModelAnnotationMiddleware` 中间件化，Responses 入口不装配 | — |
-| P6 第二层流无 idle timeout | ⏳ 待修 | 阶段 4：`IdleTimeoutMiddleware` | — |
+| P5 model:xxx 污染 Responses | ✅ 已修 | ModelAnnotationMiddleware：Responses 入口不装配 | `a7f5897` |
+| P6 第二层流无 idle timeout | ⏳ 待修 | IdleTimeoutMiddleware 已定义，on_sse_chunk 接入待完成 | — |
 
 ### 已解决的架构违规（公理二层面）
 
@@ -99,10 +101,12 @@ Untracked files:
 - ✅ Gemini 响应方向从 whitelist 构造改为 clone+edit-in-place（`3980efa`）
 - ✅ Responses 上游 adapter 双向带 `ENABLE_UNKNOWN_FIELD_PASSTHROUGH` 常量（`3a3caf6`）
 
-### 尚未收口的架构一致性项
+### 已收口的架构一致性项
 
-- ⏳ Azure 没加 `ENABLE_UNKNOWN_FIELD_PASSTHROUGH` 常量（因为 Azure = OpenAI，翻译是直通的，没字段需要穿透；阶段 3.3 合并时加个常量作为一致性标记）
-- ⏳ 协议文件合并（10→5）—— 阶段 3.3 的目标，不是 bug 只是整洁度问题
+- ✅ Azure 已加 `ENABLE_UNKNOWN_FIELD_PASSTHROUGH` 常量（`ec81f69`）
+- ✅ 协议文件合并（10→7）（`ec81f69`）
+- ✅ Responses 翻译函数搬迁到 protocol/responses.rs（`ec81f69`）
+- ✅ middleware trait 定义并接入 forwarder（`a7f5897`）
 - ⏳ Responses SSE 流式翻译（目前 adapter 的 `needs_sse_transform=false`，SSE 直通；这是有意的简化，后续版本补齐 SSE 双向翻译）
 
 ---

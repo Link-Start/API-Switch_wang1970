@@ -314,6 +314,32 @@ AUTO 路由 → 只选择 enabled=true 且未冷却、未熔断的模型
 
 ## 9. 待开发 / 改进项
 
+### P2 — Claude 协议边角一致性优化（不影响当前使用）
+
+> 结论：Claude response 主协议（非流式 message、流式 SSE 主事件序列、tool_use、usage、stop_reason）当前已可正常使用，现有实现不会阻塞当前代理主链路与客户端使用。以下事项属于“协议边角严格一致性优化”，不作为当前版本阻塞项，后续按 P2/P3 继续处理。
+
+- [ ] **Claude 非流式响应边角字段严格对齐**:
+    - **现状**: `src-tauri/src/proxy/protocol/claude.rs::openai_to_claude_response()` 已正确映射 `id`、`type`、`role`、`model`、`content`、`tool_use`、`stop_reason`、`usage` 等主字段。
+    - **说明**: 主协议字段已满足当前使用；少量边角字段是否以 Claude 官方最原生方式保留，仍可后续继续纯化。
+    - **后续关注**:
+        1. `stop_sequence` 在输出面上的严格保留策略。
+        2. 某些未来扩展字段在 Claude 输出结构中的更细粒度归位。
+        3. 在不破坏当前 passthrough 公理的前提下，减少“兼容承载”字段与“官方标准字段”之间的语义混放。
+
+- [ ] **Claude thinking / provider_specific 输出面纯化**:
+    - **现状**: 当前实现对 Claude 主协议可用性无影响；thinking 相关信息已具备兼容承载路径。
+    - **说明**: 该项属于“更贴近官方原生表达”的优化，而不是当前功能缺陷。
+    - **后续关注**:
+        1. 评估 `thinking` 信息在 OpenAI ↔ Claude 双向转换中的最原生落位。
+        2. 明确哪些字段属于 Claude 官方语义，哪些仅为本代理内部兼容承载。
+
+- [ ] **Claude 流式 SSE 边角事件一致性补测**:
+    - **现状**: `ClaudeSSETransformer` 与 `transform_openai_sse_to_claude_stream()` 已覆盖主事件序列，Claude 相关测试当前通过。
+    - **说明**: 正常使用不受影响；该项关注极端事件组合与未来协议扩展，不阻塞当前版本。
+    - **后续关注**:
+        1. 补充多 tool_use 连续切换、空块、边界 usage-only frame、thinking/tool_use 交织等场景测试。
+        2. 以 Anthropic 官方流式示例为基线，补一轮逐事件对照测试。
+
 ### P0 — 桌面 UI → 页面 UI 收尾与 Tauri v2 完善
 
 > 结论：同一套 React 页面同时服务 Tauri 桌面端与 Web 管理端，在 Tauri v2 下是可行且成熟的方向；但必须把“页面业务能力”和“桌面壳能力”显式分层。Tauri 官方已提供 IPC、capabilities、CSP、窗口、托盘、菜单、单实例、窗口状态、更新等成熟机制；项目侧需要补齐 adapter 契约、错误模型、运行模式、权限矩阵、资源路由和发布兼容策略。

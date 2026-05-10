@@ -91,7 +91,7 @@ Untracked files:
 | P3 UTF-8 切字 → � | ✅ 已修 | 抽出 `proxy::sse::append_utf8_safe`，3 处 `from_utf8_lossy` 改用 | `0771ec1` |
 | P4 流式 buffer 无上限 | 🟡 部分 | `responses_handler` 原生有 10MB 上限，其他在阶段 4 合并时统一 | — |
 | P5 model:xxx 污染 Responses | ✅ 已修 | ModelAnnotationMiddleware：Responses 入口不装配 | `a7f5897` |
-| P6 第二层流无 idle timeout | ⏳ 待修 | IdleTimeoutMiddleware 已定义，on_sse_chunk 接入待完成 | — |
+| P6 第二层流无 idle timeout | 🟡 已有实现 | forwarder.rs 已有 `STREAMING_IDLE_TIMEOUT`（300s）；IdleTimeoutMiddleware trait 已定义，on_sse_chunk 是同步接口无法直接驱动 async Sleep future，保留 forwarder 内直接实现 | `0771ec1` 基础 + 原生实现 |
 
 ### 已解决的架构违规（公理二层面）
 

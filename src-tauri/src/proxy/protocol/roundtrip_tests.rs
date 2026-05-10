@@ -97,7 +97,10 @@ mod claude_roundtrip {
 
         // 验证中间格式：system 变成第一条 message
         assert_eq!(openai_intermediate["messages"][0]["role"], "system");
-        assert_eq!(openai_intermediate["messages"][0]["content"], "You are helpful.");
+        assert_eq!(
+            openai_intermediate["messages"][0]["content"],
+            "You are helpful."
+        );
 
         let adapter = ClaudeAdapter;
         let mut back_to_claude = openai_intermediate.clone();
@@ -142,7 +145,10 @@ mod claude_roundtrip {
 
         // 验证中间格式：tools 变成 function 形态
         assert_eq!(openai_intermediate["tools"][0]["type"], "function");
-        assert_eq!(openai_intermediate["tools"][0]["function"]["name"], "get_weather");
+        assert_eq!(
+            openai_intermediate["tools"][0]["function"]["name"],
+            "get_weather"
+        );
 
         let adapter = ClaudeAdapter;
         let mut back_to_claude = openai_intermediate.clone();
@@ -248,7 +254,9 @@ mod claude_roundtrip {
         assert_eq!(back_to_claude["type"], "message");
         assert_eq!(back_to_claude["role"], "assistant");
         // content 必须是 array 形式，包含 text block
-        let content = back_to_claude["content"].as_array().expect("content should be array");
+        let content = back_to_claude["content"]
+            .as_array()
+            .expect("content should be array");
         assert_eq!(content.len(), 1);
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[0]["text"], "Hello!");
@@ -279,8 +287,13 @@ mod claude_roundtrip {
         let back_to_claude = openai_to_claude_response(&openai_intermediate);
 
         assert_eq!(back_to_claude["stop_reason"], "tool_use");
-        let content = back_to_claude["content"].as_array().expect("content should be array");
-        let tool_use = content.iter().find(|b| b["type"] == "tool_use").expect("tool_use block");
+        let content = back_to_claude["content"]
+            .as_array()
+            .expect("content should be array");
+        let tool_use = content
+            .iter()
+            .find(|b| b["type"] == "tool_use")
+            .expect("tool_use block");
         assert_eq!(tool_use["id"], "toolu_1");
         assert_eq!(tool_use["name"], "get_weather");
         assert_eq!(tool_use["input"]["city"], "Tokyo");
@@ -355,9 +368,8 @@ mod claude_roundtrip {
         );
 
         // 3. finish_reason 帧（此刻 message_delta 会被 emit）
-        let finish_events = transformer.transform_chunk(
-            r#"{"id":"c1","choices":[{"delta":{},"finish_reason":"stop"}]}"#,
-        );
+        let finish_events = transformer
+            .transform_chunk(r#"{"id":"c1","choices":[{"delta":{},"finish_reason":"stop"}]}"#);
 
         // 4. usage-only 帧（OpenAI 规范允许 choices=[] 只带 usage）
         let usage_events = transformer.transform_chunk(
@@ -426,7 +438,6 @@ mod helpers {
     }
 }
 
-
 // ═══════════════════════════════════════════════════════════════════
 //  Gemini 协议 round-trip 测试
 //
@@ -437,9 +448,7 @@ mod helpers {
 
 mod gemini_roundtrip {
     use super::*;
-    use crate::proxy::protocol::{
-        gemini_to_openai_request, openai_to_gemini_response,
-    };
+    use crate::proxy::protocol::{gemini_to_openai_request, openai_to_gemini_response};
 
     /// 基础文本请求 round-trip
     #[test]
@@ -483,7 +492,10 @@ mod gemini_roundtrip {
         let gemini = openai_to_gemini_response(&openai);
 
         assert_eq!(gemini["candidates"][0]["content"]["role"], "model");
-        assert_eq!(gemini["candidates"][0]["content"]["parts"][0]["text"], "Hi there");
+        assert_eq!(
+            gemini["candidates"][0]["content"]["parts"][0]["text"],
+            "Hi there"
+        );
         assert_eq!(gemini["candidates"][0]["finishReason"], "STOP");
         assert_eq!(gemini["usageMetadata"]["promptTokenCount"], 10);
         assert_eq!(gemini["usageMetadata"]["candidatesTokenCount"], 5);
@@ -659,7 +671,6 @@ mod openai_roundtrip {
     }
 }
 
-
 // ═══════════════════════════════════════════════════════════════════
 //  Responses 协议 round-trip 测试
 //
@@ -682,7 +693,6 @@ mod responses_roundtrip {
     /// 实现后这条测试应该通过——通过 `get_adapter("responses")` 能拿到
     /// 一个真正做翻译的 adapter（而不是 fallback 到 OpenAI）。
     #[test]
-    #[ignore] // 阶段 3 实施后移除 #[ignore]
     fn adapter_registered_for_responses() {
         let adapter = crate::proxy::protocol::get_adapter("responses");
         // 阶段 3 后，ResponsesAdapter.build_chat_url 应生成 /v1/responses
@@ -696,7 +706,6 @@ mod responses_roundtrip {
     /// **阶段 3 占位**：上游 adapter 应能把 OpenAI chat.completions 请求
     /// 翻译成 Responses 请求。
     #[test]
-    #[ignore] // 阶段 3 实施后移除 #[ignore]
     fn request_openai_to_responses_upstream() {
         let adapter = crate::proxy::protocol::get_adapter("responses");
         let mut body = json!({
@@ -723,7 +732,6 @@ mod responses_roundtrip {
 
     /// **阶段 3 占位**：响应方向 Responses → OpenAI
     #[test]
-    #[ignore] // 阶段 3 实施后移除 #[ignore]
     fn response_responses_to_openai_upstream() {
         let adapter = crate::proxy::protocol::get_adapter("responses");
         let mut body = json!({
@@ -752,7 +760,6 @@ mod responses_roundtrip {
 
     /// **公理二占位**：Responses 上游方向的未知字段穿透
     #[test]
-    #[ignore] // 阶段 3 实施后移除 #[ignore]
     fn upstream_unknown_field_passthrough() {
         let adapter = crate::proxy::protocol::get_adapter("responses");
         let mut body = json!({

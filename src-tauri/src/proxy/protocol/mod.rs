@@ -14,6 +14,7 @@ mod custom;
 mod gemini;
 mod gemini_output;
 mod openai;
+mod responses;
 
 #[cfg(test)]
 mod roundtrip_tests;
@@ -89,6 +90,7 @@ pub fn get_adapter(api_type: &str) -> Box<dyn ProtocolAdapter + Send + Sync> {
         "gemini" => Box::new(gemini::GeminiAdapter),
         "azure" => Box::new(azure::AzureAdapter),
         "custom" => Box::new(custom::CustomAdapter),
+        "responses" => Box::new(responses::ResponsesAdapter),
         _ => Box::new(openai::OpenAiAdapter), // openai + anything else
     }
 }

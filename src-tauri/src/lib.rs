@@ -48,7 +48,11 @@ pub(crate) const EXPERIMENTAL_LAZY_TRAY_REFRESH: bool = false;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let (runtime_mode, mode_source) = runtime_mode::detect_runtime_mode();
-    log::info!("Runtime mode: {:?} (source: {:?})", runtime_mode, mode_source);
+    log::info!(
+        "Runtime mode: {:?} (source: {:?})",
+        runtime_mode,
+        mode_source
+    );
 
     let _app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -277,7 +281,15 @@ pub(crate) fn build_tray_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<taur
                 Some(ch) => format!("{} / {}", entry.display_name, ch),
                 None => entry.display_name.clone(),
             };
-            CheckMenuItem::with_id(app, &format!("model:{}", entry.id), &label, true, checked, None::<String>).unwrap()
+            CheckMenuItem::with_id(
+                app,
+                &format!("model:{}", entry.id),
+                &label,
+                true,
+                checked,
+                None::<String>,
+            )
+            .unwrap()
         })
         .collect();
 
@@ -326,7 +338,10 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
             if event_id.starts_with("model:") {
                 // Tray click only reprioritizes an existing AUTO-group entry.
                 // It does not change group routing or persist active_group.
-                let entry_id = event_id.strip_prefix("model:").unwrap_or(event_id).to_string();
+                let entry_id = event_id
+                    .strip_prefix("model:")
+                    .unwrap_or(event_id)
+                    .to_string();
                 log::info!("[tray] setting AUTO-group priority for entry={entry_id}");
 
                 {

@@ -18,10 +18,12 @@ pub fn build_admin_router(state: AdminState) -> Router {
         .route("/admin/logout", post(handlers::logout))
         .route("/admin/status", get(handlers::status))
         .route("/admin/audit-logs", get(handlers::audit_logs))
-.route(
-    "/admin/settings",
-    get(handlers::get_settings).put(handlers::update_settings).patch(handlers::patch_settings),
-)
+        .route(
+            "/admin/settings",
+            get(handlers::get_settings)
+                .put(handlers::update_settings)
+                .patch(handlers::patch_settings),
+        )
         // Channel API routes – all require auth
         .route(
             "/admin/channels",
@@ -111,11 +113,14 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/admin/dashboard/user-trend",
             get(usage_handlers::get_user_trend),
         )
-.route("/admin/proxy/status", get(proxy_handlers::get_status))
-.route("/admin/proxy/start", post(proxy_handlers::start))
-.route("/admin/proxy/stop", post(proxy_handlers::stop))
-.route("/admin/test-chat", post(chat_handlers::test_chat))
-.route("/admin/translation-relay", get(translation_handlers::get_translation_relay))
+        .route("/admin/proxy/status", get(proxy_handlers::get_status))
+        .route("/admin/proxy/start", post(proxy_handlers::start))
+        .route("/admin/proxy/stop", post(proxy_handlers::stop))
+        .route("/admin/test-chat", post(chat_handlers::test_chat))
+        .route(
+            "/admin/translation-relay",
+            get(translation_handlers::get_translation_relay),
+        )
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()
@@ -137,35 +142,10 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/logo/*path",
             get(crate::admin::static_files::admin_asset_root),
         )
-// Admin API routes (login, health, version)
-    .route("/admin/login", post(handlers::login))
-    .route("/admin/health", get(handlers::health))
-    .route("/admin/version", get(handlers::version))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        // Admin API routes (login, health, version)
+        .route("/admin/login", post(handlers::login))
+        .route("/admin/health", get(handlers::health))
+        .route("/admin/version", get(handlers::version))
         .merge(protected)
         .with_state(state)
         .route_layer(middleware::from_fn(apply_admin_cors))

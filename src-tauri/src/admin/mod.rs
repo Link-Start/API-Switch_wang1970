@@ -6,11 +6,11 @@ mod error;
 mod handlers;
 mod pool_handlers;
 mod proxy_handlers;
-mod token_handlers;
-mod translation_handlers;
 mod router;
 mod state;
 mod static_files;
+mod token_handlers;
+mod translation_handlers;
 mod usage_handlers;
 
 use crate::database::AppSettings;
@@ -27,11 +27,13 @@ pub enum AdminMode {
     Combined,
 }
 
-pub use error::{ERROR_CODE_EMPTY_MODEL_LIST,
-    ERROR_CODE_ENDPOINT_CORRECTION_FAILED, ERROR_CODE_ENDPOINT_UNREACHABLE,
-    ERROR_CODE_ENDPOINT_VALIDATION_FAILED, ERROR_CODE_FETCH_MODELS_FAILED,
-    ERROR_CODE_HTTP_CLIENT_ERROR, ERROR_CODE_INVALID_CREDENTIALS, ERROR_CODE_INVALID_URL,
-    ERROR_CODE_RATE_LIMITED, ERROR_CODE_TIMEOUT, ERROR_CODE_UNSUPPORTED_PROVIDER};
+pub use error::{
+    ERROR_CODE_EMPTY_MODEL_LIST, ERROR_CODE_ENDPOINT_CORRECTION_FAILED,
+    ERROR_CODE_ENDPOINT_UNREACHABLE, ERROR_CODE_ENDPOINT_VALIDATION_FAILED,
+    ERROR_CODE_FETCH_MODELS_FAILED, ERROR_CODE_HTTP_CLIENT_ERROR, ERROR_CODE_INVALID_CREDENTIALS,
+    ERROR_CODE_INVALID_URL, ERROR_CODE_RATE_LIMITED, ERROR_CODE_TIMEOUT,
+    ERROR_CODE_UNSUPPORTED_PROVIDER,
+};
 pub use handlers::RestartInfo;
 pub use router::build_admin_router;
 pub use state::AdminState;

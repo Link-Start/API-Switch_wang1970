@@ -3,12 +3,12 @@ use crate::admin::state::AdminState;
 use crate::database::{
     ChartDataPoint, DashboardStats, ModelRanking, UsageLog, UsageLogFilter, UserRanking,
 };
+use crate::services::log_service;
 use axum::{
     extract::{Query, State},
     Json,
 };
 use serde::Deserialize;
-use crate::services::log_service;
 
 // Query parameter structs
 #[derive(Deserialize, Default)]
@@ -49,11 +49,10 @@ fn query_to_usage_log_filter(params: &LogsQueryParams) -> UsageLogFilter {
 }
 
 // Helper to convert query params to DashboardFilterParams
-fn query_to_dashboard_filter(params: &DashboardQueryParams) -> Option<crate::commands::usage::DashboardFilterParams> {
-    if params.start_time.is_none() 
-        && params.end_time.is_none() 
-        && params.granularity.is_none() 
-    {
+fn query_to_dashboard_filter(
+    params: &DashboardQueryParams,
+) -> Option<crate::commands::usage::DashboardFilterParams> {
+    if params.start_time.is_none() && params.end_time.is_none() && params.granularity.is_none() {
         None
     } else {
         Some(crate::commands::usage::DashboardFilterParams {

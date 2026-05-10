@@ -1,12 +1,11 @@
 // Proxy administration handlers (admin side)
 // Provides status, start, and stop endpoints for the HTTP proxy.
 
+use crate::admin::{error::AdminError, state::AdminState};
+use crate::commands::config::refresh_settings_l1;
+use crate::proxy::ProxyStatus;
 use axum::{extract::State, Json};
 use serde::Serialize;
-use crate::admin::{error::AdminError, state::AdminState};
-use crate::proxy::ProxyStatus;
-use crate::commands::config::refresh_settings_l1;
-
 
 #[derive(Serialize)]
 pub struct ProxyStatusResponse {
@@ -101,7 +100,10 @@ pub async fn start(
         .map_err(|e| AdminError::Internal(e.to_string()))?;
 
     // Return the new status
-    Ok(Json(ProxyStatusResponse { running: true, port }))
+    Ok(Json(ProxyStatusResponse {
+        running: true,
+        port,
+    }))
 }
 
 /// Stop the proxy server.

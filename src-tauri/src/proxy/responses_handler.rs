@@ -7,8 +7,8 @@
 
 use super::auth;
 use super::forwarder;
-use super::router;
 use super::handlers::ProxyError;
+use super::router;
 use super::server::ProxyState;
 use axum::body::Body;
 use axum::extract::State;
@@ -57,8 +57,9 @@ fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
                     match typ {
                         // ── input_image → user message with image_url ──
                         "input_image" => {
-                            let detail = obj.get("detail").and_then(|v| v.as_str()).unwrap_or("auto");
-                            
+                            let detail =
+                                obj.get("detail").and_then(|v| v.as_str()).unwrap_or("auto");
+
                             // Handle image_url (URL or data URL)
                             if let Some(image_url) = obj.get("image_url").and_then(|v| v.as_str()) {
                                 if !image_url.is_empty() {
@@ -72,7 +73,9 @@ fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
                                 }
                             }
                             // Handle image_data (base64) → convert to data URL
-                            else if let Some(image_data) = obj.get("image_data").and_then(|v| v.as_str()) {
+                            else if let Some(image_data) =
+                                obj.get("image_data").and_then(|v| v.as_str())
+                            {
                                 if !image_data.is_empty() {
                                     // Assume PNG if no media type specified
                                     let data_url = if image_data.starts_with("data:") {
@@ -108,7 +111,10 @@ fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
                         "function_call" => {
                             let call_id = obj.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
                             let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                            let arguments = obj.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}");
+                            let arguments = obj
+                                .get("arguments")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("{}");
 
                             // Collect tool calls for this assistant turn
                             let mut tool_calls = vec![json!({
@@ -124,11 +130,21 @@ fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
                             let mut j = i + 1;
                             while j < items.len() {
                                 if let Value::Object(next_obj) = &items[j] {
-                                    let next_typ = next_obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                                    let next_typ =
+                                        next_obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
                                     if next_typ == "function_call" {
-                                        let next_call_id = next_obj.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
-                                        let next_name = next_obj.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                                        let next_args = next_obj.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}");
+                                        let next_call_id = next_obj
+                                            .get("call_id")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let next_name = next_obj
+                                            .get("name")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let next_args = next_obj
+                                            .get("arguments")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("{}");
                                         tool_calls.push(json!({
                                             "id": next_call_id,
                                             "type": "function",
@@ -160,7 +176,9 @@ fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
                             let call_id = obj.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
                             let output = match obj.get("output") {
                                 Some(Value::String(s)) => s.clone(),
-                                Some(v) => serde_json::to_string(v).unwrap_or_else(|_| String::new()),
+                                Some(v) => {
+                                    serde_json::to_string(v).unwrap_or_else(|_| String::new())
+                                }
                                 None => String::new(),
                             };
 
@@ -180,18 +198,30 @@ fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
                                     "system" | "developer" => "system".to_string(),
                                     "user" | "assistant" | "tool" => r.clone(),
                                     _ => {
-                                        if matches!(typ, "message") { "assistant".to_string() } else { "user".to_string() }
+                                        if matches!(typ, "message") {
+                                            "assistant".to_string()
+                                        } else {
+                                            "user".to_string()
+                                        }
                                     }
                                 },
                                 _ => {
-                                    if matches!(typ, "message") { "assistant".to_string() } else { "user".to_string() }
+                                    if matches!(typ, "message") {
+                                        "assistant".to_string()
+                                    } else {
+                                        "user".to_string()
+                                    }
                                 }
                             };
 
                             let content_value = match obj.get("content") {
                                 Some(Value::String(s)) => {
-                                    if s.is_empty() { None } else { Some(json!(s)) }
-                                },
+                                    if s.is_empty() {
+                                        None
+                                    } else {
+                                        Some(json!(s))
+                                    }
+                                }
                                 Some(Value::Array(parts)) => {
                                     let mut texts: Vec<String> = Vec::new();
                                     let mut image_parts: Vec<Value> = Vec::new();
@@ -201,14 +231,17 @@ fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
                                         match p {
                                             Value::String(s) => texts.push(s.clone()),
                                             Value::Object(o) => {
-                                                let part_type = o.get("type")
+                                                let part_type = o
+                                                    .get("type")
                                                     .and_then(|v| v.as_str())
                                                     .unwrap_or("");
                                                 if part_type == "input_image" {
-                                                    let image_url = o.get("image_url")
+                                                    let image_url = o
+                                                        .get("image_url")
                                                         .and_then(|v| v.as_str())
                                                         .unwrap_or("");
-                                                    let detail = o.get("detail")
+                                                    let detail = o
+                                                        .get("detail")
                                                         .and_then(|v| v.as_str())
                                                         .unwrap_or("auto");
                                                     if !image_url.is_empty() {
@@ -223,7 +256,8 @@ fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
                                                         raw_parts.push(p.clone());
                                                     }
                                                 } else {
-                                                    let t = o.get("text")
+                                                    let t = o
+                                                        .get("text")
                                                         .or_else(|| o.get("input_text"))
                                                         .or_else(|| o.get("output_text"))
                                                         .and_then(|v| v.as_str())
@@ -242,15 +276,24 @@ fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
                                     if image_parts.is_empty() && raw_parts.is_empty() {
                                         // No structured parts — join text as plain string (backward compat)
                                         let joined = texts.join("\n");
-                                        if joined.is_empty() { None } else { Some(json!(joined)) }
+                                        if joined.is_empty() {
+                                            None
+                                        } else {
+                                            Some(json!(joined))
+                                        }
                                     } else {
                                         // Has images or unknown parts — build structured content array
-                                        let mut content_parts: Vec<Value> = texts.iter()
+                                        let mut content_parts: Vec<Value> = texts
+                                            .iter()
                                             .map(|t| json!({"type": "text", "text": t}))
                                             .collect();
                                         content_parts.extend(image_parts);
                                         content_parts.extend(raw_parts);
-                                        if content_parts.is_empty() { None } else { Some(json!(content_parts)) }
+                                        if content_parts.is_empty() {
+                                            None
+                                        } else {
+                                            Some(json!(content_parts))
+                                        }
                                     }
                                 }
                                 _ => None,
@@ -345,7 +388,10 @@ fn convert_tools(tools: &[Value]) -> Option<Value> {
                 if let Some(parameters) = tool_obj.remove("parameters") {
                     function.insert("parameters".to_string(), parameters);
                 } else {
-                    function.insert("parameters".to_string(), json!({ "type": "object", "properties": {} }));
+                    function.insert(
+                        "parameters".to_string(),
+                        json!({ "type": "object", "properties": {} }),
+                    );
                 }
                 if let Some(strict) = tool_obj.remove("strict") {
                     function.insert("strict".to_string(), strict);
@@ -405,11 +451,17 @@ fn merge_tool_delta(item: &mut Value, delta: &Value) {
                                     .to_string();
                                 let delta_args = match fn_value {
                                     Value::String(s) => s.clone(),
-                                    Value::Object(_) | Value::Array(_) => serde_json::to_string(fn_value).unwrap_or_else(|_| String::new()),
+                                    Value::Object(_) | Value::Array(_) => {
+                                        serde_json::to_string(fn_value)
+                                            .unwrap_or_else(|_| String::new())
+                                    }
                                     _ => String::new(),
                                 };
                                 if !delta_args.is_empty() {
-                                    existing.insert("arguments".to_string(), json!(format!("{}{}", existing_args, delta_args)));
+                                    existing.insert(
+                                        "arguments".to_string(),
+                                        json!(format!("{}{}", existing_args, delta_args)),
+                                    );
                                 }
                             } else if !fn_value.is_null() {
                                 existing.insert(fn_key.clone(), fn_value.clone());
@@ -430,7 +482,10 @@ fn merge_tool_delta(item: &mut Value, delta: &Value) {
 // ─── SSE helpers ─────────────────────────────────────────────────────
 
 fn sse_line(obj: &Value) -> Bytes {
-    let line = format!("data: {}\n\n", serde_json::to_string(obj).unwrap_or_default());
+    let line = format!(
+        "data: {}\n\n",
+        serde_json::to_string(obj).unwrap_or_default()
+    );
     Bytes::from(line)
 }
 
@@ -498,32 +553,38 @@ pub async fn handle_responses(
         .await
         .map_err(|e| ProxyError::Internal(format!("Failed to read body: {e}")))?;
 
-let req_body: Value = match serde_json::from_slice(&body_bytes) {
-    Ok(v) => v,
-    Err(e) => {
-        return Ok((StatusCode::BAD_REQUEST, axum::Json(json!({
-            "error": {
-                "message": format!("Invalid JSON: {e}"),
-                "type": "invalid_request_error",
-                "code": "invalid_json"
-            }
-        })))
-        .into_response());
-    }
-};
+    let req_body: Value = match serde_json::from_slice(&body_bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            return Ok((
+                StatusCode::BAD_REQUEST,
+                axum::Json(json!({
+                    "error": {
+                        "message": format!("Invalid JSON: {e}"),
+                        "type": "invalid_request_error",
+                        "code": "invalid_json"
+                    }
+                })),
+            )
+                .into_response());
+        }
+    };
 
-// ── Hosted tool types: passed through as-is ──
-//
-// As a pure relay, we pass all tool types through to the upstream unchanged.
-// Function tools are converted to Chat Completions format; all other tool
-// types (web_search, image_generation, local_shell, etc.) are forwarded as-is.
-// The upstream decides how to handle them.
-//
-// Affected tool types: web_search, image_generation, tool_search,
-//                      local_shell, custom (and any future hosted tools)
+    // ── Hosted tool types: passed through as-is ──
+    //
+    // As a pure relay, we pass all tool types through to the upstream unchanged.
+    // Function tools are converted to Chat Completions format; all other tool
+    // types (web_search, image_generation, local_shell, etc.) are forwarded as-is.
+    // The upstream decides how to handle them.
+    //
+    // Affected tool types: web_search, image_generation, tool_search,
+    //                      local_shell, custom (and any future hosted tools)
 
     // 3. Determine stream mode BEFORE building chat body
-    let is_stream = req_body.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
+    let is_stream = req_body
+        .get("stream")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let response_id = format!("resp_{}", Uuid::new_v4().to_string().replace('-', ""));
     let model = req_body
@@ -668,7 +729,10 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
     .await;
 
     // 6. Build response based on stream mode
-    let item_id = format!("msg_{}", Uuid::new_v4().to_string().replace('-', "")[..16].to_string());
+    let item_id = format!(
+        "msg_{}",
+        Uuid::new_v4().to_string().replace('-', "")[..16].to_string()
+    );
     let created_at = chrono::Utc::now().timestamp();
 
     // Collect all SSE frames into a Vec for streaming
@@ -716,7 +780,10 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                 let body_bytes = axum::body::to_bytes(resp.into_body(), 32 * 1024 * 1024)
                     .await
                     .unwrap_or_default();
-                let err_text = String::from_utf8_lossy(&body_bytes).chars().take(2000).collect::<String>();
+                let err_text = String::from_utf8_lossy(&body_bytes)
+                    .chars()
+                    .take(2000)
+                    .collect::<String>();
                 let error_event = json!({
                     "type": "response.failed",
                     "response": {
@@ -739,7 +806,9 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                         "status": "failed",
                         "error": { "message": err_text, "type": "upstream_error" }
                     });
-                    return Ok((StatusCode::BAD_GATEWAY, axum::Json(non_stream_error)).into_response());
+                    return Ok(
+                        (StatusCode::BAD_GATEWAY, axum::Json(non_stream_error)).into_response()
+                    );
                 }
             }
 
@@ -766,7 +835,9 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                     // Helper macro to send a frame, abort if receiver dropped
                     macro_rules! send {
                         ($frame:expr) => {
-                            if tx.send(Ok($frame)).await.is_err() { return; }
+                            if tx.send(Ok($frame)).await.is_err() {
+                                return;
+                            }
                         };
                     }
 
@@ -775,34 +846,34 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                         send!(frame);
                     }
 
-        let upstream_stream = upstream_body.into_data_stream();
-        let mut buffer = String::new();
-        let mut utf8_remainder: Vec<u8> = Vec::new();
-        let mut full_content = String::new();
-        let mut usage = json!({});
-        let mut finish_reason: Option<String> = None;
-        let mut upstream_model: Option<String> = None;
-        let mut content_len: usize = 0;
-        
-        // Index tracking for output items
-        // Start at 1 because we assume text will exist at index 0
-        // If no text is present, we'll adjust in response.completed
-        let mut next_content_index: u32 = 1;
-        let mut index_by_key: HashMap<String, u32> = HashMap::new();
-        let mut tool_index_by_item_id: HashMap<String, u32> = HashMap::new();
-        let mut last_tool_index: Option<u32> = None;
+                    let upstream_stream = upstream_body.into_data_stream();
+                    let mut buffer = String::new();
+                    let mut utf8_remainder: Vec<u8> = Vec::new();
+                    let mut full_content = String::new();
+                    let mut usage = json!({});
+                    let mut finish_reason: Option<String> = None;
+                    let mut upstream_model: Option<String> = None;
+                    let mut content_len: usize = 0;
 
-        // ToolCallAccum: index → accumulated state across chunks
-        struct ToolCallEntry {
-            id: String,
-            name: String,
-            arguments: String,
-            passthrough_item: Option<Value>,
-            added_emitted: bool,
-            assigned_index: u32,
-        }
-        let mut tool_accum: HashMap<usize, ToolCallEntry> = HashMap::new();
-        const MAX_CONTENT_LEN: usize = 10 * 1024 * 1024; // 10MB cap
+                    // Index tracking for output items
+                    // Start at 1 because we assume text will exist at index 0
+                    // If no text is present, we'll adjust in response.completed
+                    let mut next_content_index: u32 = 1;
+                    let mut index_by_key: HashMap<String, u32> = HashMap::new();
+                    let mut tool_index_by_item_id: HashMap<String, u32> = HashMap::new();
+                    let mut last_tool_index: Option<u32> = None;
+
+                    // ToolCallAccum: index → accumulated state across chunks
+                    struct ToolCallEntry {
+                        id: String,
+                        name: String,
+                        arguments: String,
+                        passthrough_item: Option<Value>,
+                        added_emitted: bool,
+                        assigned_index: u32,
+                    }
+                    let mut tool_accum: HashMap<usize, ToolCallEntry> = HashMap::new();
+                    const MAX_CONTENT_LEN: usize = 10 * 1024 * 1024; // 10MB cap
 
                     let mut stream = upstream_stream;
 
@@ -831,7 +902,9 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                             buffer = buffer[newline_pos + 1..].to_string();
                             let line = line.trim();
 
-                            if line.is_empty() { continue; }
+                            if line.is_empty() {
+                                continue;
+                            }
 
                             if let Some(data) = sse_data_payload(line) {
                                 if data == "[DONE]" {
@@ -854,7 +927,8 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                     }
 
                                     // Emit final events for each accumulated tool call
-                                    let mut sorted_indices: Vec<usize> = tool_accum.keys().copied().collect();
+                                    let mut sorted_indices: Vec<usize> =
+                                        tool_accum.keys().copied().collect();
                                     sorted_indices.sort();
                                     for &idx in &sorted_indices {
                                         let entry = &tool_accum[&idx];
@@ -891,14 +965,17 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
 
                                     // Determine status based on finish_reason
                                     let streaming_incomplete = match finish_reason.as_deref() {
-                                        Some("length") | Some("content_filter") => json!({ "reason": finish_reason.as_ref().unwrap() }),
+                                        Some("length") | Some("content_filter") => {
+                                            json!({ "reason": finish_reason.as_ref().unwrap() })
+                                        }
                                         _ => json!(null),
                                     };
                                     let final_status = match finish_reason.as_deref() {
                                         Some("length") | Some("content_filter") => "incomplete",
                                         _ => "completed",
                                     };
-                                    let resolved_model = upstream_model.as_deref().unwrap_or(&model_task);
+                                    let resolved_model =
+                                        upstream_model.as_deref().unwrap_or(&model_task);
 
                                     // Build output items for response.completed (text + tool calls)
                                     let mut final_items: Vec<Value> = Vec::new();
@@ -914,7 +991,10 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                     for &idx in &sorted_indices {
                                         let entry = &tool_accum[&idx];
                                         if let Some(item) = &entry.passthrough_item {
-                                            final_items.push(passthrough_output_item(item, Some("completed")));
+                                            final_items.push(passthrough_output_item(
+                                                item,
+                                                Some("completed"),
+                                            ));
                                         } else {
                                             final_items.push(json!({
                                                 "id": entry.id,
@@ -928,11 +1008,28 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                     }
 
                                     // Usage
-                                    let input_tokens = usage.get("prompt_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
-                                    let output_tokens = usage.get("completion_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
-                                    let total = usage.get("total_tokens").and_then(|v| v.as_i64()).unwrap_or(input_tokens + output_tokens);
-                                    let cached = usage.get("prompt_tokens_details").and_then(|d| d.get("cached_tokens")).and_then(|v| v.as_i64()).unwrap_or(0);
-                                    let reasoning = usage.get("completion_tokens_details").and_then(|d| d.get("reasoning_tokens")).and_then(|v| v.as_i64()).unwrap_or(0);
+                                    let input_tokens = usage
+                                        .get("prompt_tokens")
+                                        .and_then(|v| v.as_i64())
+                                        .unwrap_or(0);
+                                    let output_tokens = usage
+                                        .get("completion_tokens")
+                                        .and_then(|v| v.as_i64())
+                                        .unwrap_or(0);
+                                    let total = usage
+                                        .get("total_tokens")
+                                        .and_then(|v| v.as_i64())
+                                        .unwrap_or(input_tokens + output_tokens);
+                                    let cached = usage
+                                        .get("prompt_tokens_details")
+                                        .and_then(|d| d.get("cached_tokens"))
+                                        .and_then(|v| v.as_i64())
+                                        .unwrap_or(0);
+                                    let reasoning = usage
+                                        .get("completion_tokens_details")
+                                        .and_then(|d| d.get("reasoning_tokens"))
+                                        .and_then(|v| v.as_i64())
+                                        .unwrap_or(0);
 
                                     send!(sse_line(&json!({
                                         "type": "response.completed",
@@ -977,7 +1074,9 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                 if let Ok(chunk_obj) = serde_json::from_str::<Value>(data) {
                                     // Capture upstream model from first chunk that has it
                                     if upstream_model.is_none() {
-                                        if let Some(m) = chunk_obj.get("model").and_then(|m| m.as_str()) {
+                                        if let Some(m) =
+                                            chunk_obj.get("model").and_then(|m| m.as_str())
+                                        {
                                             upstream_model = Some(m.to_string());
                                         }
                                     }
@@ -987,7 +1086,8 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                     }
 
                                     // Extract finish_reason
-                                    if let Some(fr) = chunk_obj.get("choices")
+                                    if let Some(fr) = chunk_obj
+                                        .get("choices")
                                         .and_then(|c| c.as_array())
                                         .and_then(|a| a.first())
                                         .and_then(|c| c.get("finish_reason"))
@@ -999,7 +1099,8 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                     }
 
                                     // Parse streaming tool_calls into accumulated state
-                                    if let Some(tool_calls_delta) = chunk_obj.get("choices")
+                                    if let Some(tool_calls_delta) = chunk_obj
+                                        .get("choices")
                                         .and_then(|c| c.as_array())
                                         .and_then(|a| a.first())
                                         .and_then(|c| c.get("delta"))
@@ -1007,32 +1108,59 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                         .and_then(|t| t.as_array())
                                     {
                                         for tc_delta in tool_calls_delta {
-                                            let tc_idx = tc_delta.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                                            let tc_id_new = tc_delta.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                                            let tc_fn = tc_delta.get("function").cloned().unwrap_or_else(|| json!({}));
-                                            let tc_name_delta = tc_fn.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                                            let is_function_delta = tc_delta.get("type").and_then(|v| v.as_str()) == Some("function")
-                                                || (tc_delta.get("type").is_none() && tc_delta.get("function").is_some());
+                                            let tc_idx = tc_delta
+                                                .get("index")
+                                                .and_then(|v| v.as_u64())
+                                                .unwrap_or(0)
+                                                as usize;
+                                            let tc_id_new = tc_delta
+                                                .get("id")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("");
+                                            let tc_fn = tc_delta
+                                                .get("function")
+                                                .cloned()
+                                                .unwrap_or_else(|| json!({}));
+                                            let tc_name_delta = tc_fn
+                                                .get("name")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("");
+                                            let is_function_delta =
+                                                tc_delta.get("type").and_then(|v| v.as_str())
+                                                    == Some("function")
+                                                    || (tc_delta.get("type").is_none()
+                                                        && tc_delta.get("function").is_some());
                                             // Handle arguments as both string and object (for streaming deltas)
                                             let tc_args_delta = match tc_fn.get("arguments") {
                                                 Some(Value::String(s)) => s.clone(),
                                                 Some(Value::Object(_)) | Some(Value::Array(_)) => {
-                                                    serde_json::to_string(tc_fn.get("arguments").unwrap()).unwrap_or_else(|_| String::new())
+                                                    serde_json::to_string(
+                                                        tc_fn.get("arguments").unwrap(),
+                                                    )
+                                                    .unwrap_or_else(|_| String::new())
                                                 }
                                                 _ => String::new(),
                                             };
 
-                                            let entry = tool_accum.entry(tc_idx).or_insert_with(|| ToolCallEntry {
-                                                id: String::new(),
-                                                name: String::new(),
-                                                arguments: String::new(),
-                                                passthrough_item: None,
-                                                added_emitted: false,
-                                                assigned_index: 0,
-                                            });
+                                            let entry =
+                                                tool_accum.entry(tc_idx).or_insert_with(|| {
+                                                    ToolCallEntry {
+                                                        id: String::new(),
+                                                        name: String::new(),
+                                                        arguments: String::new(),
+                                                        passthrough_item: None,
+                                                        added_emitted: false,
+                                                        assigned_index: 0,
+                                                    }
+                                                });
 
-                                            if !is_function_delta || entry.passthrough_item.is_some() {
-                                                let item = entry.passthrough_item.get_or_insert_with(|| passthrough_output_item(tc_delta, None));
+                                            if !is_function_delta
+                                                || entry.passthrough_item.is_some()
+                                            {
+                                                let item =
+                                                    entry.passthrough_item.get_or_insert_with(
+                                                        || passthrough_output_item(tc_delta, None),
+                                                    );
                                                 merge_tool_delta(item, tc_delta);
                                                 if !tc_id_new.is_empty() {
                                                     entry.id = tc_id_new.to_string();
@@ -1049,114 +1177,119 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                                                 continue;
                                             }
 
-                if !tc_id_new.is_empty() {
-                    entry.id = tc_id_new.to_string();
-                }
-                if !tc_name_delta.is_empty() {
-                    entry.name = tc_name_delta.to_string();
-                }
-                if !tc_args_delta.is_empty() {
-                    entry.arguments.push_str(&tc_args_delta);
-                }
+                                            if !tc_id_new.is_empty() {
+                                                entry.id = tc_id_new.to_string();
+                                            }
+                                            if !tc_name_delta.is_empty() {
+                                                entry.name = tc_name_delta.to_string();
+                                            }
+                                            if !tc_args_delta.is_empty() {
+                                                entry.arguments.push_str(&tc_args_delta);
+                                            }
 
-                // Calculate stable index for this tool call
-                let tool_key = if !entry.id.is_empty() {
-                    Some(format!("tool:{}", entry.id))
-                } else {
-                    None
-                };
+                                            // Calculate stable index for this tool call
+                                            let tool_key = if !entry.id.is_empty() {
+                                                Some(format!("tool:{}", entry.id))
+                                            } else {
+                                                None
+                                            };
 
-                let assigned_index = if let Some(ref k) = tool_key {
-                    if let Some(existing) = index_by_key.get(k).copied() {
-                        existing
-                    } else {
-                        let assigned = next_content_index;
-                        next_content_index += 1;
-                        index_by_key.insert(k.clone(), assigned);
-                        assigned
-                    }
-                } else {
-                    let assigned = next_content_index;
-                    next_content_index += 1;
-                    assigned
-                };
+                                            let assigned_index = if let Some(ref k) = tool_key {
+                                                if let Some(existing) = index_by_key.get(k).copied()
+                                                {
+                                                    existing
+                                                } else {
+                                                    let assigned = next_content_index;
+                                                    next_content_index += 1;
+                                                    index_by_key.insert(k.clone(), assigned);
+                                                    assigned
+                                                }
+                                            } else {
+                                                let assigned = next_content_index;
+                                                next_content_index += 1;
+                                                assigned
+                                            };
 
-                // Store index by item_id for later lookups
-                entry.assigned_index = assigned_index;
-                if !entry.id.is_empty() {
-                    tool_index_by_item_id.insert(entry.id.clone(), assigned_index);
-                    last_tool_index = Some(assigned_index);
-                }
+                                            // Store index by item_id for later lookups
+                                            entry.assigned_index = assigned_index;
+                                            if !entry.id.is_empty() {
+                                                tool_index_by_item_id
+                                                    .insert(entry.id.clone(), assigned_index);
+                                                last_tool_index = Some(assigned_index);
+                                            }
 
-                // Emit output_item.added only on first occurrence
-                if !entry.added_emitted && !entry.name.is_empty() {
-                    send!(sse_line(&json!({
-                        "type": "response.output_item.added",
-                        "response_id": &response_id_task,
-                        "output_index": assigned_index,
-                        "item": {
-                            "id": entry.id,
-                            "type": "function_call",
-                            "call_id": entry.id,
-                            "name": entry.name,
-                            "arguments": "",
-                            "status": "in_progress"
-                        }
-                    })));
-                    entry.added_emitted = true;
-                }
+                                            // Emit output_item.added only on first occurrence
+                                            if !entry.added_emitted && !entry.name.is_empty() {
+                                                send!(sse_line(&json!({
+                                                    "type": "response.output_item.added",
+                                                    "response_id": &response_id_task,
+                                                    "output_index": assigned_index,
+                                                    "item": {
+                                                        "id": entry.id,
+                                                        "type": "function_call",
+                                                        "call_id": entry.id,
+                                                        "name": entry.name,
+                                                        "arguments": "",
+                                                        "status": "in_progress"
+                                                    }
+                                                })));
+                                                entry.added_emitted = true;
+                                            }
 
-                // Emit argument deltas incrementally
-                if !tc_args_delta.is_empty() {
-                    let delta_index = tool_index_by_item_id.get(&entry.id).copied()
-                        .or(last_tool_index)
-                        .unwrap_or(assigned_index);
+                                            // Emit argument deltas incrementally
+                                            if !tc_args_delta.is_empty() {
+                                                let delta_index = tool_index_by_item_id
+                                                    .get(&entry.id)
+                                                    .copied()
+                                                    .or(last_tool_index)
+                                                    .unwrap_or(assigned_index);
 
-                    send!(sse_line(&json!({
-                        "type": "response.function_call_arguments.delta",
-                        "response_id": &response_id_task,
-                        "item_id": entry.id,
-                        "output_index": delta_index,
-                        "delta": tc_args_delta
-                    })));
-                }
-            }
-        }
+                                                send!(sse_line(&json!({
+                                                    "type": "response.function_call_arguments.delta",
+                                                    "response_id": &response_id_task,
+                                                    "item_id": entry.id,
+                                                    "output_index": delta_index,
+                                                    "delta": tc_args_delta
+                                                })));
+                                            }
+                                        }
+                                    }
 
                                     // Parse content delta incrementally
-                                    if let Some(content) = chunk_obj.get("choices")
+                                    if let Some(content) = chunk_obj
+                                        .get("choices")
                                         .and_then(|c| c.as_array())
                                         .and_then(|a| a.first())
                                         .and_then(|c| c.get("delta"))
                                         .and_then(|d| d.get("content"))
                                         .and_then(|c| c.as_str())
                                     {
-            if !content.is_empty() {
-                // Emit output_item.added for text message on first content
-                if full_content.is_empty() {
-                    send!(sse_line(&json!({
-                        "type": "response.output_item.added",
-                        "response_id": &response_id_task,
-                        "output_index": 0,
-                        "item": {
-                            "type": "message",
-                            "role": "assistant",
-                            "id": &item_id_task,
-                            "status": "in_progress",
-                            "content": []
-                        }
-                    })));
-                }
-                full_content.push_str(content);
-                send!(sse_line(&json!({
-                    "type": "response.output_text.delta",
-                    "response_id": &response_id_task,
-                    "item_id": &item_id_task,
-                    "output_index": 0,
-                    "content_index": 0,
-                    "delta": content
-                })));
-            }
+                                        if !content.is_empty() {
+                                            // Emit output_item.added for text message on first content
+                                            if full_content.is_empty() {
+                                                send!(sse_line(&json!({
+                                                    "type": "response.output_item.added",
+                                                    "response_id": &response_id_task,
+                                                    "output_index": 0,
+                                                    "item": {
+                                                        "type": "message",
+                                                        "role": "assistant",
+                                                        "id": &item_id_task,
+                                                        "status": "in_progress",
+                                                        "content": []
+                                                    }
+                                                })));
+                                            }
+                                            full_content.push_str(content);
+                                            send!(sse_line(&json!({
+                                                "type": "response.output_text.delta",
+                                                "response_id": &response_id_task,
+                                                "item_id": &item_id_task,
+                                                "output_index": 0,
+                                                "content_index": 0,
+                                                "delta": content
+                                            })));
+                                        }
                                     }
                                 }
                             }
@@ -1180,7 +1313,9 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                     .header(header::CACHE_CONTROL, "no-cache")
                     .header(header::CONNECTION, "close")
                     .body(body)
-                    .map_err(|e| ProxyError::Internal(format!("Failed to build response: {e}")))?);
+                    .map_err(|e| {
+                        ProxyError::Internal(format!("Failed to build response: {e}"))
+                    })?);
             }
 
             // ── NON-STREAMING: buffer entire response, parse JSON ──
@@ -1207,16 +1342,15 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                 json!({ "choices": [{ "message": { "content": String::from_utf8_lossy(&body_bytes) } }] })
             });
 
-            let msg = obj.get("choices")
+            let msg = obj
+                .get("choices")
                 .and_then(|c| c.as_array())
                 .and_then(|a| a.first())
                 .and_then(|c| c.get("message"))
                 .cloned()
                 .unwrap_or_else(|| json!({}));
 
-            let content = msg.get("content")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let content = msg.get("content").and_then(|v| v.as_str()).unwrap_or("");
 
             let tool_calls = msg.get("tool_calls").and_then(|v| v.as_array());
 
@@ -1257,7 +1391,11 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
             // Tool calls (function_call output or passthrough output items)
             if let Some(tc_array) = tool_calls {
                 for (idx, tc) in tc_array.iter().enumerate() {
-                    let output_index = if content.is_empty() { idx as u32 } else { (idx + 1) as u32 };
+                    let output_index = if content.is_empty() {
+                        idx as u32
+                    } else {
+                        (idx + 1) as u32
+                    };
 
                     if !is_function_tool_call(tc) {
                         let item = passthrough_output_item(tc, Some("completed"));
@@ -1284,7 +1422,8 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
                     let tc_args = match tc_fn.get("arguments") {
                         Some(Value::String(s)) => s.clone(),
                         Some(Value::Object(_)) | Some(Value::Array(_)) => {
-                            serde_json::to_string(tc_fn.get("arguments").unwrap()).unwrap_or_else(|_| "{}".to_string())
+                            serde_json::to_string(tc_fn.get("arguments").unwrap())
+                                .unwrap_or_else(|_| "{}".to_string())
                         }
                         _ => "{}".to_string(),
                     };
@@ -1359,21 +1498,29 @@ let req_body: Value = match serde_json::from_slice(&body_bytes) {
             };
 
             // Get upstream model
-            let upstream_model = obj
-                .get("model")
-                .and_then(|m| m.as_str())
-                .unwrap_or(model);
+            let upstream_model = obj.get("model").and_then(|m| m.as_str()).unwrap_or(model);
 
             // Usage
             let usage = obj.get("usage").cloned().unwrap_or_else(|| json!({}));
-            let input_tokens = usage.get("prompt_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
-            let output_tokens = usage.get("completion_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
-            let total_tokens = usage.get("total_tokens").and_then(|v| v.as_i64()).unwrap_or(input_tokens + output_tokens);
-            let cached_tokens = usage.get("prompt_tokens_details")
+            let input_tokens = usage
+                .get("prompt_tokens")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let output_tokens = usage
+                .get("completion_tokens")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let total_tokens = usage
+                .get("total_tokens")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(input_tokens + output_tokens);
+            let cached_tokens = usage
+                .get("prompt_tokens_details")
                 .and_then(|d| d.get("cached_tokens"))
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
-            let reasoning_tokens = usage.get("completion_tokens_details")
+            let reasoning_tokens = usage
+                .get("completion_tokens_details")
                 .and_then(|d| d.get("reasoning_tokens"))
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
@@ -1623,7 +1770,9 @@ mod tests {
 
     #[test]
     fn test_convert_tools_function() {
-        let tools = vec![json!({ "type": "function", "name": "my_fn", "parameters": { "type": "object" } })];
+        let tools = vec![
+            json!({ "type": "function", "name": "my_fn", "parameters": { "type": "object" } }),
+        ];
         let result = convert_tools(&tools);
         assert!(result.is_some());
         let arr = result.unwrap();
@@ -1650,7 +1799,10 @@ mod tests {
 
     #[test]
     fn test_passthrough_output_item_removes_index_and_adds_type() {
-        let item = passthrough_output_item(&json!({ "id": "call_1", "index": 2, "custom": true }), Some("completed"));
+        let item = passthrough_output_item(
+            &json!({ "id": "call_1", "index": 2, "custom": true }),
+            Some("completed"),
+        );
         assert_eq!(item["id"], "call_1");
         assert_eq!(item["type"], "tool_call");
         assert_eq!(item["custom"], true);
@@ -1689,8 +1841,8 @@ mod tests {
         let arr = result.unwrap().as_array().unwrap().clone();
         assert_eq!(arr.len(), 3);
         assert_eq!(arr[0]["function"]["name"], "my_fn"); // converted
-        assert_eq!(arr[1]["type"], "web_search");        // passthrough
-        assert_eq!(arr[2]["type"], "local_shell");       // passthrough
+        assert_eq!(arr[1]["type"], "web_search"); // passthrough
+        assert_eq!(arr[2]["type"], "local_shell"); // passthrough
     }
 
     // ── Image URL Content Tests ──
@@ -1709,12 +1861,17 @@ mod tests {
         assert_eq!(msgs[0]["role"], "user");
 
         // Content should be an array with text + image_url
-        let content = msgs[0]["content"].as_array().expect("content should be array");
+        let content = msgs[0]["content"]
+            .as_array()
+            .expect("content should be array");
         assert_eq!(content.len(), 2);
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[0]["text"], "describe");
         assert_eq!(content[1]["type"], "image_url");
-        assert_eq!(content[1]["image_url"]["url"], "https://example.com/img.jpg");
+        assert_eq!(
+            content[1]["image_url"]["url"],
+            "https://example.com/img.jpg"
+        );
         assert_eq!(content[1]["image_url"]["detail"], "auto");
     }
 
@@ -1731,10 +1888,15 @@ mod tests {
         assert_eq!(msgs[0]["role"], "user");
 
         // Content should be an array with only image_url
-        let content = msgs[0]["content"].as_array().expect("content should be array");
+        let content = msgs[0]["content"]
+            .as_array()
+            .expect("content should be array");
         assert_eq!(content.len(), 1);
         assert_eq!(content[0]["type"], "image_url");
-        assert_eq!(content[0]["image_url"]["url"], "https://example.com/photo.png");
+        assert_eq!(
+            content[0]["image_url"]["url"],
+            "https://example.com/photo.png"
+        );
         assert_eq!(content[0]["image_url"]["detail"], "auto");
     }
 
@@ -1749,7 +1911,9 @@ mod tests {
         let msgs = input_to_messages(&input, None);
         assert_eq!(msgs.len(), 1);
 
-        let content = msgs[0]["content"].as_array().expect("content should be array");
+        let content = msgs[0]["content"]
+            .as_array()
+            .expect("content should be array");
         assert_eq!(content[0]["image_url"]["detail"], "high");
     }
 
@@ -1771,7 +1935,8 @@ mod tests {
 
     #[test]
     fn test_input_to_messages_preserves_unknown_structured_item() {
-        let input = json!([{ "type": "custom_tool_result", "id": "item_1", "payload": { "ok": true } }]);
+        let input =
+            json!([{ "type": "custom_tool_result", "id": "item_1", "payload": { "ok": true } }]);
         let msgs = input_to_messages(&input, None);
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0]["role"], "user");
@@ -1800,8 +1965,14 @@ mod tests {
 
     #[test]
     fn test_sse_data_payload_accepts_optional_space() {
-        assert_eq!(sse_data_payload("data: {\"ok\":true}"), Some("{\"ok\":true}"));
-        assert_eq!(sse_data_payload("data:{\"ok\":true}"), Some("{\"ok\":true}"));
+        assert_eq!(
+            sse_data_payload("data: {\"ok\":true}"),
+            Some("{\"ok\":true}")
+        );
+        assert_eq!(
+            sse_data_payload("data:{\"ok\":true}"),
+            Some("{\"ok\":true}")
+        );
         assert_eq!(sse_data_payload("event: message"), None);
     }
 }

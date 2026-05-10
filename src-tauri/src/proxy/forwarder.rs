@@ -4,7 +4,6 @@ use super::protocol::get_adapter;
 use super::server::ProxyState;
 use crate::database::{AccessKey, ApiEntry, AppSettings, Database};
 use crate::refresh_tray_if_enabled;
-use tauri::Emitter;
 use axum::body::Body;
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
@@ -17,6 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
+use tauri::Emitter;
 use tokio::time::sleep;
 
 const STREAMING_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -28,6 +28,7 @@ struct SseDoneState {
     appended_model_info: bool,
     upstream_model_info_seen: bool,
 }
+
 #[derive(Debug, Clone, Copy)]
 enum StreamEndReason {
     Done,
@@ -60,7 +61,11 @@ fn is_completed_stream_success(
 /// 修复: 原逻辑要求 prompt_tokens > 0 || completion_tokens > 0，但很多上游 API 在流式响应中
 /// 不返回 usage 信息，导致客户端断开时即使模型正常工作也被误判为失败。
 /// 只要 status_code == 200 就算成功（客户端断开不代表模型故障）。
-fn is_dropped_stream_success(status_code: i32, _prompt_tokens: i64, _completion_tokens: i64) -> bool {
+fn is_dropped_stream_success(
+    status_code: i32,
+    _prompt_tokens: i64,
+    _completion_tokens: i64,
+) -> bool {
     status_code == 200
 }
 
@@ -88,7 +93,7 @@ fn attempt_path_json(attempts: &[AttemptInfo]) -> String {
                     "error": a.error,
                 })
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>(),
     )
     .unwrap_or_else(|_| "[]".to_string())
 }
@@ -102,7 +107,10 @@ fn push_attempt(
 ) {
     attempts.push(AttemptInfo {
         entry_id: entry.id.clone(),
-        channel_name: entry.channel_name.clone().unwrap_or_else(|| "unknown".to_string()),
+        channel_name: entry
+            .channel_name
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
         model: entry.model.clone(),
         status_code,
         success,
@@ -274,7 +282,8 @@ impl Drop for StreamLogGuard {
         if !self.logged.swap(true, Ordering::SeqCst) {
             let prompt_tokens = self.prompt_tokens.load(Ordering::SeqCst);
             let completion_tokens = self.completion_tokens.load(Ordering::SeqCst);
-            let success = is_dropped_stream_success(self.status_code, prompt_tokens, completion_tokens);
+            let success =
+                is_dropped_stream_success(self.status_code, prompt_tokens, completion_tokens);
             let attempt_path = attempt_path_with_current(
                 &self.prior_attempts,
                 &self.entry,
@@ -292,11 +301,21 @@ impl Drop for StreamLogGuard {
             let status_code = self.status_code;
             tokio::spawn(async move {
                 log_usage(
-                    &db, &app_handle, access_key.as_ref(), &entry, &requested_model,
-                    true, prompt_tokens, completion_tokens,
-                    first_token_ms, latency_ms,
-                    status_code, success, None,
-                    Some(attempt_path.as_str()), Some(StreamEndReason::Dropped),
+                    &db,
+                    &app_handle,
+                    access_key.as_ref(),
+                    &entry,
+                    &requested_model,
+                    true,
+                    prompt_tokens,
+                    completion_tokens,
+                    first_token_ms,
+                    latency_ms,
+                    status_code,
+                    success,
+                    None,
+                    Some(attempt_path.as_str()),
+                    Some(StreamEndReason::Dropped),
                 );
             });
         }
@@ -334,7 +353,17 @@ pub async fn forward_with_retry(
             }
         }
 
-        match forward_single(state, entry, body, requested_model, access_key, is_stream, attempts.clone()).await {
+        match forward_single(
+            state,
+            entry,
+            body,
+            requested_model,
+            access_key,
+            is_stream,
+            attempts.clone(),
+        )
+        .await
+        {
             Ok(result) => {
                 let elapsed = start.elapsed();
 
@@ -344,10 +373,21 @@ pub async fn forward_with_retry(
                     let attempt_path = attempt_path_json(&attempts);
                     let latency_ms = elapsed.as_millis() as i64;
                     log_usage(
-                        &state.db, &state.app_handle, access_key, entry, requested_model,
-                        is_stream, result.prompt_tokens, result.completion_tokens,
-                        result.first_token_ms, latency_ms, result.status_code, true, None,
-                        Some(attempt_path.as_str()), None,
+                        &state.db,
+                        &state.app_handle,
+                        access_key,
+                        entry,
+                        requested_model,
+                        is_stream,
+                        result.prompt_tokens,
+                        result.completion_tokens,
+                        result.first_token_ms,
+                        latency_ms,
+                        result.status_code,
+                        true,
+                        None,
+                        Some(attempt_path.as_str()),
+                        None,
                     );
                 }
                 return Ok(result.response);
@@ -362,14 +402,28 @@ pub async fn forward_with_retry(
 
                 // Step 1: Always write usage log for every failed attempt
                 log_usage(
-                    &state.db, &state.app_handle, access_key, entry, requested_model,
-                    is_stream, 0, 0, 0, latency_ms, log_status, false, Some(&e),
-                    Some(attempt_path.as_str()), None,
+                    &state.db,
+                    &state.app_handle,
+                    access_key,
+                    entry,
+                    requested_model,
+                    is_stream,
+                    0,
+                    0,
+                    0,
+                    latency_ms,
+                    log_status,
+                    false,
+                    Some(&e),
+                    Some(attempt_path.as_str()),
+                    None,
                 );
 
                 // Step 2: disable unrecoverable status codes, otherwise cool down briefly.
                 // Connection failures report status=0 and must remain recoverable.
-                if status > 0 && should_disable_entry_for_status(&settings.circuit_disable_codes, status) {
+                if status > 0
+                    && should_disable_entry_for_status(&settings.circuit_disable_codes, status)
+                {
                     disable_entry(state, entry).await;
                 } else {
                     cool_down_entry(state, entry).await;
@@ -384,7 +438,10 @@ pub async fn forward_with_retry(
     Err(last_error
         .map(|(msg, status)| {
             if status > 0 {
-                ProxyError::Upstream { status, message: msg }
+                ProxyError::Upstream {
+                    status,
+                    message: msg,
+                }
             } else {
                 ProxyError::Internal(msg)
             }
@@ -444,7 +501,7 @@ async fn forward_single(
         // Read full error body for debugging
         let raw_body = response.bytes().await.unwrap_or_default();
         let error_body = String::from_utf8_lossy(&raw_body);
-        
+
         // If error body is empty, just use status code
         let error_msg = if error_body.is_empty() {
             format!("Upstream error {status}")
@@ -460,13 +517,25 @@ async fn forward_single(
         let needs_transform = adapter.needs_sse_transform();
         let append_model_info = should_append_model_info(state, body);
         let response = build_streaming_response(
-            state, entry, access_key, requested_model,
-            &url, response, status_code, needs_transform, adapter, request_start, prior_attempts,
+            state,
+            entry,
+            access_key,
+            requested_model,
+            &url,
+            response,
+            status_code,
+            needs_transform,
+            adapter,
+            request_start,
+            prior_attempts,
             append_model_info,
         );
         Ok(ForwardResult {
-            response, prompt_tokens: 0, completion_tokens: 0,
-            first_token_ms: 0, status_code,
+            response,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            first_token_ms: 0,
+            status_code,
         })
     } else {
         let mut response_body: Value = response
@@ -479,7 +548,10 @@ async fn forward_single(
 
         Ok(ForwardResult {
             response: axum::Json(response_body).into_response(),
-            prompt_tokens, completion_tokens, first_token_ms: 0, status_code,
+            prompt_tokens,
+            completion_tokens,
+            first_token_ms: 0,
+            status_code,
         })
     }
 }
@@ -501,6 +573,31 @@ fn request_uses_structured_output(body: &Value) -> bool {
     body.get("response_format").is_some()
 }
 
+fn contains_tool_calling_field(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            if map.get("tools").is_some()
+                || map.get("tool_choice").is_some()
+                || map.get("functions").is_some()
+                || map.get("function_call").is_some()
+                || map.get("parallel_tool_calls").is_some()
+                || map.get("max_tool_calls").is_some()
+                || map.get("tool_calls").is_some()
+            {
+                return true;
+            }
+
+            map.values().any(contains_tool_calling_field)
+        }
+        Value::Array(items) => items.iter().any(contains_tool_calling_field),
+        _ => false,
+    }
+}
+
+fn request_uses_tool_calling(body: &Value) -> bool {
+    contains_tool_calling_field(body)
+}
+
 fn should_append_model_info(state: &ProxyState, body: &Value) -> bool {
     let setting_enabled = state
         .settings
@@ -508,10 +605,9 @@ fn should_append_model_info(state: &ProxyState, body: &Value) -> bool {
         .map(|settings| settings.show_conversation_model)
         .unwrap_or(true);
 
-    // 模型名是普通正文注入。结构化输出会把正文当协议内容解析，
-    // 不能追加 `model: ...`。工具调用请求不在这里预先屏蔽，
-    // 因为真正追加前还会要求流里已经出现普通文本 delta；纯工具调用流不会追加。
-    setting_enabled && !request_uses_structured_output(body)
+    // 模型名是普通正文注入。结构化输出或工具调用上下文会把正文当协议内容复用，
+    // 不能追加 `model: ...`，否则下游 CALL 循环会夹带模型信息并重复显示。
+    setting_enabled && !request_uses_structured_output(body) && !request_uses_tool_calling(body)
 }
 
 fn build_streaming_response(
@@ -575,124 +671,26 @@ fn build_streaming_response(
         prior_attempts: prior_attempts.clone(),
     };
 
-    let body_stream = futures::stream::poll_fn(move |cx| -> Poll<Option<Result<Bytes, std::io::Error>>> {
-        let _ = &guard; // keep guard alive in the closure's capture list
+    let body_stream =
+        futures::stream::poll_fn(move |cx| -> Poll<Option<Result<Bytes, std::io::Error>>> {
+            let _ = &guard; // keep guard alive in the closure's capture list
 
-        // Temporarily disable downstream SSE ping injection.
-        // Some clients do not correctly ignore SSE comment frames like `: PING\n\n`
-        // and may concatenate them into JSON payloads, causing parse errors.
-        // if ping_interval.as_mut().poll(cx).is_ready() {
-        //     ping_interval.as_mut().reset(tokio::time::Instant::now() + STREAMING_PING_INTERVAL);
-        //     return Poll::Ready(Some(Ok(Bytes::from_static(b": PING\n\n"))));
-        // }
+            // Temporarily disable downstream SSE ping injection.
+            // Some clients do not correctly ignore SSE comment frames like `: PING\n\n`
+            // and may concatenate them into JSON payloads, causing parse errors.
+            // if ping_interval.as_mut().poll(cx).is_ready() {
+            //     ping_interval.as_mut().reset(tokio::time::Instant::now() + STREAMING_PING_INTERVAL);
+            //     return Poll::Ready(Some(Ok(Bytes::from_static(b": PING\n\n"))));
+            // }
 
-        if idle_timeout.as_mut().poll(cx).is_ready() {
-            if !logged.swap(true, Ordering::SeqCst) {
-                let attempt_path = attempt_path_with_current(
-                    &prior_attempts,
-                    &entry,
-                    504,
-                    false,
-                    Some("stream idle timeout".to_string()),
-                );
-                let db2 = db.clone();
-                let ah2 = app_handle.clone();
-                let ak2 = access_key.clone();
-                let e2 = entry.clone();
-                let rm2 = requested_model.clone();
-                let pt = prompt_tokens.load(Ordering::SeqCst);
-                let ct = completion_tokens.load(Ordering::SeqCst);
-                let ft = first_token_ms.load(Ordering::SeqCst);
-                let lat = start.elapsed().as_millis() as i64;
-                tokio::spawn(async move {
-                    log_usage(
-                        &db2, &ah2, ak2.as_ref(), &e2, &rm2,
-                        true, pt, ct, ft, lat,
-                        504, false, Some("stream idle timeout"),
-                        Some(attempt_path.as_str()), Some(StreamEndReason::Timeout),
-                    );
-                });
-                spawn_cool_down_entry(
-                    circuit_breakers.clone(),
-                    failure_counts.clone(),
-                    settings_cache.clone(),
-                    db.clone(),
-                    entries_app_handle.clone(),
-                    entry_id.clone(),
-                );
-            }
-            return Poll::Ready(Some(Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "stream idle timeout",
-            ))));
-        }
-
-        match upstream_stream.as_mut().poll_next(cx) {
-            Poll::Ready(Some(Ok(chunk))) => {
-                idle_timeout.as_mut().reset(tokio::time::Instant::now() + STREAMING_IDLE_TIMEOUT);
-                if !seen_first_chunk.swap(true, Ordering::SeqCst) {
-                    first_token_ms.store(start.elapsed().as_millis() as i64, Ordering::SeqCst);
-                }
-                chunk_count.fetch_add(1, Ordering::SeqCst);
-                streamed_bytes.fetch_add(chunk.len() as i64, Ordering::SeqCst);
-
-                if needs_transform {
-                    if let Some(transformed) = transform_sse_chunk(
-                        &chunk, &mut sse_buffer, &adapter,
-                        &prompt_tokens, &completion_tokens,
-                        &has_text_delta, &has_tool_calls,
-                        append_model_info.then_some(entry.model.as_str()),
-                        &mut done_state,
-                    ) {
-                        return Poll::Ready(Some(Ok(transformed)));
-                    } else {
-                        cx.waker().wake_by_ref();
-                        return Poll::Pending;
-                    }
-                } else {
-                    if let Some(with_model_info) = append_and_parse_sse(
-                        &mut sse_buffer,
-                        &chunk,
-                        &prompt_tokens,
-                        &completion_tokens,
-                        &has_sse_error,
-                        &has_text_delta,
-                        &has_tool_calls,
-                        append_model_info.then_some(entry.model.as_str()),
-                        &mut done_state,
-                    ) {
-                        return Poll::Ready(Some(Ok(with_model_info)));
-                    }
-                }
-
-                Poll::Ready(Some(Ok(chunk)))
-            }
-            Poll::Ready(Some(Err(err))) => {
+            if idle_timeout.as_mut().poll(cx).is_ready() {
                 if !logged.swap(true, Ordering::SeqCst) {
-                    let chunk_total = chunk_count.load(Ordering::SeqCst);
-                    let byte_total = streamed_bytes.load(Ordering::SeqCst);
-                    let ft = first_token_ms.load(Ordering::SeqCst);
-                    let lat = start.elapsed().as_millis() as i64;
-                    let diagnostic = build_stream_diagnostic(
-                        "stream_read",
-                        Some(&err),
-                        &entry,
-                        &upstream_url,
-                        status_code,
-                        &response_headers,
-                        chunk_total,
-                        byte_total,
-                        sse_buffer.len(),
-                        ft,
-                        lat,
-                    );
-                    let error_message = format!("Stream error: {err}\n{diagnostic}");
                     let attempt_path = attempt_path_with_current(
                         &prior_attempts,
                         &entry,
-                        502,
+                        504,
                         false,
-                        Some(error_message.clone()),
+                        Some("stream idle timeout".to_string()),
                     );
                     let db2 = db.clone();
                     let ah2 = app_handle.clone();
@@ -701,12 +699,25 @@ fn build_streaming_response(
                     let rm2 = requested_model.clone();
                     let pt = prompt_tokens.load(Ordering::SeqCst);
                     let ct = completion_tokens.load(Ordering::SeqCst);
+                    let ft = first_token_ms.load(Ordering::SeqCst);
+                    let lat = start.elapsed().as_millis() as i64;
                     tokio::spawn(async move {
                         log_usage(
-                            &db2, &ah2, ak2.as_ref(), &e2, &rm2,
-                            true, pt, ct, ft, lat,
-                            502, false, Some(error_message.as_str()),
-                            Some(attempt_path.as_str()), Some(StreamEndReason::UpstreamError),
+                            &db2,
+                            &ah2,
+                            ak2.as_ref(),
+                            &e2,
+                            &rm2,
+                            true,
+                            pt,
+                            ct,
+                            ft,
+                            lat,
+                            504,
+                            false,
+                            Some("stream idle timeout"),
+                            Some(attempt_path.as_str()),
+                            Some(StreamEndReason::Timeout),
                         );
                     });
                     spawn_cool_down_entry(
@@ -718,73 +729,205 @@ fn build_streaming_response(
                         entry_id.clone(),
                     );
                 }
-                Poll::Ready(Some(Err(std::io::Error::new(std::io::ErrorKind::Other, err))))
+                return Poll::Ready(Some(Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "stream idle timeout",
+                ))));
             }
-            Poll::Ready(None) => {
-                if !logged.swap(true, Ordering::SeqCst) {
-                    let pt = prompt_tokens.load(Ordering::SeqCst);
-                    let ct = completion_tokens.load(Ordering::SeqCst);
-                    let has_error = has_sse_error.load(Ordering::SeqCst);
-                    let chunk_total = chunk_count.load(Ordering::SeqCst);
-                    let byte_total = streamed_bytes.load(Ordering::SeqCst);
-                    let ft = first_token_ms.load(Ordering::SeqCst);
-                    let sc = status_code;
-                    let success = is_completed_stream_success(sc, has_error, chunk_total, byte_total);
-                    let attempt_path = attempt_path_with_current(
-                        &prior_attempts,
-                        &entry,
-                        status_code,
-                        success,
-                        None,
-                    );
-                    let stream_summary = build_stream_diagnostic(
-                        "stream_complete",
-                        None,
-                        &entry,
-                        &upstream_url,
-                        status_code,
-                        &response_headers,
-                        chunk_total,
-                        byte_total,
-                        sse_buffer.len(),
-                        ft,
-                        start.elapsed().as_millis() as i64,
-                    );
-                    let db2 = db.clone();
-                    let ah2 = app_handle.clone();
-                    let ak2 = access_key.clone();
-                    let e2 = entry.clone();
-                    let rm2 = requested_model.clone();
-                    let ft = first_token_ms.load(Ordering::SeqCst);
-                    let lat = start.elapsed().as_millis() as i64;
-                    let sc = status_code;
-                    let scb = success_circuit_breakers.clone();
-                    let sfc = success_failure_counts.clone();
-                    let eid = entry_id.clone();
-                    let sdb = settings_cache.clone();
-                    let eah = entries_app_handle.clone();
-                    tokio::spawn(async move {
-                        log_usage(
-                            &db2, &ah2, ak2.as_ref(), &e2, &rm2,
-                            true, pt, ct, ft, lat,
-                            sc, success, Some(stream_summary.as_str()),
-                            Some(attempt_path.as_str()), Some(StreamEndReason::Done),
-                        );
-                        if success {
-                            spawn_record_circuit_success(scb, sfc, sdb, db2.clone(), eah, eid);
+
+            match upstream_stream.as_mut().poll_next(cx) {
+                Poll::Ready(Some(Ok(chunk))) => {
+                    idle_timeout
+                        .as_mut()
+                        .reset(tokio::time::Instant::now() + STREAMING_IDLE_TIMEOUT);
+                    if !seen_first_chunk.swap(true, Ordering::SeqCst) {
+                        first_token_ms.store(start.elapsed().as_millis() as i64, Ordering::SeqCst);
+                    }
+                    chunk_count.fetch_add(1, Ordering::SeqCst);
+                    streamed_bytes.fetch_add(chunk.len() as i64, Ordering::SeqCst);
+
+                    if needs_transform {
+                        if let Some(transformed) = transform_sse_chunk(
+                            &chunk,
+                            &mut sse_buffer,
+                            &adapter,
+                            &prompt_tokens,
+                            &completion_tokens,
+                            &has_text_delta,
+                            &has_tool_calls,
+                            append_model_info.then_some(entry.model.as_str()),
+                            &mut done_state,
+                        ) {
+                            return Poll::Ready(Some(Ok(transformed)));
                         } else {
-                            spawn_cool_down_entry(scb, sfc, sdb, db2.clone(), eah, eid);
+                            cx.waker().wake_by_ref();
+                            return Poll::Pending;
                         }
-                    });
+                    } else {
+                        if let Some(with_model_info) = append_and_parse_sse(
+                            &mut sse_buffer,
+                            &chunk,
+                            &prompt_tokens,
+                            &completion_tokens,
+                            &has_sse_error,
+                            &has_text_delta,
+                            &has_tool_calls,
+                            append_model_info.then_some(entry.model.as_str()),
+                            &mut done_state,
+                        ) {
+                            return Poll::Ready(Some(Ok(with_model_info)));
+                        }
+                    }
+
+                    Poll::Ready(Some(Ok(chunk)))
                 }
-                Poll::Ready(None)
+                Poll::Ready(Some(Err(err))) => {
+                    if !logged.swap(true, Ordering::SeqCst) {
+                        let chunk_total = chunk_count.load(Ordering::SeqCst);
+                        let byte_total = streamed_bytes.load(Ordering::SeqCst);
+                        let ft = first_token_ms.load(Ordering::SeqCst);
+                        let lat = start.elapsed().as_millis() as i64;
+                        let diagnostic = build_stream_diagnostic(
+                            "stream_read",
+                            Some(&err),
+                            &entry,
+                            &upstream_url,
+                            status_code,
+                            &response_headers,
+                            chunk_total,
+                            byte_total,
+                            sse_buffer.len(),
+                            ft,
+                            lat,
+                        );
+                        let error_message = format!("Stream error: {err}\n{diagnostic}");
+                        let attempt_path = attempt_path_with_current(
+                            &prior_attempts,
+                            &entry,
+                            502,
+                            false,
+                            Some(error_message.clone()),
+                        );
+                        let db2 = db.clone();
+                        let ah2 = app_handle.clone();
+                        let ak2 = access_key.clone();
+                        let e2 = entry.clone();
+                        let rm2 = requested_model.clone();
+                        let pt = prompt_tokens.load(Ordering::SeqCst);
+                        let ct = completion_tokens.load(Ordering::SeqCst);
+                        tokio::spawn(async move {
+                            log_usage(
+                                &db2,
+                                &ah2,
+                                ak2.as_ref(),
+                                &e2,
+                                &rm2,
+                                true,
+                                pt,
+                                ct,
+                                ft,
+                                lat,
+                                502,
+                                false,
+                                Some(error_message.as_str()),
+                                Some(attempt_path.as_str()),
+                                Some(StreamEndReason::UpstreamError),
+                            );
+                        });
+                        spawn_cool_down_entry(
+                            circuit_breakers.clone(),
+                            failure_counts.clone(),
+                            settings_cache.clone(),
+                            db.clone(),
+                            entries_app_handle.clone(),
+                            entry_id.clone(),
+                        );
+                    }
+                    Poll::Ready(Some(Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        err,
+                    ))))
+                }
+                Poll::Ready(None) => {
+                    if !logged.swap(true, Ordering::SeqCst) {
+                        let pt = prompt_tokens.load(Ordering::SeqCst);
+                        let ct = completion_tokens.load(Ordering::SeqCst);
+                        let has_error = has_sse_error.load(Ordering::SeqCst);
+                        let chunk_total = chunk_count.load(Ordering::SeqCst);
+                        let byte_total = streamed_bytes.load(Ordering::SeqCst);
+                        let ft = first_token_ms.load(Ordering::SeqCst);
+                        let sc = status_code;
+                        let success =
+                            is_completed_stream_success(sc, has_error, chunk_total, byte_total);
+                        let attempt_path = attempt_path_with_current(
+                            &prior_attempts,
+                            &entry,
+                            status_code,
+                            success,
+                            None,
+                        );
+                        let stream_summary = build_stream_diagnostic(
+                            "stream_complete",
+                            None,
+                            &entry,
+                            &upstream_url,
+                            status_code,
+                            &response_headers,
+                            chunk_total,
+                            byte_total,
+                            sse_buffer.len(),
+                            ft,
+                            start.elapsed().as_millis() as i64,
+                        );
+                        let db2 = db.clone();
+                        let ah2 = app_handle.clone();
+                        let ak2 = access_key.clone();
+                        let e2 = entry.clone();
+                        let rm2 = requested_model.clone();
+                        let ft = first_token_ms.load(Ordering::SeqCst);
+                        let lat = start.elapsed().as_millis() as i64;
+                        let sc = status_code;
+                        let scb = success_circuit_breakers.clone();
+                        let sfc = success_failure_counts.clone();
+                        let eid = entry_id.clone();
+                        let sdb = settings_cache.clone();
+                        let eah = entries_app_handle.clone();
+                        tokio::spawn(async move {
+                            log_usage(
+                                &db2,
+                                &ah2,
+                                ak2.as_ref(),
+                                &e2,
+                                &rm2,
+                                true,
+                                pt,
+                                ct,
+                                ft,
+                                lat,
+                                sc,
+                                success,
+                                Some(stream_summary.as_str()),
+                                Some(attempt_path.as_str()),
+                                Some(StreamEndReason::Done),
+                            );
+                            if success {
+                                spawn_record_circuit_success(scb, sfc, sdb, db2.clone(), eah, eid);
+                            } else {
+                                spawn_cool_down_entry(scb, sfc, sdb, db2.clone(), eah, eid);
+                            }
+                        });
+                    }
+                    Poll::Ready(None)
+                }
+                Poll::Pending => Poll::Pending,
             }
-            Poll::Pending => Poll::Pending,
-        }
-    });
+        });
 
     axum::http::Response::builder()
-        .status(axum::http::StatusCode::from_u16(status_code as u16).unwrap_or(axum::http::StatusCode::OK))
+        .status(
+            axum::http::StatusCode::from_u16(status_code as u16)
+                .unwrap_or(axum::http::StatusCode::OK),
+        )
         .header("content-type", "text/event-stream")
         .header("cache-control", "no-cache")
         .header("connection", "keep-alive")
@@ -823,10 +966,9 @@ fn stream_chunk_has_model_info_delta(value: &Value, model: &str) -> bool {
         })
 }
 
-/// 检测 chunk 是否包含 tool_calls（函数调用/工具调用）。
-/// 当响应中存在 tool_calls 时，不应附加模型信息，因为：
-/// 1. 工具调用是中间步骤，不是最终文本输出
-/// 2. 下游循环调用时会出现多条模型信息
+/// 检测 OpenAI 兼容 chunk 是否包含函数/工具调用信号。
+/// 一旦响应中存在工具调用，本轮就是 CALL 中间态，不应附加模型信息，
+/// 否则下游循环复用时会把 `model: ...` 当成对话内容重复显示。
 fn stream_chunk_has_tool_calls(value: &Value) -> bool {
     value
         .get("choices")
@@ -834,11 +976,33 @@ fn stream_chunk_has_tool_calls(value: &Value) -> bool {
         .into_iter()
         .flatten()
         .any(|choice| {
-            choice
-                .get("delta")
-                .and_then(|delta| delta.get("tool_calls"))
-                .and_then(Value::as_array)
-                .is_some_and(|tc| !tc.is_empty())
+            let delta = choice.get("delta");
+            let message = choice.get("message");
+
+            let has_tool_calls = |container: Option<&Value>| {
+                container
+                    .and_then(|item| item.get("tool_calls"))
+                    .and_then(Value::as_array)
+                    .is_some_and(|tool_calls| !tool_calls.is_empty())
+            };
+
+            let has_function_call = |container: Option<&Value>| {
+                container
+                    .and_then(|item| item.get("function_call"))
+                    .is_some_and(|function_call| !function_call.is_null())
+            };
+
+            let finish_reason = choice
+                .get("finish_reason")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let is_tool_finish = matches!(finish_reason, "tool_calls" | "function_call");
+
+            has_tool_calls(delta)
+                || has_tool_calls(message)
+                || has_function_call(delta)
+                || has_function_call(message)
+                || is_tool_finish
         })
 }
 
@@ -869,8 +1033,12 @@ fn transform_sse_chunk(
 
     while let Some(line_end) = buffer.find('\n') {
         let mut line = buffer.drain(..=line_end).collect::<String>();
-        if line.ends_with('\n') { line.pop(); }
-        if line.ends_with('\r') { line.pop(); }
+        if line.ends_with('\n') {
+            line.pop();
+        }
+        if line.ends_with('\r') {
+            line.pop();
+        }
 
         if let Some(payload) = line.strip_prefix("data: ") {
             if payload == "[DONE]" {
@@ -891,8 +1059,12 @@ fn transform_sse_chunk(
             }
 
             let (prompt, completion) = adapter.extract_sse_usage(payload);
-            if prompt > 0 { prompt_tokens.store(prompt, Ordering::Relaxed); }
-            if completion > 0 { completion_tokens.store(completion, Ordering::Relaxed); }
+            if prompt > 0 {
+                prompt_tokens.store(prompt, Ordering::Relaxed);
+            }
+            if completion > 0 {
+                completion_tokens.store(completion, Ordering::Relaxed);
+            }
 
             if let Some(transformed) = adapter.transform_sse_line(payload) {
                 if let Ok(value) = serde_json::from_str::<Value>(&transformed) {
@@ -913,7 +1085,11 @@ fn transform_sse_chunk(
         }
     }
 
-    if output.is_empty() { None } else { Some(Bytes::from(output.concat())) }
+    if output.is_empty() {
+        None
+    } else {
+        Some(Bytes::from(output.concat()))
+    }
 }
 
 fn append_and_parse_sse(
@@ -932,8 +1108,12 @@ fn append_and_parse_sse(
 
     while let Some(line_end) = buffer.find('\n') {
         let mut line = buffer.drain(..=line_end).collect::<String>();
-        if line.ends_with('\n') { line.pop(); }
-        if line.ends_with('\r') { line.pop(); }
+        if line.ends_with('\n') {
+            line.pop();
+        }
+        if line.ends_with('\r') {
+            line.pop();
+        }
 
         if let Some(payload) = line.strip_prefix("data: ") {
             if payload == "[DONE]" {
@@ -944,7 +1124,9 @@ fn append_and_parse_sse(
                 continue;
             }
 
-            let Ok(value) = serde_json::from_str::<Value>(payload) else { continue };
+            let Ok(value) = serde_json::from_str::<Value>(payload) else {
+                continue;
+            };
             // 只有 error 值是非 null 对象时才算真正的错误
             // 修复: value.get("error").is_some() 对 "error": null 也会返回 true，导致误判
             if let Some(err) = value.get("error") {
@@ -964,8 +1146,12 @@ fn append_and_parse_sse(
                 }
             }
             let (prompt, completion) = extract_usage_tokens(&value);
-            if prompt > 0 { prompt_tokens.store(prompt, Ordering::Relaxed); }
-            if completion > 0 { completion_tokens.store(completion, Ordering::Relaxed); }
+            if prompt > 0 {
+                prompt_tokens.store(prompt, Ordering::Relaxed);
+            }
+            if completion > 0 {
+                completion_tokens.store(completion, Ordering::Relaxed);
+            }
         }
     }
 
@@ -980,7 +1166,10 @@ fn append_and_parse_sse(
     };
 
     let marker = b"data: [DONE]";
-    let Some(pos) = chunk.windows(marker.len()).position(|window| window == marker) else {
+    let Some(pos) = chunk
+        .windows(marker.len())
+        .position(|window| window == marker)
+    else {
         return None;
     };
 
@@ -1004,8 +1193,12 @@ fn status_matches_rule(rule: &str, status: u16) -> bool {
     }
 
     if let Some((start, end)) = rule.split_once('-') {
-        let Ok(start) = start.trim().parse::<u16>() else { return false; };
-        let Ok(end) = end.trim().parse::<u16>() else { return false; };
+        let Ok(start) = start.trim().parse::<u16>() else {
+            return false;
+        };
+        let Ok(end) = end.trim().parse::<u16>() else {
+            return false;
+        };
         return status >= start && status <= end;
     }
 
@@ -1225,15 +1418,30 @@ fn log_usage(
     .to_string();
 
     let _ = db.insert_usage_log(
-        log_type, content,
+        log_type,
+        content,
         access_key.map(|ak| ak.id.as_str()),
         access_key.map(|ak| ak.name.as_str()).unwrap_or("NONE"),
-        token_name, &entry.id, &entry.channel_id,
+        token_name,
+        &entry.id,
+        &entry.channel_id,
         entry.channel_name.as_deref().unwrap_or("unknown"),
-        &entry.model, requested_model, 0, is_stream,
-        prompt_tokens, completion_tokens, latency_ms,
-        first_token_ms, use_time, status_code, success,
-        "", "default", &other, error_message, None,
+        &entry.model,
+        requested_model,
+        0,
+        is_stream,
+        prompt_tokens,
+        completion_tokens,
+        latency_ms,
+        first_token_ms,
+        use_time,
+        status_code,
+        success,
+        "",
+        "default",
+        &other,
+        error_message,
+        None,
     );
 
     let _ = app_handle.emit("new-usage-log", ());
@@ -1337,7 +1545,7 @@ data: [DONE]\n"
         let mut buffer = String::new();
         let first_chunk = Bytes::from_static(
             b"data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\
-data: [DONE]\n"
+data: [DONE]\n",
         );
         let second_chunk = Bytes::from_static(b"data: [DONE]\n");
         let prompt_tokens = Arc::new(AtomicI64::new(0));
@@ -1381,7 +1589,7 @@ data: [DONE]\n"
         let chunk = Bytes::from_static(
             b"data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\
 data: {\"choices\":[{\"delta\":{\"content\":\"\\n\\nmodel: gpt-test\"}}]}\n\
-data: [DONE]\n"
+data: [DONE]\n",
         );
         let prompt_tokens = Arc::new(AtomicI64::new(0));
         let completion_tokens = Arc::new(AtomicI64::new(0));
@@ -1443,7 +1651,7 @@ data: [DONE]\n"
         let chunk = Bytes::from_static(
             b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\
 data: {\"choices\":[{\"delta\":{\"content\":\"\\n\\nmodel: gpt-test\"}}]}\n\
-data: [DONE]\n"
+data: [DONE]\n",
         );
         let mut buffer = String::new();
         let prompt_tokens = Arc::new(AtomicI64::new(0));
@@ -1478,13 +1686,14 @@ data: [DONE]\n"
     }
 
     #[test]
-    fn request_structured_output_blocks_model_info_but_tools_do_not() {
+    fn request_structured_output_and_tool_calling_detection_are_separate() {
         let tools_body = serde_json::json!({
             "model": "auto",
             "messages": [{"role": "user", "content": "hi"}],
             "tools": [{"type": "function", "function": {"name": "run"}}]
         });
         assert!(!request_uses_structured_output(&tools_body));
+        assert!(request_uses_tool_calling(&tools_body));
 
         let tool_choice_body = serde_json::json!({
             "model": "auto",
@@ -1492,6 +1701,7 @@ data: [DONE]\n"
             "tool_choice": "auto"
         });
         assert!(!request_uses_structured_output(&tool_choice_body));
+        assert!(request_uses_tool_calling(&tool_choice_body));
 
         let structured_body = serde_json::json!({
             "model": "auto",
@@ -1499,12 +1709,14 @@ data: [DONE]\n"
             "response_format": {"type": "json_object"}
         });
         assert!(request_uses_structured_output(&structured_body));
+        assert!(!request_uses_tool_calling(&structured_body));
 
         let plain_body = serde_json::json!({
             "model": "auto",
             "messages": [{"role": "user", "content": "hi"}]
         });
         assert!(!request_uses_structured_output(&plain_body));
+        assert!(!request_uses_tool_calling(&plain_body));
     }
 
     // ── tool_calls 场景测试 ─────────────────────────────────────────
@@ -1594,7 +1806,7 @@ data: [DONE]\n"
         let chunk = Bytes::from_static(
             b"data: {\"choices\":[{\"delta\":{\"content\":\"Hello!\"}}]}\n\
 data: {\"choices\":[],\"finish_reason\":\"stop\"}\n\
-data: [DONE]\n"
+data: [DONE]\n",
         );
         let prompt_tokens = Arc::new(AtomicI64::new(0));
         let completion_tokens = Arc::new(AtomicI64::new(0));
@@ -1620,7 +1832,8 @@ data: [DONE]\n"
         // 无工具调用
         assert!(!has_tool_calls.load(Ordering::Relaxed));
         // 应附加模型信息
-        let text = String::from_utf8(output.expect("should have output").to_vec()).expect("valid utf8");
+        let text =
+            String::from_utf8(output.expect("should have output").to_vec()).expect("valid utf8");
         assert_eq!(text.matches("model: gpt-test").count(), 1);
         assert!(done_state.appended_model_info);
     }
@@ -1662,5 +1875,142 @@ data: [DONE]\n"
         let output = String::from_utf8(output.to_vec()).expect("valid utf8");
         assert_eq!(output.matches("model: claude-3").count(), 0);
         assert!(!done_state.appended_model_info);
+    }
+
+    #[test]
+    fn append_and_parse_sse_no_model_info_when_finish_reason_tool_calls() {
+        // 场景：finish_reason 为 "tool_calls" 但 delta 中没有 tool_calls 数组
+        // 这是 Claude 适配器在 message_delta 事件中的输出格式
+        // 预期：不附加模型信息
+        let mut buffer = String::new();
+        let chunk = Bytes::from_static(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"Let me check.\"}}]}\n\
+data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\
+data: [DONE]\n",
+        );
+        let prompt_tokens = Arc::new(AtomicI64::new(0));
+        let completion_tokens = Arc::new(AtomicI64::new(0));
+        let has_sse_error = Arc::new(AtomicBool::new(false));
+        let has_text_delta = Arc::new(AtomicBool::new(false));
+        let has_tool_calls = Arc::new(AtomicBool::new(false));
+        let mut done_state = SseDoneState::default();
+
+        let output = append_and_parse_sse(
+            &mut buffer,
+            &chunk,
+            &prompt_tokens,
+            &completion_tokens,
+            &has_sse_error,
+            &has_text_delta,
+            &has_tool_calls,
+            Some("gpt-test"),
+            &mut done_state,
+        );
+
+        // 有文本内容
+        assert!(has_text_delta.load(Ordering::Relaxed));
+        // finish_reason: "tool_calls" 应被检测为工具调用
+        assert!(has_tool_calls.load(Ordering::Relaxed));
+        // 不应附加模型信息
+        assert!(output.is_none());
+        assert!(!done_state.appended_model_info);
+    }
+
+    #[test]
+    fn append_and_parse_sse_no_model_info_when_finish_reason_function_call() {
+        // 场景：finish_reason 为 "function_call"（旧格式）
+        // 预期：不附加模型信息
+        let mut buffer = String::new();
+        let chunk = Bytes::from_static(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"Let me check.\"}}]}\n\
+data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"function_call\"}]}\n\
+data: [DONE]\n",
+        );
+        let prompt_tokens = Arc::new(AtomicI64::new(0));
+        let completion_tokens = Arc::new(AtomicI64::new(0));
+        let has_sse_error = Arc::new(AtomicBool::new(false));
+        let has_text_delta = Arc::new(AtomicBool::new(false));
+        let has_tool_calls = Arc::new(AtomicBool::new(false));
+        let mut done_state = SseDoneState::default();
+
+        let output = append_and_parse_sse(
+            &mut buffer,
+            &chunk,
+            &prompt_tokens,
+            &completion_tokens,
+            &has_sse_error,
+            &has_text_delta,
+            &has_tool_calls,
+            Some("gpt-test"),
+            &mut done_state,
+        );
+
+        // 有文本内容
+        assert!(has_text_delta.load(Ordering::Relaxed));
+        // finish_reason: "function_call" 应被检测为工具调用
+        assert!(has_tool_calls.load(Ordering::Relaxed));
+        // 不应附加模型信息
+        assert!(output.is_none());
+        assert!(!done_state.appended_model_info);
+    }
+
+    #[test]
+    fn append_and_parse_sse_no_model_info_when_delta_function_call() {
+        let mut buffer = String::new();
+        let chunk = Bytes::from_static(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"Let me check.\"}}]}\n\
+data: {\"choices\":[{\"delta\":{\"function_call\":{\"name\":\"get_weather\",\"arguments\":\"{}\"}}}]}\n\
+data: [DONE]\n"
+        );
+        let prompt_tokens = Arc::new(AtomicI64::new(0));
+        let completion_tokens = Arc::new(AtomicI64::new(0));
+        let has_sse_error = Arc::new(AtomicBool::new(false));
+        let has_text_delta = Arc::new(AtomicBool::new(false));
+        let has_tool_calls = Arc::new(AtomicBool::new(false));
+        let mut done_state = SseDoneState::default();
+
+        let output = append_and_parse_sse(
+            &mut buffer,
+            &chunk,
+            &prompt_tokens,
+            &completion_tokens,
+            &has_sse_error,
+            &has_text_delta,
+            &has_tool_calls,
+            Some("gpt-test"),
+            &mut done_state,
+        );
+
+        assert!(has_text_delta.load(Ordering::Relaxed));
+        assert!(has_tool_calls.load(Ordering::Relaxed));
+        assert!(output.is_none());
+        assert!(!done_state.appended_model_info);
+    }
+
+    #[test]
+    fn stream_chunk_detects_message_level_tool_and_function_calls() {
+        let message_tool_calls = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": "{}"}
+                    }]
+                }
+            }]
+        });
+        assert!(stream_chunk_has_tool_calls(&message_tool_calls));
+
+        let message_function_call = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "function_call": {"name": "get_weather", "arguments": "{}"}
+                }
+            }]
+        });
+        assert!(stream_chunk_has_tool_calls(&message_function_call));
     }
 }

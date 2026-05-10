@@ -14,7 +14,6 @@ pub struct LoginFailureState {
 pub struct SessionInfo {
     pub username: String,
     pub expires_at: chrono::DateTime<chrono::Utc>,
-
 }
 
 #[derive(Clone)]
@@ -28,8 +27,6 @@ pub struct AdminState {
 }
 
 impl AdminState {
-
-
     pub fn new_runtime(runtime: AppState, app_handle: tauri::AppHandle) -> Self {
         Self {
             db: runtime.db.clone(),

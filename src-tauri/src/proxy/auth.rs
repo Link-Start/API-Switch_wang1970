@@ -12,12 +12,11 @@ pub async fn extract_access_key(
 ) -> Result<Option<AccessKey>, AppError> {
     let settings = state.settings.read().await.clone();
 
-    let auth_header = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok());
+    let auth_header = headers.get("authorization").and_then(|v| v.to_str().ok());
 
     let key_str = auth_header.and_then(|a| {
-        let stripped = a.strip_prefix("Bearer ")
+        let stripped = a
+            .strip_prefix("Bearer ")
             .or_else(|| a.strip_prefix("bearer "))
             .unwrap_or(a);
         Some(stripped)
@@ -36,7 +35,9 @@ pub async fn extract_access_key(
         // Validation enabled: must have a valid enabled key
         match access_key {
             Some(ak) if ak.enabled => Ok(Some(ak)),
-            _ => Err(AppError::Validation("Valid Access Key required".to_string())),
+            _ => Err(AppError::Validation(
+                "Valid Access Key required".to_string(),
+            )),
         }
     } else {
         // Validation disabled: just track identity

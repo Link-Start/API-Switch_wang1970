@@ -16,7 +16,10 @@ fn parse_response_ms(entry: &ApiEntry) -> Option<i64> {
         return milliseconds.parse::<f64>().ok().map(|ms| ms.round() as i64);
     }
     if let Some(seconds) = value.strip_suffix('s') {
-        return seconds.parse::<f64>().ok().map(|s| (s * 1000.0).round() as i64);
+        return seconds
+            .parse::<f64>()
+            .ok()
+            .map(|s| (s * 1000.0).round() as i64);
     }
     value.parse::<f64>().ok().map(|ms| ms.round() as i64)
 }
@@ -205,7 +208,13 @@ mod tests {
         }
     }
 
-    fn entry_with_group(id: &str, model: &str, enabled: bool, sort_index: i32, group: &str) -> ApiEntry {
+    fn entry_with_group(
+        id: &str,
+        model: &str,
+        enabled: bool,
+        sort_index: i32,
+        group: &str,
+    ) -> ApiEntry {
         let mut e = entry(id, model, enabled, sort_index);
         e.group_name = Some(group.to_string());
         e
@@ -222,7 +231,10 @@ mod tests {
 
         let resolved = resolve("   ", &all, &auto, &breakers, "custom").await;
 
-        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["auto-first"]);
+        assert_eq!(
+            resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["auto-first"]
+        );
     }
 
     #[tokio::test]
@@ -236,7 +248,10 @@ mod tests {
 
         let resolved = resolve("CoDiNg", &all, &all, &breakers, "custom").await;
 
-        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["match1", "match2"]);
+        assert_eq!(
+            resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["match1", "match2"]
+        );
     }
 
     #[tokio::test]
@@ -249,7 +264,10 @@ mod tests {
 
         let resolved = resolve("coding", &all, &all, &breakers, "custom").await;
 
-        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["group-match"]);
+        assert_eq!(
+            resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["group-match"]
+        );
     }
 
     #[tokio::test]
@@ -267,7 +285,10 @@ mod tests {
         let resolved = resolve("gpt-4o", &all, &all, &breakers, "custom").await;
 
         // Only exact match should be returned, fuzzy excluded
-        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["exact-match"]);
+        assert_eq!(
+            resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["exact-match"]
+        );
     }
 
     #[tokio::test]
@@ -281,7 +302,10 @@ mod tests {
 
         let resolved = resolve("gPt-4O", &all, &all, &breakers, "custom").await;
 
-        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["match1", "match2"]);
+        assert_eq!(
+            resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["match1", "match2"]
+        );
     }
 
     #[tokio::test]
@@ -296,7 +320,10 @@ mod tests {
 
         let resolved = resolve("missing-model", &all, &auto, &breakers, "custom").await;
 
-        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["auto-first", "auto-second"]);
+        assert_eq!(
+            resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["auto-first", "auto-second"]
+        );
     }
 
     #[tokio::test]
@@ -327,7 +354,10 @@ mod tests {
 
         let resolved = resolve("missing-model", &all, &auto, &breakers, "custom").await;
 
-        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["healthy-auto"]);
+        assert_eq!(
+            resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["healthy-auto"]
+        );
     }
 
     #[tokio::test]
@@ -341,7 +371,10 @@ mod tests {
 
         let resolved = resolve("missing-model", &all, &auto, &breakers, "custom").await;
 
-        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec![healthy.id.as_str()]);
+        assert_eq!(
+            resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec![healthy.id.as_str()]
+        );
     }
 
     #[tokio::test]
@@ -357,7 +390,10 @@ mod tests {
 
         apply_sort_mode(&mut entries, "latest");
 
-        assert_eq!(entries.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["newest", "newer", "older", "missing"]);
+        assert_eq!(
+            entries.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["newest", "newer", "older", "missing"]
+        );
     }
 
     #[tokio::test]
@@ -371,7 +407,10 @@ mod tests {
 
         apply_sort_mode(&mut entries, "fastest");
 
-        assert_eq!(entries.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["fast", "slow", "missing"]);
+        assert_eq!(
+            entries.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["fast", "slow", "missing"]
+        );
     }
 
     #[tokio::test]
@@ -385,7 +424,9 @@ mod tests {
 
         let resolved = resolve("auto", &enabled, &enabled, &breakers, "custom").await;
 
-        assert_eq!(resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["first", "second", "third"]);
+        assert_eq!(
+            resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["first", "second", "third"]
+        );
     }
 }
-

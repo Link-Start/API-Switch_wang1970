@@ -2,10 +2,10 @@
 use crate::admin::error::AdminError;
 use crate::admin::state::AdminState;
 use crate::proxy::protocol::get_adapter;
-use axum::{extract::{Json, State}};
+use axum::extract::{Json, State};
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
 use serde_json::json;
+use std::time::Instant;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TestChatRequest {
@@ -38,9 +38,10 @@ pub async fn test_chat(
     Json(payload): Json<TestChatRequest>,
 ) -> Result<Json<TestChatResponse>, AdminError> {
     // Ensure runtime is available
-    let runtime = state.runtime.as_ref().ok_or_else(|| {
-        AdminError::BadRequest("Admin runtime not initialized".to_string())
-    })?;
+    let runtime = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| AdminError::BadRequest("Admin runtime not initialized".to_string()))?;
     let db = runtime.db.clone();
 
     // Get all entries for routing (including disabled)
@@ -68,7 +69,9 @@ pub async fn test_chat(
 
     let start = Instant::now();
     let client = reqwest::Client::new();
-    let request = adapter.apply_auth(client.post(&url), &channel.api_key).json(&upstream_body);
+    let request = adapter
+        .apply_auth(client.post(&url), &channel.api_key)
+        .json(&upstream_body);
     let response = request
         .send()
         .await
@@ -77,7 +80,9 @@ pub async fn test_chat(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(AdminError::Internal(format!("Upstream error {status}: {body}")));
+        return Err(AdminError::Internal(format!(
+            "Upstream error {status}: {body}"
+        )));
     }
 
     let latency_ms = start.elapsed().as_millis() as u64;
@@ -101,9 +106,16 @@ pub async fn test_chat(
     // Extract usage if present
     let usage = json_body.get("usage").map(|u| TestChatUsage {
         prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
-        completion_tokens: u.get("completion_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
+        completion_tokens: u
+            .get("completion_tokens")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
         total_tokens: u.get("total_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
     });
 
-    Ok(Json(TestChatResponse { content, latency_ms, usage }))
+    Ok(Json(TestChatResponse {
+        content,
+        latency_ms,
+        usage,
+    }))
 }

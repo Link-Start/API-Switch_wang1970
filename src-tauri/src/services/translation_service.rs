@@ -74,7 +74,10 @@ async fn perform_llm_call(
                 .first()
                 .ok_or("No API entries configured in the system")?
                 .clone();
-            log::info!("[translation] No entry_id specified, falling back to first entry: {}", first.id);
+            log::info!(
+                "[translation] No entry_id specified, falling back to first entry: {}",
+                first.id
+            );
             first
         }
     };

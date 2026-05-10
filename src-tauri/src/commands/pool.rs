@@ -1,9 +1,9 @@
 use crate::database::ApiEntry;
 use crate::error::AppError;
+use crate::services::pool_service;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State};
-use crate::services::pool_service;
 
 #[derive(Serialize)]
 pub struct TestResult {
@@ -58,7 +58,12 @@ pub fn list_entries(state: State<'_, AppState>) -> Result<Vec<ApiEntry>, AppErro
 }
 
 #[tauri::command]
-pub fn toggle_entry(app: tauri::AppHandle, state: State<'_, AppState>, id: String, enabled: bool) -> Result<(), AppError> {
+pub fn toggle_entry(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), AppError> {
     pool_service::toggle_entry(&state.db, &state.failure_counts, &id, enabled)?;
     let _ = app.emit("entries-changed", ());
     crate::refresh_tray_if_enabled(&app);

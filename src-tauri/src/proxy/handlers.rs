@@ -3,8 +3,8 @@ use super::forwarder;
 use super::protocol::{
     azure_to_openai_request, claude_to_openai_request, gemini_to_openai_request,
     openai_to_azure_response, openai_to_claude_response, openai_to_gemini_response,
-    transform_azure_error, transform_claude_error, transform_gemini_error,
-    AzureSSETransformer, ClaudeSSETransformer, GeminiSSETransformer,
+    transform_azure_error, transform_claude_error, transform_gemini_error, AzureSSETransformer,
+    ClaudeSSETransformer, GeminiSSETransformer,
 };
 use super::router;
 use super::server::ProxyState;
@@ -47,10 +47,12 @@ pub async fn handle_chat_completions(
     let headers = &parts.headers;
 
     // Extract Access Key
-    let access_key = auth::extract_access_key(headers, &state).await.map_err(|err| match err {
-        crate::error::AppError::Validation(_) => ProxyError::Unauthorized,
-        other => ProxyError::from(other),
-    })?;
+    let access_key = auth::extract_access_key(headers, &state)
+        .await
+        .map_err(|err| match err {
+            crate::error::AppError::Validation(_) => ProxyError::Unauthorized,
+            other => ProxyError::from(other),
+        })?;
 
     // Read request body
     let body_bytes = axum::body::to_bytes(body, 32 * 1024 * 1024)
@@ -112,10 +114,12 @@ pub async fn handle_messages(
     let headers = &parts.headers;
 
     // Extract Access Key (same as OpenAI)
-    let access_key = auth::extract_access_key(headers, &state).await.map_err(|err| match err {
-        crate::error::AppError::Validation(_) => ProxyError::Unauthorized,
-        other => ProxyError::from(other),
-    })?;
+    let access_key = auth::extract_access_key(headers, &state)
+        .await
+        .map_err(|err| match err {
+            crate::error::AppError::Validation(_) => ProxyError::Unauthorized,
+            other => ProxyError::from(other),
+        })?;
 
     // Read request body
     let body_bytes = axum::body::to_bytes(body, 32 * 1024 * 1024)
@@ -128,7 +132,8 @@ pub async fn handle_messages(
     // Convert Claude format to OpenAI format for internal routing
     let openai_body = claude_to_openai_request(&body);
 
-    let requested_model = normalize_requested_model(openai_body.get("model").and_then(|m| m.as_str()));
+    let requested_model =
+        normalize_requested_model(openai_body.get("model").and_then(|m| m.as_str()));
 
     let is_stream = openai_body
         .get("stream")
@@ -200,9 +205,8 @@ pub async fn handle_messages(
                             if !events.is_empty() {
                                 let mut output = Vec::new();
                                 for event in &events {
-                                    output.extend_from_slice(
-                                        format!("data: {event}\n\n").as_bytes(),
-                                    );
+                                    output
+                                        .extend_from_slice(format!("data: {event}\n\n").as_bytes());
                                 }
                                 return Some((
                                     Ok(Bytes::from(output)),
@@ -289,7 +293,12 @@ pub async fn handle_list_models(
         })
         .collect();
     // Sort groups for deterministic order (optional)
-    group_models.sort_by(|a, b| a["id"].as_str().unwrap_or("").cmp(b["id"].as_str().unwrap_or("")));
+    group_models.sort_by(|a, b| {
+        a["id"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(b["id"].as_str().unwrap_or(""))
+    });
 
     let models: Vec<Value> = entries
         .iter()
@@ -323,7 +332,9 @@ pub async fn handle_gemini_native(
     };
 
     if action != "generateContent" {
-        return Err(ProxyError::Internal(format!("Unsupported Gemini action: {action}")));
+        return Err(ProxyError::Internal(format!(
+            "Unsupported Gemini action: {action}"
+        )));
     }
 
     let (parts, body) = request.into_parts();
@@ -395,10 +406,12 @@ pub async fn handle_azure_chat(
     let headers = &parts.headers;
 
     // Extract Access Key
-    let access_key = auth::extract_access_key(headers, &state).await.map_err(|err| match err {
-        crate::error::AppError::Validation(_) => ProxyError::Unauthorized,
-        other => ProxyError::from(other),
-    })?;
+    let access_key = auth::extract_access_key(headers, &state)
+        .await
+        .map_err(|err| match err {
+            crate::error::AppError::Validation(_) => ProxyError::Unauthorized,
+            other => ProxyError::from(other),
+        })?;
 
     // Read request body
     let body_bytes = axum::body::to_bytes(body, 32 * 1024 * 1024)
@@ -411,7 +424,8 @@ pub async fn handle_azure_chat(
     // Convert Azure format to OpenAI format (mostly passthrough)
     let openai_body = azure_to_openai_request(&body, &deployment);
 
-    let requested_model = normalize_requested_model(openai_body.get("model").and_then(|m| m.as_str()));
+    let requested_model =
+        normalize_requested_model(openai_body.get("model").and_then(|m| m.as_str()));
 
     let is_stream = openai_body
         .get("stream")
@@ -494,10 +508,9 @@ impl IntoResponse for ProxyError {
                 format!("No available provider for model: {model}"),
             ),
             ProxyError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
-            ProxyError::AllProvidersFailed => (
-                StatusCode::BAD_GATEWAY,
-                "All providers failed".to_string(),
-            ),
+            ProxyError::AllProvidersFailed => {
+                (StatusCode::BAD_GATEWAY, "All providers failed".to_string())
+            }
             ProxyError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
             ProxyError::Upstream { status, message } => {
                 let code = StatusCode::from_u16(*status).unwrap_or(StatusCode::BAD_GATEWAY);

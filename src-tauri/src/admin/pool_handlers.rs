@@ -2,7 +2,7 @@ use crate::admin::error::AdminError;
 use crate::admin::state::AdminState;
 use crate::database::ApiEntry;
 use crate::services::pool_service;
-use axum::{extract::{Json, Path, State}};
+use axum::extract::{Json, Path, State};
 use serde::Deserialize;
 
 // ---------- Request/Response Types -----------------------------------------
@@ -77,9 +77,13 @@ pub async fn toggle(
 ) -> Result<Json<serde_json::Value>, AdminError> {
     pool_service::toggle_entry(
         &state.db,
-        &state.runtime.as_ref().ok_or_else(|| {
-            AdminError::Internal("Runtime state not available for toggle operation".to_string())
-        })?.failure_counts,
+        &state
+            .runtime
+            .as_ref()
+            .ok_or_else(|| {
+                AdminError::Internal("Runtime state not available for toggle operation".to_string())
+            })?
+            .failure_counts,
         &id,
         enabled,
     )?;
@@ -134,9 +138,7 @@ pub async fn backfill_catalog_meta(
 }
 
 /// GET /admin/pool/groups - Get all distinct group names
-pub async fn get_groups(
-    State(state): State<AdminState>,
-) -> Result<Json<Vec<String>>, AdminError> {
+pub async fn get_groups(State(state): State<AdminState>) -> Result<Json<Vec<String>>, AdminError> {
     let groups = pool_service::get_all_groups(&state.db)?;
     Ok(Json(groups))
 }

@@ -197,7 +197,12 @@ impl Database {
         Ok(())
     }
 
-    pub fn add_channel_model_if_missing(&self, channel_id: &str, model: &str, owned_by: Option<&str>) -> Result<(), AppError> {
+    pub fn add_channel_model_if_missing(
+        &self,
+        channel_id: &str,
+        model: &str,
+        owned_by: Option<&str>,
+    ) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         let now = chrono::Utc::now().timestamp();
 
@@ -207,10 +212,15 @@ impl Database {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
 
-        let mut available_models: Vec<ModelInfo> = serde_json::from_str(&available_models_str).unwrap_or_default();
-        let mut selected_models: Vec<String> = serde_json::from_str(&selected_models_str).unwrap_or_default();
+        let mut available_models: Vec<ModelInfo> =
+            serde_json::from_str(&available_models_str).unwrap_or_default();
+        let mut selected_models: Vec<String> =
+            serde_json::from_str(&selected_models_str).unwrap_or_default();
 
-        if !available_models.iter().any(|m| m.id == model || m.name == model) {
+        if !available_models
+            .iter()
+            .any(|m| m.id == model || m.name == model)
+        {
             available_models.push(ModelInfo {
                 id: model.to_string(),
                 name: model.to_string(),

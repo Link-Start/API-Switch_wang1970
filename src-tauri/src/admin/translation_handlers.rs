@@ -20,7 +20,9 @@ pub async fn get_translation_relay(
 ) -> Result<Json<TranslationRelayResponse>, AdminError> {
     // Use the same AppState cache via AdminState.runtime
     let runtime = state.runtime.as_ref().ok_or_else(|| {
-        AdminError::Internal("AdminState runtime not initialized; cannot access translation relay".to_string())
+        AdminError::Internal(
+            "AdminState runtime not initialized; cannot access translation relay".to_string(),
+        )
     })?;
 
     let latest = translation_service::get_latest(runtime).await;

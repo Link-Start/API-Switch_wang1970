@@ -56,8 +56,8 @@ impl Default for AppSettings {
             theme: String::new(),
             updated_at: 0,
             }
-        }
     }
+}
 
 impl Database {
     pub fn get_settings(&self) -> Result<AppSettings, AppError> {
@@ -115,13 +115,13 @@ impl Database {
         if let Some(v) = kv.get("show_guide") {
             settings.show_guide = v == "1";
         }
-if let Some(v) = kv.get("default_sort_mode") {
-    settings.default_sort_mode = v.clone();
-}
-if let Some(v) = kv.get("active_group") {
-    settings.active_group = v.clone();
-}
-if let Some(v) = kv.get("web_admin_enabled") {
+        if let Some(v) = kv.get("default_sort_mode") {
+            settings.default_sort_mode = v.clone();
+        }
+        if let Some(v) = kv.get("active_group") {
+            settings.active_group = v.clone();
+        }
+        if let Some(v) = kv.get("web_admin_enabled") {
             settings.web_admin_enabled = v == "1";
         }
         if let Some(v) = kv.get("web_admin_username") {
@@ -183,17 +183,24 @@ if let Some(v) = kv.get("web_admin_enabled") {
                 "start_minimized",
                 if updates.start_minimized { "1" } else { "0" },
             ),
-("show_guide", if updates.show_guide { "1" } else { "0" }),
-("default_sort_mode", &updates.default_sort_mode),
-("active_group", &updates.active_group),
-(
-    "web_admin_enabled",
-    if updates.web_admin_enabled { "1" } else { "0" },
-),
+            ("show_guide", if updates.show_guide { "1" } else { "0" }),
+            ("default_sort_mode", &updates.default_sort_mode),
+            ("active_group", &updates.active_group),
+            (
+                "web_admin_enabled",
+                if updates.web_admin_enabled { "1" } else { "0" },
+            ),
             ("web_admin_username", &updates.web_admin_username),
             ("web_admin_password", &updates.web_admin_password),
             ("web_admin_port", &updates.web_admin_port.to_string()),
-("show_conversation_model", if updates.show_conversation_model { "1" } else { "0" }),
+            (
+                "show_conversation_model",
+                if updates.show_conversation_model {
+                    "1"
+                } else {
+                    "0"
+                },
+            ),
             ("updated_at", &updated_at.to_string()),
         ];
 

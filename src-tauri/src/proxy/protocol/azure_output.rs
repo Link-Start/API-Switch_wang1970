@@ -205,7 +205,10 @@ mod tests {
         assert_eq!(azure["id"], "chatcmpl-abc123");
         assert_eq!(azure["object"], "chat.completion");
         assert_eq!(azure["model"], "gpt-4o");
-        assert_eq!(azure["choices"][0]["message"]["content"], "Hello! How can I help?");
+        assert_eq!(
+            azure["choices"][0]["message"]["content"],
+            "Hello! How can I help?"
+        );
         assert_eq!(azure["choices"][0]["finish_reason"], "stop");
         assert_eq!(azure["usage"]["prompt_tokens"], 10);
         assert_eq!(azure["usage"]["completion_tokens"], 8);
@@ -294,7 +297,10 @@ mod tests {
     fn azure_error_401() {
         let error = transform_azure_error(401, "Access denied due to invalid key");
         assert_eq!(error["error"]["type"], "authentication_error");
-        assert_eq!(error["error"]["message"], "Access denied due to invalid key");
+        assert_eq!(
+            error["error"]["message"],
+            "Access denied due to invalid key"
+        );
         assert_eq!(error["error"]["code"], 401);
     }
 
@@ -334,8 +340,7 @@ mod tests {
         let transformer =
             AzureSSETransformer::new("chatcmpl-test".to_string(), "gpt-4o".to_string());
 
-        let chunk =
-            r#"{"id":"chatcmpl-abc","object":"chat.completion.chunk","choices":[{"delta":{"role":"assistant"}}]}"#;
+        let chunk = r#"{"id":"chatcmpl-abc","object":"chat.completion.chunk","choices":[{"delta":{"role":"assistant"}}]}"#;
         let events = transformer.transform_chunk(chunk);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0], chunk);
@@ -346,8 +351,7 @@ mod tests {
         let transformer =
             AzureSSETransformer::new("chatcmpl-test".to_string(), "gpt-4o".to_string());
 
-        let chunk =
-            r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":"Hello world"},"finish_reason":null}]}"#;
+        let chunk = r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":"Hello world"},"finish_reason":null}]}"#;
         let events = transformer.transform_chunk(chunk);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0], chunk);
@@ -358,8 +362,7 @@ mod tests {
         let transformer =
             AzureSSETransformer::new("chatcmpl-test".to_string(), "gpt-4o".to_string());
 
-        let chunk =
-            r#"{"id":"chatcmpl-abc","choices":[{"delta":{},"finish_reason":"stop"}]}"#;
+        let chunk = r#"{"id":"chatcmpl-abc","choices":[{"delta":{},"finish_reason":"stop"}]}"#;
         let events = transformer.transform_chunk(chunk);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0], chunk);

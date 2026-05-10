@@ -1,4 +1,4 @@
-﻿use serde_json::{json, Value};
+use serde_json::{json, Value};
 
 // ═══════════════════════════════════════════════════════════════════
 //  Public API: Claude <-> OpenAI format conversion
@@ -67,10 +67,7 @@ pub fn claude_to_openai_request(claude: &Value) -> Value {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
 
-                let tc_type = o
-                    .get("type")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("auto");
+                let tc_type = o.get("type").and_then(|t| t.as_str()).unwrap_or("auto");
                 let mapped = match tc_type {
                     "auto" => json!("auto"),
                     "any" => json!("required"),
@@ -146,9 +143,7 @@ pub fn openai_to_claude_response(openai: &Value) -> Value {
         format!("msg_{id}")
     };
 
-    let choice = openai
-        .get("choices")
-        .and_then(|c| c.get(0));
+    let choice = openai.get("choices").and_then(|c| c.get(0));
 
     let message = choice.and_then(|c| c.get("message"));
     let content_str = message
@@ -156,7 +151,9 @@ pub fn openai_to_claude_response(openai: &Value) -> Value {
         .and_then(|c| c.as_str())
         .unwrap_or("");
 
-    let tool_calls = message.and_then(|m| m.get("tool_calls")).and_then(|tc| tc.as_array());
+    let tool_calls = message
+        .and_then(|m| m.get("tool_calls"))
+        .and_then(|tc| tc.as_array());
 
     // Build content array
     let mut content = Vec::new();
@@ -320,13 +317,19 @@ impl ClaudeSSETransformer {
         };
 
         // Emit message_start if this is the first chunk with role
-        if let Some(delta) = chunk.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("delta")) {
+        if let Some(delta) = chunk
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("delta"))
+        {
             if delta.get("role").is_some() && !self.started {
                 self.started = true;
                 // Capture input_tokens from the first chunk if present
                 if let Some(u) = chunk.get("usage") {
                     let input = u.get("prompt_tokens").and_then(Value::as_i64).unwrap_or(0);
-                    if input > 0 { self.usage_input_tokens = input; }
+                    if input > 0 {
+                        self.usage_input_tokens = input;
+                    }
                 }
                 events.push(
                     serde_json::to_string(&json!({
@@ -356,9 +359,16 @@ impl ClaudeSSETransformer {
         // Capture usage from the chunk if present (OpenAI stream_options.include_usage)
         if let Some(u) = chunk.get("usage") {
             let input = u.get("prompt_tokens").and_then(Value::as_i64).unwrap_or(0);
-            let output = u.get("completion_tokens").and_then(Value::as_i64).unwrap_or(0);
-            if input > 0 { self.usage_input_tokens = input; }
-            if output > 0 { self.usage_output_tokens = output; }
+            let output = u
+                .get("completion_tokens")
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            if input > 0 {
+                self.usage_input_tokens = input;
+            }
+            if output > 0 {
+                self.usage_output_tokens = output;
+            }
         }
 
         let delta = choice.get("delta").cloned().unwrap_or(json!({}));
@@ -620,16 +630,23 @@ fn convert_claude_message_to_openai(msg: &Value) -> Vec<Value> {
                                 Some(s) => s,
                                 None => continue,
                             };
-                            let source_type = source.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                            let source_type =
+                                source.get("type").and_then(|t| t.as_str()).unwrap_or("");
                             let image_url = match source_type {
                                 "base64" => {
-                                    let media_type = source.get("media_type").and_then(|t| t.as_str()).unwrap_or("application/octet-stream");
-                                    let data = source.get("data").and_then(|d| d.as_str()).unwrap_or("");
+                                    let media_type = source
+                                        .get("media_type")
+                                        .and_then(|t| t.as_str())
+                                        .unwrap_or("application/octet-stream");
+                                    let data =
+                                        source.get("data").and_then(|d| d.as_str()).unwrap_or("");
                                     format!("data:{};base64,{}", media_type, data)
                                 }
-                                "url" => {
-                                    source.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string()
-                                }
+                                "url" => source
+                                    .get("url")
+                                    .and_then(|u| u.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
                                 _ => continue,
                             };
                             if !image_url.is_empty() {
@@ -705,16 +722,23 @@ fn convert_claude_message_to_openai(msg: &Value) -> Vec<Value> {
                                 Some(s) => s,
                                 None => continue,
                             };
-                            let source_type = source.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                            let source_type =
+                                source.get("type").and_then(|t| t.as_str()).unwrap_or("");
                             let image_url = match source_type {
                                 "base64" => {
-                                    let media_type = source.get("media_type").and_then(|t| t.as_str()).unwrap_or("application/octet-stream");
-                                    let data = source.get("data").and_then(|d| d.as_str()).unwrap_or("");
+                                    let media_type = source
+                                        .get("media_type")
+                                        .and_then(|t| t.as_str())
+                                        .unwrap_or("application/octet-stream");
+                                    let data =
+                                        source.get("data").and_then(|d| d.as_str()).unwrap_or("");
                                     format!("data:{};base64,{}", media_type, data)
                                 }
-                                "url" => {
-                                    source.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string()
-                                }
+                                "url" => source
+                                    .get("url")
+                                    .and_then(|u| u.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
                                 _ => continue,
                             };
                             if !image_url.is_empty() {
@@ -813,7 +837,10 @@ mod tests {
         let openai = claude_to_openai_request(&claude);
 
         assert_eq!(openai["messages"][0]["role"], "system");
-        assert_eq!(openai["messages"][0]["content"], "You are a helpful assistant.");
+        assert_eq!(
+            openai["messages"][0]["content"],
+            "You are a helpful assistant."
+        );
         assert_eq!(openai["messages"][1]["role"], "user");
         assert_eq!(openai["messages"][1]["content"], "Hello");
     }
@@ -844,8 +871,14 @@ mod tests {
 
         assert_eq!(openai["tools"][0]["type"], "function");
         assert_eq!(openai["tools"][0]["function"]["name"], "get_weather");
-        assert_eq!(openai["tools"][0]["function"]["description"], "Get weather for a city");
-        assert_eq!(openai["tools"][0]["function"]["parameters"]["type"], "object");
+        assert_eq!(
+            openai["tools"][0]["function"]["description"],
+            "Get weather for a city"
+        );
+        assert_eq!(
+            openai["tools"][0]["function"]["parameters"]["type"],
+            "object"
+        );
         assert_eq!(
             openai["tools"][0]["function"]["parameters"]["properties"]["city"]["type"],
             "string"
@@ -1005,8 +1038,7 @@ mod tests {
             ClaudeSSETransformer::new("msg_test".to_string(), "claude-3-opus".to_string());
 
         // First text chunk: emits content_block_start + content_block_delta
-        let chunk1 =
-            r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#;
+        let chunk1 = r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#;
         let events1 = transformer.transform_chunk(chunk1);
         assert_eq!(events1.len(), 2);
 
@@ -1022,8 +1054,7 @@ mod tests {
         assert_eq!(delta1["delta"]["text"], "Hello");
 
         // Second text chunk: ONLY content_block_delta (no new block start!)
-        let chunk2 =
-            r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":" world"},"finish_reason":null}]}"#;
+        let chunk2 = r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":" world"},"finish_reason":null}]}"#;
         let events2 = transformer.transform_chunk(chunk2);
         assert_eq!(events2.len(), 1);
 
@@ -1055,8 +1086,7 @@ mod tests {
         transformer.transform_chunk(chunk1);
 
         // Finish
-        let chunk2 =
-            r#"{"id":"chatcmpl-abc","choices":[{"delta":{},"finish_reason":"stop"}]}"#;
+        let chunk2 = r#"{"id":"chatcmpl-abc","choices":[{"delta":{},"finish_reason":"stop"}]}"#;
         let events = transformer.transform_chunk(chunk2);
 
         // Should have: content_block_stop, message_delta, message_stop
@@ -1083,8 +1113,7 @@ mod tests {
             ClaudeSSETransformer::new("msg_test".to_string(), "claude-3-opus".to_string());
 
         // Text content
-        let chunk1 =
-            r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":"Let me check"},"finish_reason":null}]}"#;
+        let chunk1 = r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":"Let me check"},"finish_reason":null}]}"#;
         transformer.transform_chunk(chunk1);
 
         // Tool call start (closes text block, opens tool_use block)
@@ -1097,11 +1126,13 @@ mod tests {
         });
         let has_tool_start = events2.iter().any(|e| {
             let v: Value = serde_json::from_str(e).unwrap();
-            v["type"] == "content_block_start"
-                && v["content_block"]["type"] == "tool_use"
+            v["type"] == "content_block_start" && v["content_block"]["type"] == "tool_use"
         });
         assert!(has_stop, "Should have content_block_stop for text block");
-        assert!(has_tool_start, "Should have content_block_start for tool_use");
+        assert!(
+            has_tool_start,
+            "Should have content_block_start for tool_use"
+        );
 
         // Tool call arguments
         let chunk3 = r#"{"id":"chatcmpl-abc","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"city\":"}}]},"finish_reason":null}]}"#;
@@ -1233,7 +1264,10 @@ mod tests {
         assert_eq!(content[0]["type"], "text");
         assert_eq!(content[0]["text"], "describe");
         assert_eq!(content[1]["type"], "image_url");
-        assert_eq!(content[1]["image_url"]["url"], "data:image/png;base64,abc123");
+        assert_eq!(
+            content[1]["image_url"]["url"],
+            "data:image/png;base64,abc123"
+        );
     }
 
     #[test]
@@ -1251,6 +1285,9 @@ mod tests {
         let msg = &openai["messages"][0];
         let content = msg["content"].as_array().expect("content should be array");
         assert_eq!(content[0]["type"], "image_url");
-        assert_eq!(content[0]["image_url"]["url"], "https://example.com/img.png");
+        assert_eq!(
+            content[0]["image_url"]["url"],
+            "https://example.com/img.png"
+        );
     }
 }

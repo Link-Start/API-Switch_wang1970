@@ -100,30 +100,20 @@ impl ProxyServer {
                 "/v1/chat/completions",
                 post(handlers::handle_chat_completions),
             )
-            .route(
-                "/v1/messages",
-                post(handlers::handle_messages),
-            )
+            .route("/v1/messages", post(handlers::handle_messages))
             .route("/v1/models", get(handlers::handle_list_models))
             // Gemini native endpoint (non-streaming only for now)
-            .route(
-                "/v1beta/models/*rest",
-                post(handlers::handle_gemini_native),
-            )
+            .route("/v1beta/models/*rest", post(handlers::handle_gemini_native))
             // Azure native endpoint
             .route(
                 "/openai/deployments/*rest",
                 post(handlers::handle_azure_chat),
             )
             // OpenAI Responses API (Chat Completions format under the hood)
-            .route(
-                "/v1/responses",
-                post(responses_handler::handle_responses),
-            )
+            .route("/v1/responses", post(responses_handler::handle_responses))
             .route(
                 "/v1/responses/:response_id",
-                get(responses_handler::get_response)
-                    .delete(responses_handler::delete_response),
+                get(responses_handler::get_response).delete(responses_handler::delete_response),
             )
             .route(
                 "/v1/responses/:response_id/cancel",

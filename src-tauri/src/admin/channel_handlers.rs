@@ -1,22 +1,15 @@
 use crate::admin::error::{
-    AdminError,
-    ERROR_CODE_BAD_REQUEST,
-    ERROR_CODE_EMPTY_MODEL_LIST,
-    ERROR_CODE_ENDPOINT_CORRECTION_FAILED,
-    ERROR_CODE_ENDPOINT_UNREACHABLE,
-    ERROR_CODE_INVALID_CREDENTIALS,
-    ERROR_CODE_INVALID_URL,
-    ERROR_CODE_RATE_LIMITED,
-    ERROR_CODE_TIMEOUT,
-    ERROR_CODE_UNSUPPORTED_PROVIDER,
+    AdminError, ERROR_CODE_BAD_REQUEST, ERROR_CODE_EMPTY_MODEL_LIST,
+    ERROR_CODE_ENDPOINT_CORRECTION_FAILED, ERROR_CODE_ENDPOINT_UNREACHABLE,
+    ERROR_CODE_INVALID_CREDENTIALS, ERROR_CODE_INVALID_URL, ERROR_CODE_RATE_LIMITED,
+    ERROR_CODE_TIMEOUT, ERROR_CODE_UNSUPPORTED_PROVIDER,
 };
 use crate::admin::state::AdminState;
 use crate::database::{Channel, ModelInfo};
 use crate::services::channel_service;
 use crate::services::channel_service::{ChannelOperationError, FetchModelsResult, ProbeResult};
-use axum::{extract::{Json, Path, State}};
+use axum::extract::{Json, Path, State};
 use serde::Deserialize;
-
 
 // Types for request bodies – reuse the same definitions as in the Tauri commands
 #[derive(Deserialize)]
@@ -97,9 +90,10 @@ fn channel_operation_error_to_admin(error: &ChannelOperationError) -> AdminError
             remaining_attempts: 0,
             locked_until: 0,
         },
-        ERROR_CODE_INVALID_URL | ERROR_CODE_BAD_REQUEST | ERROR_CODE_UNSUPPORTED_PROVIDER | ERROR_CODE_EMPTY_MODEL_LIST => {
-            AdminError::BadRequest(error.message.clone())
-        }
+        ERROR_CODE_INVALID_URL
+        | ERROR_CODE_BAD_REQUEST
+        | ERROR_CODE_UNSUPPORTED_PROVIDER
+        | ERROR_CODE_EMPTY_MODEL_LIST => AdminError::BadRequest(error.message.clone()),
         ERROR_CODE_ENDPOINT_CORRECTION_FAILED => AdminError::Conflict {
             code: ERROR_CODE_ENDPOINT_CORRECTION_FAILED,
             message: error.message.clone(),
@@ -190,7 +184,8 @@ pub async fn fetch_models_direct(
         payload.base_url,
         payload.api_key,
         payload.verified,
-    ).await?;
+    )
+    .await?;
     Ok(Json(ensure_fetch_models_result(res)?))
 }
 
@@ -210,9 +205,11 @@ pub async fn select_models(
     state
         .db
         .update_channel_models(&id, &payload.available_models, &payload.model_names)?;
-    state
-        .db
-        .sync_entries_for_channel_with_meta(&id, &payload.model_names, &payload.catalog_meta)?;
+    state.db.sync_entries_for_channel_with_meta(
+        &id,
+        &payload.model_names,
+        &payload.catalog_meta,
+    )?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 

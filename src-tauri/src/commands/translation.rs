@@ -1,7 +1,7 @@
 //! Tauri commands for translation relay.
 
-use crate::{AppError, AppState};
 use crate::services::translation_service;
+use crate::{AppError, AppState};
 use tauri::State;
 
 /// Translate text and store result in cache.

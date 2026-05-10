@@ -12,7 +12,9 @@ pub struct CreateTokenParams {
 
 // ---------- Handlers -------------------------------------------------------
 
-pub async fn list_tokens(State(state): State<AdminState>) -> Result<Json<Vec<AccessKey>>, AdminError> {
+pub async fn list_tokens(
+    State(state): State<AdminState>,
+) -> Result<Json<Vec<AccessKey>>, AdminError> {
     let keys = token_service::list_access_keys(&state.db)?;
     Ok(Json(keys))
 }

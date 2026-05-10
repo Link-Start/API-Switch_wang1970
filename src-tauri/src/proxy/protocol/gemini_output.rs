@@ -16,7 +16,10 @@ pub fn gemini_to_openai_request(gemini: &Value) -> Value {
     // Convert Gemini contents -> OpenAI messages
     if let Some(contents) = gemini.get("contents").and_then(|c| c.as_array()) {
         for content in contents {
-            let role = content.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+            let role = content
+                .get("role")
+                .and_then(|r| r.as_str())
+                .unwrap_or("user");
             let openai_role = match role {
                 "model" => "assistant",
                 "user" => "user",
@@ -25,7 +28,10 @@ pub fn gemini_to_openai_request(gemini: &Value) -> Value {
 
             // Extract text from parts
             let empty_vec = vec![];
-            let parts = content.get("parts").and_then(|p| p.as_array()).unwrap_or(&empty_vec);
+            let parts = content
+                .get("parts")
+                .and_then(|p| p.as_array())
+                .unwrap_or(&empty_vec);
             let text: String = parts
                 .iter()
                 .filter_map(|part| part.get("text").and_then(|t| t.as_str()))
@@ -48,7 +54,8 @@ pub fn gemini_to_openai_request(gemini: &Value) -> Value {
 
     // Extract generationConfig parameters
     if let Some(gen_config) = gemini.get("generationConfig") {
-        if let Some(max_output_tokens) = gen_config.get("maxOutputTokens").and_then(|v| v.as_i64()) {
+        if let Some(max_output_tokens) = gen_config.get("maxOutputTokens").and_then(|v| v.as_i64())
+        {
             openai["max_tokens"] = json!(max_output_tokens);
         }
         if let Some(temperature) = gen_config.get("temperature").and_then(|v| v.as_f64()) {
@@ -70,7 +77,9 @@ pub fn gemini_to_openai_request(gemini: &Value) -> Value {
             .iter()
             .filter_map(|tool| {
                 // Gemini tools format has functionDeclarations array
-                let declarations = tool.get("functionDeclarations").and_then(|d| d.as_array())?;
+                let declarations = tool
+                    .get("functionDeclarations")
+                    .and_then(|d| d.as_array())?;
                 let mut functions = Vec::new();
 
                 for decl in declarations {
@@ -275,8 +284,14 @@ impl GeminiSSETransformer {
             };
 
             let usage = chunk.get("usage").cloned().unwrap_or(json!({}));
-            let prompt_tokens = usage.get("prompt_tokens").and_then(Value::as_i64).unwrap_or(0);
-            let completion_tokens = usage.get("completion_tokens").and_then(Value::as_i64).unwrap_or(0);
+            let prompt_tokens = usage
+                .get("prompt_tokens")
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            let completion_tokens = usage
+                .get("completion_tokens")
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
 
             let event = json!({
                 "candidates": [
@@ -415,7 +430,10 @@ mod tests {
 
         let gemini = openai_to_gemini_response(&openai);
 
-        assert_eq!(gemini["candidates"][0]["content"]["parts"][0]["text"], "Hello! How can I help?");
+        assert_eq!(
+            gemini["candidates"][0]["content"]["parts"][0]["text"],
+            "Hello! How can I help?"
+        );
         assert_eq!(gemini["candidates"][0]["content"]["role"], "model");
         assert_eq!(gemini["candidates"][0]["finishReason"], "STOP");
         assert_eq!(gemini["usageMetadata"]["promptTokenCount"], 10);
@@ -500,7 +518,10 @@ mod tests {
         assert_eq!(events.len(), 1);
 
         let event: Value = serde_json::from_str(&events[0]).unwrap();
-        assert_eq!(event["candidates"][0]["content"]["parts"][0]["text"], "Hello");
+        assert_eq!(
+            event["candidates"][0]["content"]["parts"][0]["text"],
+            "Hello"
+        );
         assert_eq!(event["candidates"][0]["content"]["role"], "model");
     }
 
@@ -509,7 +530,8 @@ mod tests {
         let mut transformer =
             GeminiSSETransformer::new("msg_test".to_string(), "gemini-pro".to_string());
 
-        let chunk1 = r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}"#;
+        let chunk1 =
+            r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}"#;
         let events1 = transformer.transform_chunk(chunk1);
         assert_eq!(events1.len(), 1);
 
@@ -521,7 +543,10 @@ mod tests {
         assert_eq!(event1["candidates"][0]["content"]["parts"][0]["text"], "Hi");
 
         let event2: Value = serde_json::from_str(&events2[0]).unwrap();
-        assert_eq!(event2["candidates"][0]["content"]["parts"][0]["text"], " there");
+        assert_eq!(
+            event2["candidates"][0]["content"]["parts"][0]["text"],
+            " there"
+        );
     }
 
     #[test]

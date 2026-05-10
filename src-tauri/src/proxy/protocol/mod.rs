@@ -15,10 +15,18 @@ mod gemini;
 mod gemini_output;
 mod openai;
 
-pub use azure_output::{azure_to_openai_request, openai_to_azure_response, transform_azure_error, AzureSSETransformer};
-pub use claude_output::{claude_to_openai_request, openai_to_claude_response, transform_claude_error, ClaudeSSETransformer};
-pub use gemini_output::{gemini_to_openai_request, openai_to_gemini_response, transform_gemini_error, GeminiSSETransformer};
+pub use azure_output::{
+    azure_to_openai_request, openai_to_azure_response, transform_azure_error, AzureSSETransformer,
+};
+pub use claude_output::{
+    claude_to_openai_request, openai_to_claude_response, transform_claude_error,
+    ClaudeSSETransformer,
+};
 pub use common::join_url;
+pub use gemini_output::{
+    gemini_to_openai_request, openai_to_gemini_response, transform_gemini_error,
+    GeminiSSETransformer,
+};
 
 use serde_json::Value;
 
@@ -893,7 +901,10 @@ mod tests {
         });
         let models = a.parse_models_response(&body);
         assert_eq!(models.len(), 2);
-        assert_eq!(models[0], ("gpt-4o-deployment".into(), Some("gpt-4o".into())));
+        assert_eq!(
+            models[0],
+            ("gpt-4o-deployment".into(), Some("gpt-4o".into()))
+        );
         assert_eq!(models[1], ("gpt-35-turbo-deployment".into(), None));
     }
 
@@ -915,7 +926,10 @@ mod tests {
     fn gemini_chat_url_basic() {
         let a = gemini::GeminiAdapter;
         assert_eq!(
-            a.build_chat_url("https://generativelanguage.googleapis.com", "gemini-2.0-flash"),
+            a.build_chat_url(
+                "https://generativelanguage.googleapis.com",
+                "gemini-2.0-flash"
+            ),
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
         );
     }
@@ -924,7 +938,10 @@ mod tests {
     fn gemini_chat_url_dedup_v1beta() {
         let a = gemini::GeminiAdapter;
         assert_eq!(
-            a.build_chat_url("https://generativelanguage.googleapis.com/v1beta", "gemini-2.0-flash"),
+            a.build_chat_url(
+                "https://generativelanguage.googleapis.com/v1beta",
+                "gemini-2.0-flash"
+            ),
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
         );
     }
@@ -999,8 +1016,14 @@ mod tests {
         });
         let models = a.parse_models_response(&body);
         assert_eq!(models.len(), 2);
-        assert_eq!(models[0], ("gemini-2.0-flash".into(), Some("google".into())));
-        assert_eq!(models[1], ("gemini-2.5-pro-preview".into(), Some("google".into())));
+        assert_eq!(
+            models[0],
+            ("gemini-2.0-flash".into(), Some("google".into()))
+        );
+        assert_eq!(
+            models[1],
+            ("gemini-2.5-pro-preview".into(), Some("google".into()))
+        );
     }
 
     #[test]
@@ -1009,7 +1032,10 @@ mod tests {
         assert!(a.uses_query_auth());
         assert!(!a.needs_sse_transform());
         assert_eq!(
-            a.build_chat_url("https://generativelanguage.googleapis.com", "gemini-2.0-flash"),
+            a.build_chat_url(
+                "https://generativelanguage.googleapis.com",
+                "gemini-2.0-flash"
+            ),
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
         );
     }
@@ -1072,8 +1098,14 @@ mod tests {
         });
         let models = gemini::parse_gemini_native_models(&body);
         assert_eq!(models.len(), 2);
-        assert_eq!(models[0], ("gemini-2.0-flash".into(), Some("Gemini 2.0 Flash".into())));
-        assert_eq!(models[1], ("gemini-2.5-pro".into(), Some("Gemini 2.5 Pro".into())));
+        assert_eq!(
+            models[0],
+            ("gemini-2.0-flash".into(), Some("Gemini 2.0 Flash".into()))
+        );
+        assert_eq!(
+            models[1],
+            ("gemini-2.5-pro".into(), Some("Gemini 2.5 Pro".into()))
+        );
     }
 
     #[test]
@@ -1091,7 +1123,10 @@ mod tests {
 
         assert_eq!(body["model"], "gemini-2.0-flash");
         assert!(body.get("systemInstruction").is_some());
-        assert_eq!(body["systemInstruction"]["parts"][0]["text"], "You are helpful.");
+        assert_eq!(
+            body["systemInstruction"]["parts"][0]["text"],
+            "You are helpful."
+        );
         // Messages → contents
         let contents = body["contents"].as_array().unwrap();
         assert_eq!(contents.len(), 1);

@@ -182,8 +182,16 @@ async fn query_kimi(client: &reqwest::Client, api_key: &str) -> LimitQueryResult
                 let remaining = detail.get("remaining").and_then(parse_f64).unwrap_or(0.0);
                 let resets_at = detail.get("resetTime").and_then(extract_reset_time);
                 let used = (limit - remaining).max(0.0);
-                let utilization = if limit > 0.0 { (used / limit) * 100.0 } else { 0.0 };
-                tiers.push(LimitTier { name: "five_hour".to_string(), utilization, resets_at });
+                let utilization = if limit > 0.0 {
+                    (used / limit) * 100.0
+                } else {
+                    0.0
+                };
+                tiers.push(LimitTier {
+                    name: "five_hour".to_string(),
+                    utilization,
+                    resets_at,
+                });
             }
         }
     }
@@ -193,8 +201,16 @@ async fn query_kimi(client: &reqwest::Client, api_key: &str) -> LimitQueryResult
         let remaining = usage.get("remaining").and_then(parse_f64).unwrap_or(0.0);
         let resets_at = usage.get("resetTime").and_then(extract_reset_time);
         let used = (limit - remaining).max(0.0);
-        let utilization = if limit > 0.0 { (used / limit) * 100.0 } else { 0.0 };
-        tiers.push(LimitTier { name: "weekly_limit".to_string(), utilization, resets_at });
+        let utilization = if limit > 0.0 {
+            (used / limit) * 100.0
+        } else {
+            0.0
+        };
+        tiers.push(LimitTier {
+            name: "weekly_limit".to_string(),
+            utilization,
+            resets_at,
+        });
     }
 
     success(provider, tiers, None, body)
@@ -230,7 +246,10 @@ async fn query_zhipu(client: &reqwest::Client, api_key: &str) -> LimitQueryResul
     };
 
     if body.get("success").and_then(|v| v.as_bool()) == Some(false) {
-        let msg = body.get("msg").and_then(|v| v.as_str()).unwrap_or("Unknown error");
+        let msg = body
+            .get("msg")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown error");
         return error(provider, format!("API error: {msg}"));
     }
 
@@ -242,7 +261,10 @@ async fn query_zhipu(client: &reqwest::Client, api_key: &str) -> LimitQueryResul
     let mut tiers = Vec::new();
     if let Some(limits) = data.get("limits").and_then(|v| v.as_array()) {
         for limit_item in limits {
-            let limit_type = limit_item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            let limit_type = limit_item
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if limit_type != "TOKENS_LIMIT" {
                 continue;
             }
@@ -254,17 +276,32 @@ async fn query_zhipu(client: &reqwest::Client, api_key: &str) -> LimitQueryResul
                 .get("nextResetTime")
                 .and_then(|v| v.as_i64())
                 .and_then(millis_to_iso8601);
-            tiers.push(LimitTier { name: "five_hour".to_string(), utilization, resets_at });
+            tiers.push(LimitTier {
+                name: "five_hour".to_string(),
+                utilization,
+                resets_at,
+            });
         }
     }
 
-    let level = data.get("level").and_then(|v| v.as_str()).map(str::to_string);
+    let level = data
+        .get("level")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     success(provider, tiers, level, body)
 }
 
 async fn query_minimax(client: &reqwest::Client, api_key: &str, is_cn: bool) -> LimitQueryResult {
-    let provider = if is_cn { "minimax_cn" } else { "minimax_global" };
-    let api_domain = if is_cn { "api.minimaxi.com" } else { "api.minimax.io" };
+    let provider = if is_cn {
+        "minimax_cn"
+    } else {
+        "minimax_global"
+    };
+    let api_domain = if is_cn {
+        "api.minimaxi.com"
+    } else {
+        "api.minimax.io"
+    };
     let url = format!("https://{api_domain}/v1/api/openplatform/coding_plan/remains");
     let resp = client
         .get(&url)
@@ -293,7 +330,10 @@ async fn query_minimax(client: &reqwest::Client, api_key: &str, is_cn: bool) -> 
     };
 
     if let Some(base_resp) = body.get("base_resp") {
-        let status_code = base_resp.get("status_code").and_then(|v| v.as_i64()).unwrap_or(-1);
+        let status_code = base_resp
+            .get("status_code")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(-1);
         if status_code != 0 {
             let msg = base_resp
                 .get("status_msg")
@@ -345,7 +385,10 @@ async fn query_minimax(client: &reqwest::Client, api_key: &str, is_cn: bool) -> 
     success(provider, tiers, None, body)
 }
 
-pub async fn query_limit_by_url(base_url: &str, api_key: &str) -> Result<LimitQueryResult, AppError> {
+pub async fn query_limit_by_url(
+    base_url: &str,
+    api_key: &str,
+) -> Result<LimitQueryResult, AppError> {
     if api_key.trim().is_empty() {
         return Ok(not_found("unknown"));
     }

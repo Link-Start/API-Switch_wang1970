@@ -96,7 +96,8 @@ pub fn set_user_env_vars(vars: Vec<EnvVarParam>) -> Result<(), AppError> {
         #[cfg(not(target_os = "windows"))]
         {
             return Err(AppError::Internal(
-                "Setting persistent user environment variables is only implemented on Windows".to_string(),
+                "Setting persistent user environment variables is only implemented on Windows"
+                    .to_string(),
             ));
         }
     }

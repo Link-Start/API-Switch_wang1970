@@ -103,11 +103,11 @@ fn backup_corrupt_database(db_path: &Path) -> Result<(), AppError> {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("api-switch.corrupt.db");
-            let sidecar_backup_path = backup_path.with_file_name(format!("{backup_file_name}{suffix}"));
+            let sidecar_backup_path =
+                backup_path.with_file_name(format!("{backup_file_name}{suffix}"));
             let _ = std::fs::rename(sidecar_path, sidecar_backup_path);
         }
     }
 
     Ok(())
 }
-

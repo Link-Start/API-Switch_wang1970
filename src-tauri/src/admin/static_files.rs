@@ -1,10 +1,7 @@
 use axum::http::{header, HeaderValue, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
 
-
 use std::path::{Component, Path, PathBuf};
-
-
 
 fn dist_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist-web-admin")
@@ -17,10 +14,6 @@ fn read_text(path: &Path) -> Option<String> {
 fn read_bytes(path: &Path) -> Option<Vec<u8>> {
     std::fs::read(path).ok()
 }
-
-
-
-
 
 fn content_type_for(path: &str) -> &'static str {
     if path.ends_with(".css") {
@@ -54,7 +47,10 @@ fn safe_dist_path(path: &str) -> Option<PathBuf> {
     }
 
     let relative = Path::new(path);
-    if !relative.components().all(|component| matches!(component, Component::Normal(_))) {
+    if !relative
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
+    {
         return None;
     }
 
@@ -68,14 +64,14 @@ pub async fn admin_index() -> impl IntoResponse {
         return StatusCode::NOT_FOUND.into_response();
     };
 
-// 动态资源已在构建产出 (dist) 的 index.html 中直接使用哈希文件名，
-// 因此无需在运行时进行占位符替换。若仍然需要确保入口资源存在，可在此处加入检查。
-// 当前实现保持原始 HTML 内容，避免硬编码文件名。
-// 如需在未来添加自定义资源注入，可在这里使用 `entry_assets()` 的结果。
-// 如果后台在单端口模式下重新定位了 Admin 服务，会通过环境变量 ADMIN_BASE_URL 提供新的基路径。
-if let Ok(base_url) = std::env::var("ADMIN_BASE_URL") {
-    html = html.replace("%ADMIN_BASE_URL%", &base_url);
-}
+    // 动态资源已在构建产出 (dist) 的 index.html 中直接使用哈希文件名，
+    // 因此无需在运行时进行占位符替换。若仍然需要确保入口资源存在，可在此处加入检查。
+    // 当前实现保持原始 HTML 内容，避免硬编码文件名。
+    // 如需在未来添加自定义资源注入，可在这里使用 `entry_assets()` 的结果。
+    // 如果后台在单端口模式下重新定位了 Admin 服务，会通过环境变量 ADMIN_BASE_URL 提供新的基路径。
+    if let Ok(base_url) = std::env::var("ADMIN_BASE_URL") {
+        html = html.replace("%ADMIN_BASE_URL%", &base_url);
+    }
 
     // 示例（已注释）：
     // if let Some((js, css_list)) = entry_assets() {
@@ -87,16 +83,15 @@ if let Ok(base_url) = std::env::var("ADMIN_BASE_URL") {
     // （保持原代码结构不变，仅去除硬编码替换）
 
     let mut response = Html(html).into_response();
-    response.headers_mut().insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("no-cache"),
-    );
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     response
 }
 
 pub async fn admin_asset_root(uri: Uri) -> Response {
     let path = uri.path();
-    
+
     // Strip root prefixes: /assets/, /logo/, etc.
     let stripped = if let Some(rest) = path.strip_prefix("/assets/") {
         format!("assets/{rest}")

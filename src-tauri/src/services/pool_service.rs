@@ -84,7 +84,11 @@ pub fn create_entry(db: &Database, params: CreateEntryParams) -> Result<ApiEntry
         &params.model_meta_en,
         group_name,
     )?;
-    let _ = db.add_channel_model_if_missing(&params.channel_id, &params.model, entry.owned_by.as_deref());
+    let _ = db.add_channel_model_if_missing(
+        &params.channel_id,
+        &params.model,
+        entry.owned_by.as_deref(),
+    );
     Ok(entry)
 }
 
@@ -186,7 +190,11 @@ pub async fn test_entry_latency(
 }
 
 /// Update response time for an entry.
-pub fn update_entry_response_ms(db: &Database, entry_id: &str, response_ms: &str) -> Result<(), AppError> {
+pub fn update_entry_response_ms(
+    db: &Database,
+    entry_id: &str,
+    response_ms: &str,
+) -> Result<(), AppError> {
     db.update_entry_response_ms(entry_id, response_ms)
 }
 

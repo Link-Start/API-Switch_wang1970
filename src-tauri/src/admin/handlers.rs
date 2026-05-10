@@ -106,7 +106,9 @@ pub async fn login(
         let entry = failures.entry(key).or_default();
         entry.count += 1;
         let remaining_attempts = 5_u32.saturating_sub(entry.count) as i64;
-        let _ = state.db.add_audit_log("admin_login_failed", "invalid credentials");
+        let _ = state
+            .db
+            .add_audit_log("admin_login_failed", "invalid credentials");
 
         if entry.count >= 6 {
             let lock_expiry = now + chrono::Duration::minutes(5);
@@ -126,7 +128,11 @@ pub async fn login(
     }
 
     state.login_failures.lock().await.remove(&payload.username);
-    state.login_failures.lock().await.remove(&settings.web_admin_username);
+    state
+        .login_failures
+        .lock()
+        .await
+        .remove(&settings.web_admin_username);
 
     let token = Uuid::new_v4().to_string();
     let expires_at = chrono::Utc::now() + chrono::Duration::hours(SESSION_TTL_HOURS);
@@ -137,7 +143,9 @@ pub async fn login(
             expires_at,
         },
     );
-    let _ = state.db.add_audit_log("admin_login_success", &payload.username);
+    let _ = state
+        .db
+        .add_audit_log("admin_login_success", &payload.username);
 
     Ok(Json(LoginResponse {
         token,
@@ -167,12 +175,13 @@ pub async fn logout(
 
 pub async fn status(State(state): State<AdminState>) -> Json<AdminStatus> {
     let settings = state.settings.read().await.clone();
-    let runtime_mode = state.runtime.as_ref().map(|runtime| {
-        match runtime.runtime_mode {
+    let runtime_mode = state
+        .runtime
+        .as_ref()
+        .map(|runtime| match runtime.runtime_mode {
             crate::runtime_mode::RuntimeMode::Combined => "combined".to_string(),
             crate::runtime_mode::RuntimeMode::Standalone => "standalone".to_string(),
-        }
-    });
+        });
     Json(AdminStatus {
         running: true,
         port: settings.web_admin_port,
@@ -204,8 +213,8 @@ pub async fn patch_settings(
     let current = state.settings.read().await.clone();
 
     // 2. 将当前 settings 序列化为 serde_json::Value
-    let mut settings_value = serde_json::to_value(&current)
-        .map_err(|e| AdminError::Internal(e.to_string()))?;
+    let mut settings_value =
+        serde_json::to_value(&current).map_err(|e| AdminError::Internal(e.to_string()))?;
 
     // 3. 合并 patch 字段到 settings_value
     if let (Some(obj), Some(patch_obj)) = (settings_value.as_object_mut(), patch.as_object()) {
@@ -260,7 +269,8 @@ pub async fn update_settings(
     let mut invalidated_session_count = 0usize;
     if credentials_changed {
         let mut sessions = state.login_sessions.write().await;
-        invalidated_session_count += invalidate_sessions_for_username(&mut sessions, &current_username);
+        invalidated_session_count +=
+            invalidate_sessions_for_username(&mut sessions, &current_username);
     }
     let session_invalidated = credentials_changed;
 
@@ -317,4 +327,3 @@ pub async fn update_settings(
         restart: None,
     }))
 }
-

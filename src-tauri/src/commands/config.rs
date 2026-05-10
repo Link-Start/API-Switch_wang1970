@@ -1,9 +1,9 @@
+use crate::admin::RestartInfo;
 use crate::database::AppSettings;
 use crate::error::AppError;
 use crate::AppState;
-use serde::{Deserialize};
+use serde::Deserialize;
 use tauri::State;
-use crate::admin::RestartInfo;
 
 async fn restart_proxy_if_running(
     app: tauri::AppHandle,
@@ -195,7 +195,10 @@ pub async fn apply_settings_update_with_restart(
     let mut restart_info = RestartInfo {
         admin_relocated,
         new_admin_base_url: if admin_relocated {
-            Some(format!("http://127.0.0.1:{}/admin", settings.web_admin_port))
+            Some(format!(
+                "http://127.0.0.1:{}/admin",
+                settings.web_admin_port
+            ))
         } else {
             None
         },

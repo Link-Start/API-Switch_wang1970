@@ -1,15 +1,15 @@
 use crate::admin::{
     ERROR_CODE_EMPTY_MODEL_LIST, ERROR_CODE_ENDPOINT_CORRECTION_FAILED,
     ERROR_CODE_ENDPOINT_UNREACHABLE, ERROR_CODE_ENDPOINT_VALIDATION_FAILED,
-    ERROR_CODE_FETCH_MODELS_FAILED, ERROR_CODE_HTTP_CLIENT_ERROR,
-    ERROR_CODE_INVALID_CREDENTIALS, ERROR_CODE_INVALID_URL, ERROR_CODE_RATE_LIMITED,
-    ERROR_CODE_TIMEOUT, ERROR_CODE_UNSUPPORTED_PROVIDER,
+    ERROR_CODE_FETCH_MODELS_FAILED, ERROR_CODE_HTTP_CLIENT_ERROR, ERROR_CODE_INVALID_CREDENTIALS,
+    ERROR_CODE_INVALID_URL, ERROR_CODE_RATE_LIMITED, ERROR_CODE_TIMEOUT,
+    ERROR_CODE_UNSUPPORTED_PROVIDER,
 };
 use crate::database::{Channel, Database, ModelInfo};
 use crate::error::AppError;
 use crate::proxy::protocol::get_adapter;
-use tauri::Emitter;
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 
 #[derive(Deserialize)]
 #[allow(dead_code)]
@@ -41,7 +41,10 @@ enum ModelsEndpointError {
 
 impl ModelsEndpointError {
     fn is_blocking(&self) -> bool {
-        matches!(self, Self::Network(_) | Self::Timeout(_) | Self::Auth(_) | Self::RateLimited(_))
+        matches!(
+            self,
+            Self::Network(_) | Self::Timeout(_) | Self::Auth(_) | Self::RateLimited(_)
+        )
     }
 
     fn code(&self) -> &'static str {
@@ -179,7 +182,10 @@ pub struct FetchModelsResult {
 
 // Service functions – thin wrappers around existing logic
 
-pub fn update_channel_response_ms(db: &Database, params: UpdateResponseMsParams) -> Result<(), AppError> {
+pub fn update_channel_response_ms(
+    db: &Database,
+    params: UpdateResponseMsParams,
+) -> Result<(), AppError> {
     db.update_channel_response_ms(&params.channel_id, &params.response_ms)
 }
 
@@ -197,7 +203,11 @@ pub fn create_channel(db: &Database, params: CreateChannelParams) -> Result<Chan
     )
 }
 
-pub fn update_channel(db: &Database, app: Option<&tauri::AppHandle>, params: UpdateChannelParams) -> Result<Channel, AppError> {
+pub fn update_channel(
+    db: &Database,
+    app: Option<&tauri::AppHandle>,
+    params: UpdateChannelParams,
+) -> Result<Channel, AppError> {
     if let Some(false) = params.enabled {
         db.disable_entries_for_channel(&params.id)?;
     }
@@ -217,7 +227,11 @@ pub fn update_channel(db: &Database, app: Option<&tauri::AppHandle>, params: Upd
     db.get_channel(&params.id)
 }
 
-pub fn delete_channel(db: &Database, app: Option<&tauri::AppHandle>, id: String) -> Result<(), AppError> {
+pub fn delete_channel(
+    db: &Database,
+    app: Option<&tauri::AppHandle>,
+    id: String,
+) -> Result<(), AppError> {
     db.delete_channel(&id)?;
     if let Some(app) = app {
         let _ = app.emit("channels-changed", ());
@@ -230,9 +244,17 @@ pub async fn probe_url(url: String) -> Result<ProbeResult, AppError> {
     // identical implementation from original command
     let url = url.trim_end_matches('/').trim();
     if url.is_empty() {
-        return Ok(ProbeResult { reachable: false, status_code: None, latency_ms: 0,
-            detected_type: None, message: "Empty URL".into(),
-            error: Some(ChannelOperationError::new(ERROR_CODE_INVALID_URL, "Empty URL")) });
+        return Ok(ProbeResult {
+            reachable: false,
+            status_code: None,
+            latency_ms: 0,
+            detected_type: None,
+            message: "Empty URL".into(),
+            error: Some(ChannelOperationError::new(
+                ERROR_CODE_INVALID_URL,
+                "Empty URL",
+            )),
+        });
     }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -245,8 +267,14 @@ pub async fn probe_url(url: String) -> Result<ProbeResult, AppError> {
         Ok(r) => {
             let s = r.status().as_u16();
             let ms = start.elapsed().as_millis() as u64;
-            Ok(ProbeResult { reachable: s < 500, status_code: Some(s), latency_ms: ms,
-                detected_type: None, message: format!("{s} ({ms}ms)"), error: None })
+            Ok(ProbeResult {
+                reachable: s < 500,
+                status_code: Some(s),
+                latency_ms: ms,
+                detected_type: None,
+                message: format!("{s} ({ms}ms)"),
+                error: None,
+            })
         }
         Err(_) => {
             let _start2 = std::time::Instant::now();
@@ -254,8 +282,14 @@ pub async fn probe_url(url: String) -> Result<ProbeResult, AppError> {
                 Ok(r) => {
                     let s = r.status().as_u16();
                     let ms = start.elapsed().as_millis() as u64;
-                    Ok(ProbeResult { reachable: s < 500, status_code: Some(s), latency_ms: ms,
-                        detected_type: None, message: format!("{s} ({ms}ms)"), error: None })
+                    Ok(ProbeResult {
+                        reachable: s < 500,
+                        status_code: Some(s),
+                        latency_ms: ms,
+                        detected_type: None,
+                        message: format!("{s} ({ms}ms)"),
+                        error: None,
+                    })
                 }
                 Err(e) => {
                     let ms = start.elapsed().as_millis() as u64;
@@ -265,8 +299,14 @@ pub async fn probe_url(url: String) -> Result<ProbeResult, AppError> {
                         ChannelOperationError::new(ERROR_CODE_ENDPOINT_UNREACHABLE, e.to_string())
                     }
                     .with_details(serde_json::json!({ "url": url }));
-                    Ok(ProbeResult { reachable: false, status_code: None, latency_ms: ms,
-                        detected_type: None, message: e.to_string(), error: Some(error) })
+                    Ok(ProbeResult {
+                        reachable: false,
+                        status_code: None,
+                        latency_ms: ms,
+                        detected_type: None,
+                        message: e.to_string(),
+                        error: Some(error),
+                    })
                 }
             }
         }
@@ -287,7 +327,10 @@ pub async fn fetch_models_direct(
             models: Vec::new(),
             message: "Empty URL".into(),
             warning: None,
-            error: Some(ChannelOperationError::new(ERROR_CODE_INVALID_URL, "Empty URL")),
+            error: Some(ChannelOperationError::new(
+                ERROR_CODE_INVALID_URL,
+                "Empty URL",
+            )),
             endpoint_corrected: false,
             auto_saved: false,
         });
@@ -297,16 +340,21 @@ pub async fn fetch_models_direct(
         .map_err(|e| AppError::Network(e.message))
 }
 
-pub async fn fetch_models(db: &Database, channel_id: String) -> Result<FetchModelsResult, AppError> {
+pub async fn fetch_models(
+    db: &Database,
+    channel_id: String,
+) -> Result<FetchModelsResult, AppError> {
     let channel = db.get_channel(&channel_id)?;
     let original_base_url = normalize_base_url(&channel.base_url);
-    let endpoint_guess = detect_endpoint_guess(&channel.api_type, &channel.base_url, &channel.api_key).await;
+    let endpoint_guess =
+        detect_endpoint_guess(&channel.api_type, &channel.base_url, &channel.api_key).await;
     let Some(guess) = endpoint_guess else {
         return Ok(FetchModelsResult {
             detected_type: channel.api_type,
             corrected_base_url: original_base_url,
             models: Vec::new(),
-            message: "Could not validate endpoint. Check network, URL, API type, and API key.".into(),
+            message: "Could not validate endpoint. Check network, URL, API type, and API key."
+                .into(),
             warning: None,
             error: Some(ChannelOperationError::new(
                 ERROR_CODE_ENDPOINT_CORRECTION_FAILED,
@@ -317,13 +365,23 @@ pub async fn fetch_models(db: &Database, channel_id: String) -> Result<FetchMode
         });
     };
 
-    let endpoint_corrected = channel.api_type != guess.detected_type || original_base_url != guess.corrected_base_url;
+    let endpoint_corrected =
+        channel.api_type != guess.detected_type || original_base_url != guess.corrected_base_url;
 
-    let result = match fetch_models_result_with_fallback(&guess.detected_type, &guess.corrected_base_url, &channel.api_key).await {
+    let result = match fetch_models_result_with_fallback(
+        &guess.detected_type,
+        &guess.corrected_base_url,
+        &channel.api_key,
+    )
+    .await
+    {
         Ok((models, _actual_type, _actual_base_url)) => {
             let count = models.len();
             let message = if endpoint_corrected {
-                format!("Detected: {} ({count} models). Endpoint correction is ready to save.", guess.detected_type)
+                format!(
+                    "Detected: {} ({count} models). Endpoint correction is ready to save.",
+                    guess.detected_type
+                )
             } else {
                 format!("Detected: {} ({count} models)", guess.detected_type)
             };
@@ -407,7 +465,8 @@ async fn smart_fetch_models(
         .map(|g| g.corrected_base_url.as_str())
         .unwrap_or(base_url.as_str());
 
-    let (models, actual_type, actual_base_url) = fetch_models_result_with_fallback(fetch_seed_type, fetch_seed_base_url, api_key).await?;
+    let (models, actual_type, actual_base_url) =
+        fetch_models_result_with_fallback(fetch_seed_type, fetch_seed_base_url, api_key).await?;
 
     let corrected_type = endpoint_guess
         .as_ref()
@@ -448,22 +507,38 @@ async fn detect_endpoint_guess(
     let original_url = normalize_base_url(&base_url);
     let base_site = extract_base_site(&original_url).unwrap_or_else(|| original_url.clone());
 
-    let phase1_base_url = if api_type == "custom" { &original_url } else { &base_site };
+    let phase1_base_url = if api_type == "custom" {
+        &original_url
+    } else {
+        &base_site
+    };
     match detect_type_with_base_url(&client, api_type, phase1_base_url, api_key, true).await {
         DetectionResult::Found(guess) => return Some(guess),
         DetectionResult::Blocked(err) => {
-            log::warn!("[detect_endpoint] Stop after selected type failed with blocking error: {}", err.message());
+            log::warn!(
+                "[detect_endpoint] Stop after selected type failed with blocking error: {}",
+                err.message()
+            );
             return None;
         }
         DetectionResult::NotFound => {}
     }
 
     for current_type in ["custom", "openai", "claude", "gemini", "azure"] {
-        let candidate_base_url = if current_type == "custom" { &original_url } else { &base_site };
-        match detect_type_with_base_url(&client, current_type, candidate_base_url, api_key, false).await {
+        let candidate_base_url = if current_type == "custom" {
+            &original_url
+        } else {
+            &base_site
+        };
+        match detect_type_with_base_url(&client, current_type, candidate_base_url, api_key, false)
+            .await
+        {
             DetectionResult::Found(guess) => return Some(guess),
             DetectionResult::Blocked(err) => {
-                log::warn!("[detect_endpoint] Stop correction flow after blocking error: {}", err.message());
+                log::warn!(
+                    "[detect_endpoint] Stop correction flow after blocking error: {}",
+                    err.message()
+                );
                 return None;
             }
             DetectionResult::NotFound => {}
@@ -495,7 +570,8 @@ async fn detect_type_with_base_url(
                     if !is_authoritative_detection_success(api_type, url) {
                         continue;
                     }
-                    let corrected_base_url = canonical_base_url_for_success(api_type, base_url, url);
+                    let corrected_base_url =
+                        canonical_base_url_for_success(api_type, base_url, url);
                     let detected_type = if respect_selected_type {
                         api_type.to_string()
                     } else {
@@ -540,7 +616,8 @@ async fn fetch_models_result_with_fallback(
             for url in &urls {
                 match try_models_endpoint(&client, adapter.as_ref(), url, api_key).await {
                     Ok(models) if !models.is_empty() => {
-                        let corrected_base_url = canonical_base_url_for_success(current_type, &candidate_base_url, url);
+                        let corrected_base_url =
+                            canonical_base_url_for_success(current_type, &candidate_base_url, url);
                         let models = dedup_models(models);
                         log::info!("[fetch_models] OK via {url}, type={current_type}, base_url={} ({} models)", corrected_base_url, models.len());
                         return Ok((models, current_type, corrected_base_url));
@@ -555,11 +632,12 @@ async fn fetch_models_result_with_fallback(
                         return Err(err.to_operation_error().with_details(details));
                     }
                     Err(err) => {
-                        last_error = Some(err.to_operation_error().with_details(serde_json::json!({
-                            "api_type": current_type,
-                            "base_url": candidate_base_url,
-                            "models_url": url,
-                        })));
+                        last_error =
+                            Some(err.to_operation_error().with_details(serde_json::json!({
+                                "api_type": current_type,
+                                "base_url": candidate_base_url,
+                                "models_url": url,
+                            })));
                     }
                 }
             }
@@ -641,13 +719,21 @@ fn extract_base_site(base_url: &str) -> Option<String> {
     let scheme_end = normalized.find("://")?;
     let after_scheme = &normalized[scheme_end + 3..];
     if let Some(slash) = after_scheme.find('/') {
-        Some(format!("{}://{}", &normalized[..scheme_end], &after_scheme[..slash]))
+        Some(format!(
+            "{}://{}",
+            &normalized[..scheme_end],
+            &after_scheme[..slash]
+        ))
     } else {
         Some(normalized)
     }
 }
 
-pub(crate) fn canonical_base_url_for_success(api_type: &str, fallback_base_url: &str, success_url: &str) -> String {
+pub(crate) fn canonical_base_url_for_success(
+    api_type: &str,
+    fallback_base_url: &str,
+    success_url: &str,
+) -> String {
     let success = success_url.trim();
     let success_lower = success.to_ascii_lowercase();
 
@@ -725,7 +811,13 @@ fn build_models_url_variants(
 ) -> Vec<String> {
     let mut urls = vec![adapter.build_models_url(base_url, api_key)];
     let base = base_url.trim_end_matches('/');
-    for v in &["/models", "/v1/models", "/api/models", "/api/v1/models", "/v2/models"] {
+    for v in &[
+        "/models",
+        "/v1/models",
+        "/api/models",
+        "/api/v1/models",
+        "/v2/models",
+    ] {
         let u = format!("{base}{v}");
         if !urls.contains(&u) {
             urls.push(u);
@@ -770,7 +862,11 @@ async fn try_models_endpoint(
     let models: Vec<ModelInfo> = adapter
         .parse_models_response(&body)
         .into_iter()
-        .map(|(id, owned_by)| ModelInfo { name: id.clone(), id, owned_by })
+        .map(|(id, owned_by)| ModelInfo {
+            name: id.clone(),
+            id,
+            owned_by,
+        })
         .collect();
     if models.is_empty() {
         Err(ModelsEndpointError::Empty)
@@ -790,11 +886,23 @@ fn extract_models_from_json(body: &str) -> Option<Vec<ModelInfo>> {
             if id.eq_ignore_ascii_case("auto") {
                 return None;
             }
-            let owned = m.get("owned_by").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-            Some(ModelInfo { name: id.clone(), id, owned_by: Some(owned) })
+            let owned = m
+                .get("owned_by")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            Some(ModelInfo {
+                name: id.clone(),
+                id,
+                owned_by: Some(owned),
+            })
         })
         .collect();
-    if models.is_empty() { None } else { Some(models) }
+    if models.is_empty() {
+        None
+    } else {
+        Some(models)
+    }
 }
 
 #[allow(dead_code)]
@@ -812,18 +920,30 @@ async fn try_chat_probe(
     };
     let chat_url = adapter.build_chat_url(base_url, test_model);
     let body = serde_json::json!({"model": test_model, "messages": [{"role":"user","content":"hi"}], "max_tokens": 1});
-    let req = adapter.apply_auth(client.post(&chat_url).header("Content-Type", "application/json"), api_key);
+    let req = adapter.apply_auth(
+        client
+            .post(&chat_url)
+            .header("Content-Type", "application/json"),
+        api_key,
+    );
     match req.json(&body).send().await {
         Ok(resp) => {
             let s = resp.status().as_u16();
             if s < 500 {
-                let corrected_base_url = canonical_base_url_for_success(api_type, base_url, &chat_url);
+                let corrected_base_url =
+                    canonical_base_url_for_success(api_type, base_url, &chat_url);
                 if let Ok(text) = resp.text().await {
                     if let Some(m) = extract_models_from_json(&text) {
-                        return Some(ProbeSuccess { models: m, corrected_base_url });
+                        return Some(ProbeSuccess {
+                            models: m,
+                            corrected_base_url,
+                        });
                     }
                 }
-                return Some(ProbeSuccess { models: known_models_for_type(api_type), corrected_base_url });
+                return Some(ProbeSuccess {
+                    models: known_models_for_type(api_type),
+                    corrected_base_url,
+                });
             }
             None
         }
@@ -834,13 +954,54 @@ async fn try_chat_probe(
 #[allow(dead_code)]
 fn known_models_for_type(api_type: &str) -> Vec<ModelInfo> {
     let list: &[(&str, &str)] = match api_type {
-        "openai" => &[("gpt-4o","openai"),("gpt-4o-mini","openai"),("gpt-4-turbo","openai"),("gpt-3.5-turbo","openai"),("o1","openai"),("o1-mini","openai"),("o1-preview","openai"),("o3-mini","openai"),("o4-mini","openai")],
-        "claude" => &[("claude-sonnet-4-20250514","anthropic"),("claude-3-5-sonnet-20241022","anthropic"),("claude-3-5-haiku-20241022","anthropic"),("claude-3-opus-20240229","anthropic")],
-        "gemini" => &[("gemini-2.5-pro-preview-05-06","google"),("gemini-2.0-flash","google"),("gemini-1.5-pro","google"),("gemini-1.5-flash","google")],
-        "azure" => &[("gpt-4o","azure"),("gpt-4o-mini","azure"),("gpt-4-turbo","azure")],
-        _ => &[("gpt-4o","openai"),("gpt-4o-mini","openai"),("gpt-3.5-turbo","openai"),("claude-3-5-sonnet-20241022","anthropic"),("claude-3-5-haiku-20241022","anthropic"),("gemini-2.0-flash","google"),("deepseek-chat","deepseek"),("deepseek-reasoner","deepseek"),("qwen-turbo","alibaba"),("glm-4-flash","zhipu")],
+        "openai" => &[
+            ("gpt-4o", "openai"),
+            ("gpt-4o-mini", "openai"),
+            ("gpt-4-turbo", "openai"),
+            ("gpt-3.5-turbo", "openai"),
+            ("o1", "openai"),
+            ("o1-mini", "openai"),
+            ("o1-preview", "openai"),
+            ("o3-mini", "openai"),
+            ("o4-mini", "openai"),
+        ],
+        "claude" => &[
+            ("claude-sonnet-4-20250514", "anthropic"),
+            ("claude-3-5-sonnet-20241022", "anthropic"),
+            ("claude-3-5-haiku-20241022", "anthropic"),
+            ("claude-3-opus-20240229", "anthropic"),
+        ],
+        "gemini" => &[
+            ("gemini-2.5-pro-preview-05-06", "google"),
+            ("gemini-2.0-flash", "google"),
+            ("gemini-1.5-pro", "google"),
+            ("gemini-1.5-flash", "google"),
+        ],
+        "azure" => &[
+            ("gpt-4o", "azure"),
+            ("gpt-4o-mini", "azure"),
+            ("gpt-4-turbo", "azure"),
+        ],
+        _ => &[
+            ("gpt-4o", "openai"),
+            ("gpt-4o-mini", "openai"),
+            ("gpt-3.5-turbo", "openai"),
+            ("claude-3-5-sonnet-20241022", "anthropic"),
+            ("claude-3-5-haiku-20241022", "anthropic"),
+            ("gemini-2.0-flash", "google"),
+            ("deepseek-chat", "deepseek"),
+            ("deepseek-reasoner", "deepseek"),
+            ("qwen-turbo", "alibaba"),
+            ("glm-4-flash", "zhipu"),
+        ],
     };
-    list.iter().map(|&(name, owner)| ModelInfo { name: name.into(), id: name.into(), owned_by: Some(owner.into()) }).collect()
+    list.iter()
+        .map(|&(name, owner)| ModelInfo {
+            name: name.into(),
+            id: name.into(),
+            owned_by: Some(owner.into()),
+        })
+        .collect()
 }
 
 fn dedup_models(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
@@ -851,4 +1012,3 @@ fn dedup_models(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
         .filter(|m| seen.insert(m.name.clone()))
         .collect()
 }
-

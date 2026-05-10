@@ -52,7 +52,6 @@ impl ModelsEndpointError {
 #[derive(Clone)]
 #[allow(dead_code)]
 struct EndpointGuess {
-
     detected_type: String,
     corrected_base_url: String,
 }
@@ -108,7 +107,11 @@ pub fn list_channels(state: State<'_, AppState>) -> Result<Vec<Channel>, AppErro
 }
 
 #[tauri::command]
-pub fn create_channel(app: tauri::AppHandle, state: State<'_, AppState>, params: CreateChannelParams) -> Result<Channel, AppError> {
+pub fn create_channel(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    params: CreateChannelParams,
+) -> Result<Channel, AppError> {
     let channel = channel_service::create_channel(
         &state.db,
         channel_service::CreateChannelParams {
@@ -124,7 +127,11 @@ pub fn create_channel(app: tauri::AppHandle, state: State<'_, AppState>, params:
 }
 
 #[tauri::command]
-pub fn update_channel(app: tauri::AppHandle, state: State<'_, AppState>, params: UpdateChannelParams) -> Result<Channel, AppError> {
+pub fn update_channel(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    params: UpdateChannelParams,
+) -> Result<Channel, AppError> {
     channel_service::update_channel(
         &state.db,
         Some(&app),
@@ -141,7 +148,11 @@ pub fn update_channel(app: tauri::AppHandle, state: State<'_, AppState>, params:
 }
 
 #[tauri::command]
-pub fn delete_channel(app: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<(), AppError> {
+pub fn delete_channel(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), AppError> {
     channel_service::delete_channel(&state.db, Some(&app), id)
 }
 
@@ -171,7 +182,6 @@ pub async fn fetch_models(
 
 #[tauri::command]
 pub fn select_models(
-
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     channel_id: String,
@@ -179,7 +189,9 @@ pub fn select_models(
     available_models: Vec<ModelInfo>,
     catalog_meta: Vec<ModelCatalogMetaInput>,
 ) -> Result<(), AppError> {
-    state.db.update_channel_models(&channel_id, &available_models, &model_names)?;
+    state
+        .db
+        .update_channel_models(&channel_id, &available_models, &model_names)?;
     let catalog_meta: Vec<crate::database::ModelCatalogMetaInput> = catalog_meta
         .into_iter()
         .map(|item| crate::database::ModelCatalogMetaInput {
@@ -190,7 +202,9 @@ pub fn select_models(
             model_meta_en: item.model_meta_en,
         })
         .collect();
-    state.db.sync_entries_for_channel_with_meta(&channel_id, &model_names, &catalog_meta)?;
+    state
+        .db
+        .sync_entries_for_channel_with_meta(&channel_id, &model_names, &catalog_meta)?;
     let _ = app.emit("entries-changed", ());
     let _ = app.emit("channels-changed", ());
     crate::refresh_tray_if_enabled(&app);
@@ -206,9 +220,17 @@ fn build_models_url_variants(
 ) -> Vec<String> {
     let mut urls = vec![adapter.build_models_url(base_url, api_key)];
     let base = base_url.trim_end_matches('/');
-    for v in &["/models", "/v1/models", "/api/models", "/api/v1/models", "/v2/models"] {
+    for v in &[
+        "/models",
+        "/v1/models",
+        "/api/models",
+        "/api/v1/models",
+        "/v2/models",
+    ] {
         let u = format!("{base}{v}");
-        if !urls.contains(&u) { urls.push(u); }
+        if !urls.contains(&u) {
+            urls.push(u);
+        }
     }
     urls
 }
@@ -221,7 +243,8 @@ async fn try_models_endpoint(
     url: &str,
     api_key: &str,
 ) -> Result<Vec<ModelInfo>, ModelsEndpointError> {
-    let resp = adapter.apply_auth(client.get(url), api_key)
+    let resp = adapter
+        .apply_auth(client.get(url), api_key)
         .send()
         .await
         .map_err(|e| {
@@ -240,9 +263,18 @@ async fn try_models_endpoint(
     if status != reqwest::StatusCode::OK {
         return Err(ModelsEndpointError::Http(status.as_u16()));
     }
-    let body: serde_json::Value = resp.json().await.map_err(|e| ModelsEndpointError::Parse(e.to_string()))?;
-    let models: Vec<ModelInfo> = adapter.parse_models_response(&body).into_iter()
-        .map(|(id, owned_by)| ModelInfo { name: id.clone(), id, owned_by })
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ModelsEndpointError::Parse(e.to_string()))?;
+    let models: Vec<ModelInfo> = adapter
+        .parse_models_response(&body)
+        .into_iter()
+        .map(|(id, owned_by)| ModelInfo {
+            name: id.clone(),
+            id,
+            owned_by,
+        })
         .collect();
     if models.is_empty() {
         Err(ModelsEndpointError::Empty)
@@ -251,23 +283,35 @@ async fn try_models_endpoint(
     }
 }
 
-
 /// Try to extract model list from a JSON body (even error responses)
 #[allow(dead_code)]
 fn extract_models_from_json(body: &str) -> Option<Vec<ModelInfo>> {
     let json: serde_json::Value = serde_json::from_str(body).ok()?;
     let arr = json.get("data")?.as_array()?;
-    let models: Vec<ModelInfo> = arr.iter()
+    let models: Vec<ModelInfo> = arr
+        .iter()
         .filter_map(|m| {
             let id = m.get("id")?.as_str()?.to_string();
             if id.eq_ignore_ascii_case("auto") {
                 return None;
             }
-            let owned = m.get("owned_by").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-            Some(ModelInfo { name: id.clone(), id, owned_by: Some(owned) })
+            let owned = m
+                .get("owned_by")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            Some(ModelInfo {
+                name: id.clone(),
+                id,
+                owned_by: Some(owned),
+            })
         })
         .collect();
-    if models.is_empty() { None } else { Some(models) }
+    if models.is_empty() {
+        None
+    } else {
+        Some(models)
+    }
 }
 
 /// Chat probe: send a tiny request to verify the API works
@@ -287,16 +331,26 @@ async fn try_chat_probe(
     let chat_url = adapter.build_chat_url(base_url, test_model);
     let body = serde_json::json!({"model": test_model, "messages": [{"role":"user","content":"hi"}], "max_tokens": 1});
     let req = adapter.apply_auth(
-        client.post(&chat_url).header("Content-Type", "application/json"), api_key);
+        client
+            .post(&chat_url)
+            .header("Content-Type", "application/json"),
+        api_key,
+    );
     match req.json(&body).send().await {
         Ok(resp) => {
             let s = resp.status().as_u16();
             if s < 500 {
-                let corrected_base_url = crate::services::channel_service::canonical_base_url_for_success(api_type, base_url, &chat_url);
+                let corrected_base_url =
+                    crate::services::channel_service::canonical_base_url_for_success(
+                        api_type, base_url, &chat_url,
+                    );
                 // Server responded → API works, return known models
                 if let Ok(text) = resp.text().await {
                     if let Some(m) = extract_models_from_json(&text) {
-                        return Some(ProbeSuccess { models: m, corrected_base_url });
+                        return Some(ProbeSuccess {
+                            models: m,
+                            corrected_base_url,
+                        });
                     }
                 }
                 return Some(ProbeSuccess {
@@ -315,31 +369,53 @@ async fn try_chat_probe(
 fn known_models_for_type(api_type: &str) -> Vec<ModelInfo> {
     let list: &[(&str, &str)] = match api_type {
         "openai" => &[
-            ("gpt-4o","openai"),("gpt-4o-mini","openai"),("gpt-4-turbo","openai"),
-            ("gpt-3.5-turbo","openai"),("o1","openai"),("o1-mini","openai"),
-            ("o1-preview","openai"),("o3-mini","openai"),("o4-mini","openai"),
+            ("gpt-4o", "openai"),
+            ("gpt-4o-mini", "openai"),
+            ("gpt-4-turbo", "openai"),
+            ("gpt-3.5-turbo", "openai"),
+            ("o1", "openai"),
+            ("o1-mini", "openai"),
+            ("o1-preview", "openai"),
+            ("o3-mini", "openai"),
+            ("o4-mini", "openai"),
         ],
         "claude" => &[
-            ("claude-sonnet-4-20250514","anthropic"),("claude-3-5-sonnet-20241022","anthropic"),
-            ("claude-3-5-haiku-20241022","anthropic"),("claude-3-opus-20240229","anthropic"),
+            ("claude-sonnet-4-20250514", "anthropic"),
+            ("claude-3-5-sonnet-20241022", "anthropic"),
+            ("claude-3-5-haiku-20241022", "anthropic"),
+            ("claude-3-opus-20240229", "anthropic"),
         ],
         "gemini" => &[
-            ("gemini-2.5-pro-preview-05-06","google"),("gemini-2.0-flash","google"),
-            ("gemini-1.5-pro","google"),("gemini-1.5-flash","google"),
+            ("gemini-2.5-pro-preview-05-06", "google"),
+            ("gemini-2.0-flash", "google"),
+            ("gemini-1.5-pro", "google"),
+            ("gemini-1.5-flash", "google"),
         ],
         "azure" => &[
-            ("gpt-4o","azure"),("gpt-4o-mini","azure"),("gpt-4-turbo","azure"),
+            ("gpt-4o", "azure"),
+            ("gpt-4o-mini", "azure"),
+            ("gpt-4-turbo", "azure"),
         ],
         _ => &[
-            ("gpt-4o","openai"),("gpt-4o-mini","openai"),("gpt-3.5-turbo","openai"),
-            ("claude-3-5-sonnet-20241022","anthropic"),("claude-3-5-haiku-20241022","anthropic"),
-            ("gemini-2.0-flash","google"),("deepseek-chat","deepseek"),("deepseek-reasoner","deepseek"),
-            ("qwen-turbo","alibaba"),("glm-4-flash","zhipu"),
+            ("gpt-4o", "openai"),
+            ("gpt-4o-mini", "openai"),
+            ("gpt-3.5-turbo", "openai"),
+            ("claude-3-5-sonnet-20241022", "anthropic"),
+            ("claude-3-5-haiku-20241022", "anthropic"),
+            ("gemini-2.0-flash", "google"),
+            ("deepseek-chat", "deepseek"),
+            ("deepseek-reasoner", "deepseek"),
+            ("qwen-turbo", "alibaba"),
+            ("glm-4-flash", "zhipu"),
         ],
     };
-    list.iter().map(|&(name, owner)| ModelInfo {
-        name: name.into(), id: name.into(), owned_by: Some(owner.into()),
-    }).collect()
+    list.iter()
+        .map(|&(name, owner)| ModelInfo {
+            name: name.into(),
+            id: name.into(),
+            owned_by: Some(owner.into()),
+        })
+        .collect()
 }
 
 #[allow(dead_code)]
@@ -351,4 +427,3 @@ fn dedup_models(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
         .filter(|m| seen.insert(m.name.clone()))
         .collect()
 }
-

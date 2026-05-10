@@ -85,10 +85,8 @@ pub async fn handle_chat_completions(
     }
 
     // Forward with retry
-    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> = vec![
-        Arc::new(super::middleware::StreamOptionsMiddleware),
-        Arc::new(super::middleware::ModelAnnotationMiddleware),
-    ];
+    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> =
+        vec![Arc::new(super::middleware::StreamOptionsMiddleware)];
     let caller_kind = super::middleware::CallerKind::OpenAiChat;
 
     forwarder::forward_with_retry(
@@ -162,10 +160,8 @@ pub async fn handle_messages(
     }
 
     // Forward with retry - handle_messages (Claude)
-    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> = vec![
-        Arc::new(super::middleware::StreamOptionsMiddleware),
-        Arc::new(super::middleware::ModelAnnotationMiddleware),
-    ];
+    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> =
+        vec![Arc::new(super::middleware::StreamOptionsMiddleware)];
     let caller_kind = super::middleware::CallerKind::ClaudeMessages;
 
     let response = forwarder::forward_with_retry(
@@ -307,10 +303,8 @@ pub async fn handle_gemini_native(
     }
 
     // Forward with retry - handle_gemini_native
-    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> = vec![
-        Arc::new(super::middleware::StreamOptionsMiddleware),
-        Arc::new(super::middleware::ModelAnnotationMiddleware),
-    ];
+    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> =
+        vec![Arc::new(super::middleware::StreamOptionsMiddleware)];
     let caller_kind = super::middleware::CallerKind::GeminiNative;
 
     let response = forwarder::forward_with_retry(
@@ -410,10 +404,8 @@ pub async fn handle_azure_chat(
     }
 
     // Forward with retry - handle_azure_chat
-    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> = vec![
-        Arc::new(super::middleware::StreamOptionsMiddleware),
-        Arc::new(super::middleware::ModelAnnotationMiddleware),
-    ];
+    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> =
+        vec![Arc::new(super::middleware::StreamOptionsMiddleware)];
     let caller_kind = super::middleware::CallerKind::AzureChat;
 
     let response = forwarder::forward_with_retry(

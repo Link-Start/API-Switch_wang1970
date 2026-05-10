@@ -541,7 +541,7 @@ async fn forward_single(
 
     if is_stream {
         let needs_transform = adapter.needs_sse_transform();
-        let append_model_info = should_append_model_info(state, body);
+        let append_model_info = should_append_model_info(state, body, caller_kind);
         let response = build_streaming_response(
             state,
             entry,
@@ -629,7 +629,17 @@ fn request_uses_tool_calling(body: &Value) -> bool {
     contains_tool_calling_field(body)
 }
 
-fn should_append_model_info(state: &ProxyState, body: &Value) -> bool {
+fn should_append_model_info(
+    state: &ProxyState,
+    body: &Value,
+    caller_kind: &super::middleware::CallerKind,
+) -> bool {
+    // Responses 协议自带原生 `response.model` 字段，绝不能向 output_text 正文
+    // 追加 `model: xxx`，否则会污染客户端的 output_text。P5 修复。
+    if matches!(caller_kind, super::middleware::CallerKind::Responses) {
+        return false;
+    }
+
     let setting_enabled = state
         .settings
         .try_read()
@@ -879,7 +889,8 @@ fn build_streaming_response(
                             append_model_info.then_some(entry.model.as_str()),
                             &mut done_state,
                         ) {
-                            if let Ok(mut chunk_text) = String::from_utf8(with_model_info.to_vec()) {
+                            if let Ok(mut chunk_text) = String::from_utf8(with_model_info.to_vec())
+                            {
                                 for mw in &middleware {
                                     mw.on_sse_chunk(&mut chunk_text, ctx.as_ref());
                                 }

@@ -863,3 +863,465 @@ mod tests {
         assert_eq!(body["choices"][0]["finish_reason"], "max_output_tokens");
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+//  下游方向：Responses API → chat.completions 格式转换
+// ═══════════════════════════════════════════════════════════════════
+
+/// 把 Responses API 的 `input` 字段转成 Chat Completions 的 `messages` 数组。
+///
+/// `input` 可以是：
+/// - 纯字符串 → 单条 user 消息
+/// - 消息数组：字符串、message 对象、function_call、function_call_output
+/// - 对象（少见，序列化为 user 消息）
+///
+/// 多轮工具使用：function_call → assistant tool_calls，
+/// function_call_output → tool message。
+pub fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value> {
+    let mut msgs: Vec<Value> = Vec::new();
+
+    // 可选的 system 消息来自 `instructions`
+    if let Some(inst) = instructions {
+        if !inst.is_empty() {
+            msgs.push(json!({ "role": "system", "content": inst }));
+        }
+    }
+
+    match input {
+        Value::String(s) => {
+            msgs.push(json!({ "role": "user", "content": s }));
+        }
+        Value::Array(items) => {
+            // 将连续的 function_call + function_call_output 配对
+            // 组合成 assistant tool_calls 消息 + 单独的 tool 消息
+            let mut i = 0;
+            while i < items.len() {
+                let item = &items[i];
+
+                if let Value::Object(obj) = item {
+                    let typ = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+                    match typ {
+                        // ── input_image → 带 image_url 的 user 消息 ──
+                        "input_image" => {
+                            let detail =
+                                obj.get("detail").and_then(|v| v.as_str()).unwrap_or("auto");
+
+                            // 处理 image_url（URL 或 data URL）
+                            if let Some(image_url) = obj.get("image_url").and_then(|v| v.as_str()) {
+                                if !image_url.is_empty() {
+                                    msgs.push(json!({
+                                        "role": "user",
+                                        "content": [{
+                                            "type": "image_url",
+                                            "image_url": { "url": image_url, "detail": detail }
+                                        }]
+                                    }));
+                                }
+                            }
+                            // 处理 image_data（base64）→ 转为 data URL
+                            else if let Some(image_data) =
+                                obj.get("image_data").and_then(|v| v.as_str())
+                            {
+                                if !image_data.is_empty() {
+                                    // 如果没有指定媒体类型，默认假设 PNG
+                                    let data_url = if image_data.starts_with("data:") {
+                                        image_data.to_string()
+                                    } else {
+                                        format!("data:image/png;base64,{}", image_data)
+                                    };
+                                    msgs.push(json!({
+                                        "role": "user",
+                                        "content": [{
+                                            "type": "image_url",
+                                            "image_url": { "url": data_url, "detail": detail }
+                                        }]
+                                    }));
+                                }
+                            }
+                            i += 1;
+                            continue;
+                        }
+
+                        // ── input_file → 直接透传 ──
+                        "input_file" => {
+                            // 直接透传 - 让上游决定如何处理
+                            msgs.push(json!({
+                                "role": "user",
+                                "content": obj.clone()
+                            }));
+                            i += 1;
+                            continue;
+                        }
+
+                        // ── function_call → 带 tool_calls 的 assistant 消息 ──
+                        "function_call" => {
+                            let call_id = obj.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
+                            let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                            let arguments = obj
+                                .get("arguments")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("{}");
+
+                            // 收集这个 assistant 轮次的 tool calls
+                            let mut tool_calls = vec![json!({
+                                "id": call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": name,
+                                    "arguments": arguments,
+                                }
+                            })];
+
+                            // 如果下一个项目也是 function_call（同一轮次），将它们分组
+                            let mut j = i + 1;
+                            while j < items.len() {
+                                if let Value::Object(next_obj) = &items[j] {
+                                    let next_typ =
+                                        next_obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                                    if next_typ == "function_call" {
+                                        let next_call_id = next_obj
+                                            .get("call_id")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let next_name = next_obj
+                                            .get("name")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let next_args = next_obj
+                                            .get("arguments")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("{}");
+                                        tool_calls.push(json!({
+                                            "id": next_call_id,
+                                            "type": "function",
+                                            "function": {
+                                                "name": next_name,
+                                                "arguments": next_args,
+                                            }
+                                        }));
+                                        j += 1;
+                                    } else {
+                                        break;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            msgs.push(json!({
+                                "role": "assistant",
+                                "content": null,
+                                "tool_calls": tool_calls
+                            }));
+                            i = j;
+                            continue;
+                        }
+
+                        // ── function_call_output → tool 消息 ──
+                        "function_call_output" => {
+                            let call_id = obj.get("call_id").and_then(|v| v.as_str()).unwrap_or("");
+                            let output = match obj.get("output") {
+                                Some(Value::String(s)) => s.clone(),
+                                Some(v) => {
+                                    serde_json::to_string(v).unwrap_or_else(|_| String::new())
+                                }
+                                None => String::new(),
+                            };
+
+                            msgs.push(json!({
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "content": output,
+                            }));
+                            i += 1;
+                            continue;
+                        }
+
+                        // ── 常规消息 ──
+                        _ => {
+                            let role = match obj.get("role") {
+                                Some(Value::String(r)) => match r.as_str() {
+                                    "system" | "developer" => "system".to_string(),
+                                    "user" | "assistant" | "tool" => r.clone(),
+                                    _ => {
+                                        if matches!(typ, "message") {
+                                            "assistant".to_string()
+                                        } else {
+                                            "user".to_string()
+                                        }
+                                    }
+                                },
+                                _ => {
+                                    if matches!(typ, "message") {
+                                        "assistant".to_string()
+                                    } else {
+                                        "user".to_string()
+                                    }
+                                }
+                            };
+
+                            let content_value = match obj.get("content") {
+                                Some(Value::String(s)) => {
+                                    if s.is_empty() {
+                                        None
+                                    } else {
+                                        Some(json!(s))
+                                    }
+                                }
+                                Some(Value::Array(parts)) => {
+                                    let mut texts: Vec<String> = Vec::new();
+                                    let mut image_parts: Vec<Value> = Vec::new();
+                                    let mut raw_parts: Vec<Value> = Vec::new();
+
+                                    for p in parts {
+                                        match p {
+                                            Value::String(s) => texts.push(s.clone()),
+                                            Value::Object(o) => {
+                                                let part_type = o
+                                                    .get("type")
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("");
+                                                if part_type == "input_image" {
+                                                    let image_url = o
+                                                        .get("image_url")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("");
+                                                    let detail = o
+                                                        .get("detail")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("auto");
+                                                    if !image_url.is_empty() {
+                                                        image_parts.push(json!({
+                                                            "type": "image_url",
+                                                            "image_url": {
+                                                                "url": image_url,
+                                                                "detail": detail
+                                                            }
+                                                        }));
+                                                    } else {
+                                                        raw_parts.push(p.clone());
+                                                    }
+                                                } else {
+                                                    let t = o
+                                                        .get("text")
+                                                        .or_else(|| o.get("input_text"))
+                                                        .or_else(|| o.get("output_text"))
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("");
+                                                    if !t.is_empty() {
+                                                        texts.push(t.to_string());
+                                                    } else {
+                                                        raw_parts.push(p.clone());
+                                                    }
+                                                }
+                                            }
+                                            _ => raw_parts.push(p.clone()),
+                                        }
+                                    }
+
+                                    if image_parts.is_empty() && raw_parts.is_empty() {
+                                        // 没有结构化部分 - 将文本连接为纯字符串（向后兼容）
+                                        let joined = texts.join("\n");
+                                        if joined.is_empty() {
+                                            None
+                                        } else {
+                                            Some(json!(joined))
+                                        }
+                                    } else {
+                                        // 有图片或未知部分 - 构建结构化内容数组
+                                        let mut content_parts: Vec<Value> = texts
+                                            .iter()
+                                            .map(|t| json!({"type": "text", "text": t}))
+                                            .collect();
+                                        content_parts.extend(image_parts);
+                                        content_parts.extend(raw_parts);
+                                        if content_parts.is_empty() {
+                                            None
+                                        } else {
+                                            Some(json!(content_parts))
+                                        }
+                                    }
+                                }
+                                _ => None,
+                            };
+
+                            if let Some(content) = content_value {
+                                msgs.push(json!({ "role": role, "content": content }));
+                            } else if matches!(typ, "function_call" | "function_call_output") {
+                                // 已在上面处理；跳过空消息回退
+                            } else if !typ.is_empty() {
+                                // 保留未知的结构化 Responses 输入项，而不是丢弃
+                                // 或字符串化。上游可以决定是否支持它们。
+                                msgs.push(json!({ "role": role, "content": obj.clone() }));
+                            }
+
+                            i += 1;
+                        }
+                    }
+                } else if let Value::String(s) = item {
+                    msgs.push(json!({ "role": "user", "content": s }));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+        other => {
+            // 对于 null 或其他类型，返回空内容而不自动填充
+            if other.is_null() {
+                // 这种情况应该在 handler 级别的验证中被捕获；
+                // 如果到达这里，返回空消息让调用方处理
+                return msgs;
+            }
+            let text = serde_json::to_string(other).unwrap_or_else(|_| "{}".to_string());
+            if !text.is_empty() {
+                msgs.push(json!({ "role": "user", "content": text }));
+            }
+        }
+    }
+
+    // 只有在有实际输入内容时才添加默认 user 消息
+    // （null/missing input 应该在 handler 级别被拒绝）
+    if msgs.is_empty() && instructions.is_none() {
+        // 没有内容也没有指令 - 这应该在验证中被捕获
+        // 返回空让调用方处理
+        return msgs;
+    }
+
+    msgs
+}
+
+/// 把 Responses API 的工具定义转成 Chat Completions 格式。
+///
+/// Responses API: `{ type: "function", name, description, parameters, strict }`
+/// Chat API:      `{ type: "function", function: { name, description, parameters, strict } }`
+///
+/// 我们是纯翻译层 - 将 function tools 转为 Chat 格式，
+/// 并将所有其他工具类型（web_search、local_shell、image_generation 等）
+/// 原样透传。我们不做过滤或预拒绝；那是上游的决定，不是我们的。
+/// 无论上游返回什么（成功或错误），我们都原样转发给调用方。
+pub fn convert_tools(tools: &[Value]) -> Option<Value> {
+    let converted: Vec<Value> = tools
+        .iter()
+        .map(|t| {
+            let typ = t.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+            // 如果已经是 Chat 格式，直接透传
+            if typ == "function" && t.get("function").is_some() {
+                return t.clone();
+            }
+
+            // 将 Responses 格式的 function tool 转为 Chat 格式，
+            // 同时保留未知的顶层字段以实现透传优先的兼容性。
+            if typ == "function" {
+                let mut tool = t.clone();
+                let Some(tool_obj) = tool.as_object_mut() else {
+                    return t.clone();
+                };
+
+                let mut function = serde_json::Map::new();
+                if let Some(name) = tool_obj.remove("name") {
+                    function.insert("name".to_string(), name);
+                } else {
+                    function.insert("name".to_string(), json!("tool"));
+                }
+                if let Some(description) = tool_obj.remove("description") {
+                    function.insert("description".to_string(), description);
+                }
+                if let Some(parameters) = tool_obj.remove("parameters") {
+                    function.insert("parameters".to_string(), parameters);
+                } else {
+                    function.insert(
+                        "parameters".to_string(),
+                        json!({ "type": "object", "properties": {} }),
+                    );
+                }
+                if let Some(strict) = tool_obj.remove("strict") {
+                    function.insert("strict".to_string(), strict);
+                }
+
+                tool_obj.insert("function".to_string(), Value::Object(function));
+                return tool;
+            }
+
+            // 非 function 工具（web_search、local_shell、image_generation 等）
+            // 直接透传。我们不做过滤 - 让上游决定。
+            t.clone()
+        })
+        .collect();
+
+    if converted.is_empty() {
+        None
+    } else {
+        Some(Value::Array(converted))
+    }
+}
+
+/// 判断 tool_calls 中的项是否为 function tool call
+pub fn is_function_tool_call(tc: &Value) -> bool {
+    tc.get("function").is_some()
+        && (tc.get("type").and_then(|v| v.as_str()) == Some("function") || tc.get("type").is_none())
+}
+
+/// 将 tool_calls 中的项转为 Responses API 的 output item 格式
+pub fn passthrough_output_item(tc: &Value, status: Option<&str>) -> Value {
+    let mut item = tc.clone();
+    if let Some(obj) = item.as_object_mut() {
+        obj.remove("index");
+        if !obj.contains_key("type") {
+            obj.insert("type".to_string(), json!("tool_call"));
+        }
+        if let Some(status) = status {
+            obj.insert("status".to_string(), json!(status));
+        }
+    }
+    item
+}
+
+/// 合并 tool_calls 的增量更新（用于流式响应）
+pub fn merge_tool_delta(item: &mut Value, delta: &Value) {
+    if let (Some(item_obj), Some(delta_obj)) = (item.as_object_mut(), delta.as_object()) {
+        for (key, value) in delta_obj {
+            if key == "index" {
+                continue;
+            }
+            if key == "function" {
+                match (item_obj.get_mut("function"), value) {
+                    (Some(Value::Object(existing)), Value::Object(delta_fn)) => {
+                        for (fn_key, fn_value) in delta_fn {
+                            if fn_key == "arguments" {
+                                let existing_args = existing
+                                    .get("arguments")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let delta_args = match fn_value {
+                                    Value::String(s) => s.clone(),
+                                    Value::Object(_) | Value::Array(_) => {
+                                        serde_json::to_string(fn_value)
+                                            .unwrap_or_else(|_| String::new())
+                                    }
+                                    _ => String::new(),
+                                };
+                                if !delta_args.is_empty() {
+                                    existing.insert(
+                                        "arguments".to_string(),
+                                        json!(format!("{}{}", existing_args, delta_args)),
+                                    );
+                                }
+                            } else if !fn_value.is_null() {
+                                existing.insert(fn_key.clone(), fn_value.clone());
+                            }
+                        }
+                    }
+                    _ => {
+                        item_obj.insert(key.clone(), value.clone());
+                    }
+                }
+            } else if !value.is_null() {
+                item_obj.insert(key.clone(), value.clone());
+            }
+        }
+    }
+}

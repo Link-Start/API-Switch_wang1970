@@ -6,26 +6,20 @@
 ///
 /// Callers never match on `api_type` themselves — they go through the trait.
 mod azure;
-mod azure_output;
 mod claude;
-mod claude_output;
 mod common;
 mod custom;
 mod gemini;
-mod gemini_output;
 mod openai;
-mod responses;
+pub mod responses;
 
 #[cfg(test)]
 mod roundtrip_tests;
 
-pub use azure_output::azure_to_openai_request;
-pub use claude_output::{
-    claude_to_openai_request, openai_to_claude_response, transform_claude_error,
-    ClaudeSSETransformer,
-};
+pub use azure::azure_to_openai_request;
+pub use claude::{claude_to_openai_request, openai_to_claude_response, ClaudeSSETransformer};
 pub use common::join_url;
-pub use gemini_output::{gemini_to_openai_request, openai_to_gemini_response};
+pub use gemini::{gemini_to_openai_request, openai_to_gemini_response};
 
 use serde_json::Value;
 

@@ -2,6 +2,7 @@ mod auth;
 pub(crate) mod circuit_breaker;
 mod forwarder;
 mod handlers;
+pub(crate) mod middleware;
 pub(crate) mod protocol;
 mod responses_handler;
 mod router;

@@ -15,6 +15,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use serde_json::{json, Value};
 use std::collections::HashSet;
+use std::sync::Arc;
 
 fn normalize_requested_model(model: Option<&str>) -> String {
     let trimmed = model.unwrap_or("auto").trim();
@@ -87,9 +88,9 @@ pub async fn handle_chat_completions(
     }
 
     // Forward with retry
-    let middleware: Vec<Box<dyn super::middleware::ForwarderMiddleware>> = vec![
-        Box::new(super::middleware::StreamOptionsMiddleware),
-        Box::new(super::middleware::ModelAnnotationMiddleware),
+    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> = vec![
+        Arc::new(super::middleware::StreamOptionsMiddleware),
+        Arc::new(super::middleware::ModelAnnotationMiddleware),
     ];
     let caller_kind = super::middleware::CallerKind::OpenAiChat;
 
@@ -164,9 +165,9 @@ pub async fn handle_messages(
     }
 
     // Forward with retry - handle_messages (Claude)
-    let middleware: Vec<Box<dyn super::middleware::ForwarderMiddleware>> = vec![
-        Box::new(super::middleware::StreamOptionsMiddleware),
-        Box::new(super::middleware::ModelAnnotationMiddleware),
+    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> = vec![
+        Arc::new(super::middleware::StreamOptionsMiddleware),
+        Arc::new(super::middleware::ModelAnnotationMiddleware),
     ];
     let caller_kind = super::middleware::CallerKind::ClaudeMessages;
 
@@ -389,9 +390,9 @@ pub async fn handle_gemini_native(
     }
 
     // Forward with retry - handle_gemini_native
-    let middleware: Vec<Box<dyn super::middleware::ForwarderMiddleware>> = vec![
-        Box::new(super::middleware::StreamOptionsMiddleware),
-        Box::new(super::middleware::ModelAnnotationMiddleware),
+    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> = vec![
+        Arc::new(super::middleware::StreamOptionsMiddleware),
+        Arc::new(super::middleware::ModelAnnotationMiddleware),
     ];
     let caller_kind = super::middleware::CallerKind::GeminiNative;
 
@@ -492,9 +493,9 @@ pub async fn handle_azure_chat(
     }
 
     // Forward with retry - handle_azure_chat
-    let middleware: Vec<Box<dyn super::middleware::ForwarderMiddleware>> = vec![
-        Box::new(super::middleware::StreamOptionsMiddleware),
-        Box::new(super::middleware::ModelAnnotationMiddleware),
+    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> = vec![
+        Arc::new(super::middleware::StreamOptionsMiddleware),
+        Arc::new(super::middleware::ModelAnnotationMiddleware),
     ];
     let caller_kind = super::middleware::CallerKind::AzureChat;
 

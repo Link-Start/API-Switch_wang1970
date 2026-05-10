@@ -1,6 +1,6 @@
 use super::circuit_breaker::CircuitBreaker;
 use super::handlers::ProxyError;
-use super::middleware::{CallerKind, ForwarderMiddleware, RequestContext};
+use super::middleware::{CallerKind, RequestContext};
 use super::protocol::get_adapter;
 use super::server::ProxyState;
 use crate::database::{AccessKey, ApiEntry, AppSettings, Database};
@@ -356,7 +356,7 @@ pub async fn forward_with_retry(
     requested_model: &str,
     access_key: Option<&AccessKey>,
     is_stream: bool,
-    middleware: &[Box<dyn super::middleware::ForwarderMiddleware>],
+    middleware: &[Arc<dyn super::middleware::ForwarderMiddleware>],
     caller_kind: CallerKind,
 ) -> Result<axum::response::Response, ProxyError> {
     let mut last_error: Option<(String, u16)> = None;
@@ -481,7 +481,7 @@ async fn forward_single(
     access_key: Option<&AccessKey>,
     is_stream: bool,
     prior_attempts: Vec<AttemptInfo>,
-    middleware: &[Box<dyn super::middleware::ForwarderMiddleware>],
+    middleware: &[Arc<dyn super::middleware::ForwarderMiddleware>],
     caller_kind: &CallerKind,
 ) -> Result<ForwardResult, ForwardError> {
     let channel = state
@@ -498,7 +498,7 @@ async fn forward_single(
     // Call middleware on_request
     let ctx = RequestContext {
         caller_kind: caller_kind.clone(),
-        requested_model,
+        requested_model: Arc::<str>::from(requested_model.to_string()),
     };
     for mw in middleware.iter() {
         mw.on_request(&mut upstream_body, &ctx);
@@ -572,6 +572,9 @@ async fn forward_single(
             .map_err(|e| (format!("Failed to parse response: {e}"), 502))?;
 
         adapter.transform_response(&mut response_body);
+        for mw in middleware.iter() {
+            mw.on_response_complete(&mut response_body, &ctx);
+        }
         let (prompt_tokens, completion_tokens) = extract_usage_tokens(&response_body);
 
         Ok(ForwardResult {
@@ -651,12 +654,14 @@ fn build_streaming_response(
     request_start: std::time::Instant,
     prior_attempts: Vec<AttemptInfo>,
     append_model_info: bool,
-    middleware: &[Box<dyn super::middleware::ForwarderMiddleware>],
+    middleware: &[Arc<dyn super::middleware::ForwarderMiddleware>],
     ctx: &RequestContext,
 ) -> axum::response::Response {
     let response_headers = response.headers().clone();
     let upstream_url = upstream_url.to_string();
     let start = request_start;
+    let middleware = middleware.to_vec();
+    let ctx = Arc::new(ctx.clone());
     let db = state.db.clone();
     let app_handle = state.app_handle.clone();
     let entry = entry.clone();
@@ -794,6 +799,12 @@ fn build_streaming_response(
                             append_model_info.then_some(entry.model.as_str()),
                             &mut done_state,
                         ) {
+                            if let Ok(mut chunk_text) = String::from_utf8(transformed.to_vec()) {
+                                for mw in &middleware {
+                                    mw.on_sse_chunk(&mut chunk_text, ctx.as_ref());
+                                }
+                                return Poll::Ready(Some(Ok(Bytes::from(chunk_text))));
+                            }
                             return Poll::Ready(Some(Ok(transformed)));
                         } else {
                             cx.waker().wake_by_ref();
@@ -812,7 +823,12 @@ fn build_streaming_response(
                             append_model_info.then_some(entry.model.as_str()),
                             &mut done_state,
                         ) {
-                            // TODO: wire middleware on_sse_chunk when implementations are ready
+                            if let Ok(mut chunk_text) = String::from_utf8(with_model_info.to_vec()) {
+                                for mw in &middleware {
+                                    mw.on_sse_chunk(&mut chunk_text, ctx.as_ref());
+                                }
+                                return Poll::Ready(Some(Ok(Bytes::from(chunk_text))));
+                            }
                             return Poll::Ready(Some(Ok(with_model_info)));
                         }
                     }

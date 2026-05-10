@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::sync::Arc;
 
 /// 调用方类型
 #[derive(Clone)]
@@ -13,9 +14,10 @@ pub enum CallerKind {
 
 /// 请求上下文，传递给中间件
 #[allow(dead_code)]
-pub struct RequestContext<'a> {
+#[derive(Clone)]
+pub struct RequestContext {
     pub caller_kind: CallerKind,
-    pub requested_model: &'a str,
+    pub requested_model: Arc<str>,
 }
 
 /// 转发器中间件 trait
@@ -64,7 +66,7 @@ impl ForwarderMiddleware for ModelAnnotationMiddleware {
         }
 
         // 注入 model:xxx 到 SSE 流中
-        let model = ctx.requested_model;
+        let model = ctx.requested_model.as_ref();
         let payload = serde_json::json!({
             "choices": [{
                 "delta": {
@@ -83,6 +85,7 @@ pub struct IdleTimeoutMiddleware {
 }
 
 impl IdleTimeoutMiddleware {
+    #[allow(dead_code)]
     pub fn new(timeout_secs: u64) -> Self {
         Self { timeout_secs }
     }

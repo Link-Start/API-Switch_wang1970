@@ -21,7 +21,9 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures::StreamExt;
 use serde_json::{json, Value};
+use std::sync::Arc;
 use uuid::Uuid;
+
 
 fn sse_line(obj: &Value) -> Bytes {
     let line = format!(
@@ -239,8 +241,8 @@ pub async fn handle_responses(
 
     // Forward with retry - handle_responses (Responses API)
     // Note: No ModelAnnotationMiddleware for Responses handler per requirements
-    let middleware: Vec<Box<dyn super::middleware::ForwarderMiddleware>> = vec![
-        Box::new(super::middleware::StreamOptionsMiddleware),
+    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> = vec![
+        Arc::new(super::middleware::StreamOptionsMiddleware),
     ];
     let caller_kind = super::middleware::CallerKind::Responses;
 

@@ -20,8 +20,14 @@ use serde_json::{json, Value};
 const AZURE_API_VERSION: &str = "2024-02-01";
 
 /// 是否在翻译时穿透本协议官方文档未定义的字段。
-/// 默认 true，贯彻「中转翻译器不丢信息」的公理。
-/// 如果某个上游对未知字段返回 400，可临时改为 false 发布紧急版本。
+///
+/// Azure OpenAI 的请求/响应与 OpenAI 协议完全兼容，body 字段直通即可
+/// （见 `azure_to_openai_request` / `AzureAdapter::transform_request`），
+/// 因此本协议**没有独立的 passthrough 代码分支**，该常量仅作范式一致性标记：
+/// 所有协议模块顶部都有这个常量，便于未来按需扩展时一处切换。
+///
+/// 如果未来 Azure 出现需要按字段穿透的场景，可在翻译函数里加上
+/// `if ENABLE_UNKNOWN_FIELD_PASSTHROUGH { ... }` 分支。
 #[allow(dead_code)]
 const ENABLE_UNKNOWN_FIELD_PASSTHROUGH: bool = true;
 

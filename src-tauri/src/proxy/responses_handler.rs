@@ -24,8 +24,6 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use uuid::Uuid;
 
-
-
 // ─── Handler ─────────────────────────────────────────────────────────
 
 /// POST /v1/responses — Responses API compatibility endpoint.
@@ -85,7 +83,6 @@ pub async fn handle_responses(
 
     let (chat_body, is_stream, model) = responses_to_openai_chat_request(&req_body);
 
-
     let response_id = format!("resp_{}", Uuid::new_v4().to_string().replace('-', ""));
     let item_id = format!(
         "msg_{}",
@@ -118,9 +115,8 @@ pub async fn handle_responses(
 
     // Forward with retry - handle_responses (Responses API)
     // Note: No ModelAnnotationMiddleware for Responses handler per requirements
-    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> = vec![
-        Arc::new(super::middleware::StreamOptionsMiddleware),
-    ];
+    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> =
+        vec![Arc::new(super::middleware::StreamOptionsMiddleware)];
     let caller_kind = super::middleware::CallerKind::Responses;
 
     let upstream_response = forwarder::forward_with_retry(
@@ -253,12 +249,8 @@ pub async fn handle_responses(
             }
         }
         Err(e) => {
-            let error_response = responses_failed_response(
-                &response_id,
-                created_at,
-                &format!("{e}"),
-                "proxy_error",
-            );
+            let error_response =
+                responses_failed_response(&response_id, created_at, &format!("{e}"), "proxy_error");
 
             if is_stream {
                 frames.push(responses_sse_line(&json!({
@@ -278,14 +270,6 @@ pub async fn handle_responses(
 /// Build an SSE response from pre-collected frames using a streaming channel.
 fn build_sse_response(frames: Vec<Bytes>) -> Result<axum::response::Response, ProxyError> {
     build_responses_sse_http_response(frames).map_err(ProxyError::from)
-}
-
-fn append_utf8_safe(buffer: &mut String, remainder: &mut Vec<u8>, bytes: &[u8]) {
-    super::sse::append_utf8_safe(buffer, remainder, bytes)
-}
-
-fn sse_data_payload(line: &str) -> Option<&str> {
-    super::sse::sse_data_payload(line)
 }
 
 // ─── Response Store Helpers ───────────────────────────────────────────
@@ -604,6 +588,7 @@ mod tests {
 
     #[test]
     fn test_append_utf8_safe_preserves_split_multibyte_content() {
+        use super::super::sse::append_utf8_safe;
         let mut buffer = String::new();
         let mut remainder = Vec::new();
         let text = "data: {\"delta\":\"你好世界\"}\n\n";
@@ -622,6 +607,7 @@ mod tests {
 
     #[test]
     fn test_sse_data_payload_accepts_optional_space() {
+        use super::super::sse::sse_data_payload;
         assert_eq!(
             sse_data_payload("data: {\"ok\":true}"),
             Some("{\"ok\":true}")

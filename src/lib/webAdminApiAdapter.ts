@@ -187,12 +187,13 @@ export const webAdminApiAdapter: ApiAdapter = {
   },
 settings: {
     get: () => request<{ data: AppSettings; _version: number }>('GET', '/settings').then(r => {
-        // Track version for subsequent updates
         lastSettingsVersion = r._version;
         return r.data;
     }),
-    update: (settings) => {
-        return request<void>('PUT', '/settings', { data: settings, _version: lastSettingsVersion });
+    update: async (settings) => {
+        const latest = await request<{ data: AppSettings; _version: number }>('GET', '/settings');
+        lastSettingsVersion = latest._version;
+        await request<void>('PUT', '/settings', { data: settings, _version: lastSettingsVersion });
     },
     patchSettings: (patch) => {
         return request<{ data: AppSettings; _version: number }>('PATCH', '/settings', patch).then(r => {

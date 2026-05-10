@@ -26,6 +26,7 @@ const STREAMING_PING_INTERVAL: Duration = Duration::from_secs(10);
 struct SseDoneState {
     seen_done: bool,
     appended_model_info: bool,
+    upstream_model_info_seen: bool,
 }
 #[derive(Debug, Clone, Copy)]
 enum StreamEndReason {
@@ -805,6 +806,21 @@ fn stream_chunk_has_text_delta(value: &Value) -> bool {
         })
 }
 
+fn stream_chunk_has_model_info_delta(value: &Value, model: &str) -> bool {
+    value
+        .get("choices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|choice| {
+            choice
+                .get("delta")
+                .and_then(|delta| delta.get("content"))
+                .and_then(Value::as_str)
+                .is_some_and(|content| content.trim() == format!("model: {model}"))
+        })
+}
+
 fn model_info_delta(model: &str) -> Vec<u8> {
     let payload = serde_json::json!({
         "choices": [{
@@ -839,7 +855,9 @@ fn transform_sse_chunk(
                 if !done_state.seen_done {
                     done_state.seen_done = true;
                     if let Some(model) = model_info.filter(|_| {
-                        has_text_delta.load(Ordering::Relaxed) && !done_state.appended_model_info
+                        has_text_delta.load(Ordering::Relaxed)
+                            && !done_state.appended_model_info
+                            && !done_state.upstream_model_info_seen
                     }) {
                         output.push(model_info_delta(model));
                         done_state.appended_model_info = true;
@@ -857,6 +875,11 @@ fn transform_sse_chunk(
                 if let Ok(value) = serde_json::from_str::<Value>(&transformed) {
                     if stream_chunk_has_text_delta(&value) {
                         has_text_delta.store(true, Ordering::Relaxed);
+                    }
+                    if let Some(model) = model_info {
+                        if stream_chunk_has_model_info_delta(&value, model) {
+                            done_state.upstream_model_info_seen = true;
+                        }
                     }
                 }
                 output.push(format!("data: {transformed}\n\n").into_bytes());
@@ -905,6 +928,11 @@ fn append_and_parse_sse(
             if stream_chunk_has_text_delta(&value) {
                 has_text_delta.store(true, Ordering::Relaxed);
             }
+            if let Some(model) = model_info {
+                if stream_chunk_has_model_info_delta(&value, model) {
+                    done_state.upstream_model_info_seen = true;
+                }
+            }
             let (prompt, completion) = extract_usage_tokens(&value);
             if prompt > 0 { prompt_tokens.store(prompt, Ordering::Relaxed); }
             if completion > 0 { completion_tokens.store(completion, Ordering::Relaxed); }
@@ -912,7 +940,10 @@ fn append_and_parse_sse(
     }
 
     let Some(model) = model_info.filter(|_| {
-        saw_done && has_text_delta.load(Ordering::Relaxed) && !done_state.appended_model_info
+        saw_done
+            && has_text_delta.load(Ordering::Relaxed)
+            && !done_state.appended_model_info
+            && !done_state.upstream_model_info_seen
     }) else {
         return None;
     };
@@ -1309,6 +1340,35 @@ data: [DONE]\n"
     }
 
     #[test]
+    fn append_and_parse_sse_does_not_duplicate_existing_model_info() {
+        let mut buffer = String::new();
+        let chunk = Bytes::from_static(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"\\n\\nmodel: gpt-test\"}}]}\n\
+data: [DONE]\n"
+        );
+        let prompt_tokens = Arc::new(AtomicI64::new(0));
+        let completion_tokens = Arc::new(AtomicI64::new(0));
+        let has_sse_error = Arc::new(AtomicBool::new(false));
+        let has_text_delta = Arc::new(AtomicBool::new(false));
+        let mut done_state = SseDoneState::default();
+
+        let output = append_and_parse_sse(
+            &mut buffer,
+            &chunk,
+            &prompt_tokens,
+            &completion_tokens,
+            &has_sse_error,
+            &has_text_delta,
+            Some("gpt-test"),
+            &mut done_state,
+        );
+
+        let text = String::from_utf8(output.unwrap_or(chunk).to_vec()).expect("valid utf8");
+        assert_eq!(text.matches("model: gpt-test").count(), 1);
+    }
+
+    #[test]
     fn transform_sse_chunk_duplicate_done_only_outputs_single_done_and_model_once() {
         let adapter = get_adapter("claude");
         let chunk = Bytes::from_static(
@@ -1337,6 +1397,37 @@ data: [DONE]\n"
         let output = String::from_utf8(output.to_vec()).expect("valid utf8");
         assert_eq!(output.matches("data: [DONE]").count(), 1);
         assert_eq!(output.matches("model: claude-3").count(), 1);
+    }
+
+    #[test]
+    fn transform_sse_chunk_does_not_duplicate_existing_model_info() {
+        let adapter = get_adapter("openai");
+        let chunk = Bytes::from_static(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"\\n\\nmodel: gpt-test\"}}]}\n\
+data: [DONE]\n"
+        );
+        let mut buffer = String::new();
+        let prompt_tokens = Arc::new(AtomicI64::new(0));
+        let completion_tokens = Arc::new(AtomicI64::new(0));
+        let has_text_delta = Arc::new(AtomicBool::new(false));
+        let mut done_state = SseDoneState::default();
+
+        let output = transform_sse_chunk(
+            &chunk,
+            &mut buffer,
+            &adapter,
+            &prompt_tokens,
+            &completion_tokens,
+            &has_text_delta,
+            Some("gpt-test"),
+            &mut done_state,
+        )
+        .expect("transformed output");
+
+        let output = String::from_utf8(output.to_vec()).expect("valid utf8");
+        assert_eq!(output.matches("data: [DONE]").count(), 1);
+        assert_eq!(output.matches("model: gpt-test").count(), 1);
     }
 
     #[test]

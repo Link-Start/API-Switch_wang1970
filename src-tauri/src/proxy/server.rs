@@ -2,6 +2,7 @@ use super::circuit_breaker::CircuitBreaker;
 use super::handlers;
 use super::responses_handler;
 use crate::database::{AppSettings, Database};
+use axum::extract::Query;
 use axum::routing::{get, post};
 use axum::Router;
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,12 @@ pub struct ProxyState {
     pub app_handle: tauri::AppHandle,
     pub http_client: reqwest::Client,
     pub response_store: Arc<RwLock<HashMap<String, serde_json::Value>>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct AzureDeploymentsQuery {
+    #[serde(rename = "api-version")]
+    _api_version: Option<String>,
 }
 
 /// HTTP proxy server
@@ -102,6 +109,16 @@ impl ProxyServer {
             )
             .route("/v1/messages", post(handlers::handle_messages))
             .route("/v1/models", get(handlers::handle_list_models))
+            .route("/anthropic/v1/models", get(handlers::handle_list_models_claude))
+            .route("/v1beta/models", get(handlers::handle_list_models_gemini))
+            .route(
+                "/openai/deployments",
+                get(
+                    |state, query: Query<AzureDeploymentsQuery>| async move {
+                        handlers::handle_list_models_azure(state, query).await
+                    },
+                ),
+            )
             // Gemini native endpoint (non-streaming only for now)
             .route("/v1beta/models/*rest", post(handlers::handle_gemini_native))
             // Azure native endpoint

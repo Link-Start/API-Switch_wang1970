@@ -6,7 +6,7 @@ use super::protocol::{
 };
 use super::router;
 use super::server::ProxyState;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -21,6 +21,149 @@ fn normalize_requested_model(model: Option<&str>) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+async fn load_sorted_entries(
+    state: &ProxyState,
+) -> Result<Vec<crate::database::ApiEntry>, ProxyError> {
+    let mut entries = state.db.get_entries_for_routing()?;
+    entries.retain(|entry| !entry.model.trim().is_empty());
+    let sort_mode = state.settings.read().await.default_sort_mode.clone();
+    router::apply_sort_mode(&mut entries, &sort_mode);
+    Ok(entries)
+}
+
+fn dedup_models_by_name(mut entries: Vec<crate::database::ApiEntry>) -> Vec<crate::database::ApiEntry> {
+    let mut seen = HashSet::new();
+    entries.retain(|entry| seen.insert(entry.model.to_ascii_lowercase()));
+    entries
+}
+
+fn group_created_at(entries: &[crate::database::ApiEntry], group: &str) -> i64 {
+    entries
+        .iter()
+        .find(|entry| entry.group_name.as_deref() == Some(group))
+        .map(entry_created_at)
+        .unwrap_or_else(|| chrono::Utc::now().timestamp())
+}
+
+fn openai_model_item(entry: &crate::database::ApiEntry) -> Value {
+    json!({
+        "id": entry.model,
+        "object": "model",
+        "created": entry_created_at(entry),
+        "owned_by": entry_owned_by(entry, "openai"),
+    })
+}
+
+fn claude_model_item(entry: &crate::database::ApiEntry) -> Value {
+    json!({
+        "type": "model",
+        "id": entry.model,
+        "display_name": claude_display_name(entry),
+        "created_at": entry_created_at_rfc3339(entry),
+    })
+}
+
+fn gemini_model_item(entry: &crate::database::ApiEntry) -> Value {
+    let token_limit = parse_context_limit(entry);
+    json!({
+        "name": format!("models/{}", entry.model),
+        "version": gemini_version(entry),
+        "displayName": gemini_display_name(entry),
+        "description": gemini_description(entry),
+        "inputTokenLimit": token_limit,
+        "outputTokenLimit": token_limit,
+        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"]
+    })
+}
+
+fn azure_deployment_item(entry: &crate::database::ApiEntry) -> Value {
+    json!({
+        "id": entry.model,
+        "object": "deployment",
+        "created": entry_created_at(entry),
+        "owned_by": entry_owned_by(entry, "openai"),
+        "model": if entry.display_name.trim().is_empty() { entry.model.clone() } else { entry.display_name.clone() },
+    })
+}
+
+fn entry_created_at(entry: &crate::database::ApiEntry) -> i64 {
+    if entry.created_at > 0 {
+        entry.created_at
+    } else {
+        chrono::Utc::now().timestamp()
+    }
+}
+
+fn entry_created_at_rfc3339(entry: &crate::database::ApiEntry) -> String {
+    let ts = entry_created_at(entry);
+    chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0)
+        .unwrap_or_else(|| chrono::Utc::now())
+        .to_rfc3339()
+}
+
+fn entry_owned_by(entry: &crate::database::ApiEntry, default_owned_by: &str) -> String {
+    entry.owned_by.clone().unwrap_or_else(|| default_owned_by.to_string())
+}
+
+fn claude_display_name(entry: &crate::database::ApiEntry) -> String {
+    if !entry.display_name.trim().is_empty() {
+        entry.display_name.clone()
+    } else {
+        entry.model.clone()
+    }
+}
+
+fn gemini_display_name(entry: &crate::database::ApiEntry) -> String {
+    if !entry.display_name.trim().is_empty() {
+        entry.display_name.clone()
+    } else {
+        entry.model.clone()
+    }
+}
+
+fn gemini_description(entry: &crate::database::ApiEntry) -> String {
+    entry
+        .model_meta_en
+        .clone()
+        .or_else(|| entry.model_meta_zh.clone())
+        .unwrap_or_default()
+}
+
+fn gemini_version(entry: &crate::database::ApiEntry) -> String {
+    entry
+        .release_date
+        .clone()
+        .unwrap_or_else(|| "stable".to_string())
+}
+
+fn parse_context_limit(entry: &crate::database::ApiEntry) -> i64 {
+    let mut haystacks = Vec::new();
+    if let Some(text) = &entry.model_meta_en {
+        haystacks.push(text.as_str());
+    }
+    if let Some(text) = &entry.model_meta_zh {
+        haystacks.push(text.as_str());
+    }
+
+    for text in haystacks {
+        for token in text.split(|c: char| !(c.is_ascii_alphanumeric() || c == 'k' || c == 'K')) {
+            let lower = token.to_ascii_lowercase();
+            if let Some(stripped) = lower.strip_suffix('k') {
+                if let Ok(value) = stripped.parse::<i64>() {
+                    return value * 1024;
+                }
+            }
+            if let Ok(value) = lower.parse::<i64>() {
+                if value >= 1024 {
+                    return value;
+                }
+            }
+        }
+    }
+
+    8192
 }
 
 /// Health check endpoint
@@ -201,11 +344,8 @@ pub async fn handle_messages(
 pub async fn handle_list_models(
     State(state): State<ProxyState>,
 ) -> Result<Json<Value>, ProxyError> {
-    let mut entries = state.db.get_entries_for_routing()?;
-    let sort_mode = state.settings.read().await.default_sort_mode.clone();
-    router::apply_sort_mode(&mut entries, &sort_mode);
+    let entries = dedup_models_by_name(load_sorted_entries(&state).await?);
 
-    // Collect unique non-empty group names as models
     let mut group_set: HashSet<String> = HashSet::new();
     for e in &entries {
         if let Some(name) = &e.group_name {
@@ -214,39 +354,77 @@ pub async fn handle_list_models(
             }
         }
     }
-    // Convert groups to model objects, owned_by "group"
-    let mut group_models: Vec<Value> = group_set
+    let mut group_names: Vec<String> = group_set.into_iter().collect();
+    group_names.sort();
+
+    let group_models: Vec<Value> = group_names
         .iter()
         .map(|g| {
             json!({
                 "id": g,
                 "object": "model",
+                "created": group_created_at(&entries, g),
                 "owned_by": "group",
             })
         })
         .collect();
-    // Sort groups for deterministic order (optional)
-    group_models.sort_by(|a, b| {
-        a["id"]
-            .as_str()
-            .unwrap_or("")
-            .cmp(b["id"].as_str().unwrap_or(""))
-    });
 
-    let models: Vec<Value> = entries
-        .iter()
-        .map(|e| {
-            json!({
-                "id": e.model,
-                "object": "model",
-                "owned_by": e.channel_name,
-            })
-        })
-        .collect();
+    let models: Vec<Value> = entries.iter().map(openai_model_item).collect();
 
-    // Combine group models first, then regular models
     let mut data = group_models;
     data.extend(models);
+
+    Ok(Json(json!({
+        "object": "list",
+        "data": data,
+    })))
+}
+
+/// Handle /anthropic/v1/models - Anthropic native model list format.
+pub async fn handle_list_models_claude(
+    State(state): State<ProxyState>,
+) -> Result<Json<Value>, ProxyError> {
+    let entries = dedup_models_by_name(load_sorted_entries(&state).await?);
+    let data: Vec<Value> = entries.iter().map(claude_model_item).collect();
+
+    let first_id = data
+        .first()
+        .and_then(|item| item.get("id"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    let last_id = data
+        .last()
+        .and_then(|item| item.get("id"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+
+    Ok(Json(json!({
+        "data": data,
+        "first_id": first_id,
+        "last_id": last_id,
+        "has_more": false,
+    })))
+}
+
+/// Handle /v1beta/models - Gemini native model list format.
+pub async fn handle_list_models_gemini(
+    State(state): State<ProxyState>,
+) -> Result<Json<Value>, ProxyError> {
+    let entries = dedup_models_by_name(load_sorted_entries(&state).await?);
+    let models: Vec<Value> = entries.iter().map(gemini_model_item).collect();
+
+    Ok(Json(json!({
+        "models": models,
+    })))
+}
+
+/// Handle /openai/deployments - Azure deployment list format.
+pub async fn handle_list_models_azure(
+    State(state): State<ProxyState>,
+    Query(_query): Query<super::server::AzureDeploymentsQuery>,
+) -> Result<Json<Value>, ProxyError> {
+    let entries = dedup_models_by_name(load_sorted_entries(&state).await?);
+    let data: Vec<Value> = entries.iter().map(azure_deployment_item).collect();
 
     Ok(Json(json!({
         "object": "list",
@@ -302,7 +480,6 @@ pub async fn handle_gemini_native(
         return Err(ProxyError::NoAvailableProvider(requested_model));
     }
 
-    // Forward with retry - handle_gemini_native
     let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> =
         vec![Arc::new(super::middleware::StreamOptionsMiddleware)];
     let caller_kind = super::middleware::CallerKind::GeminiNative;
@@ -345,7 +522,6 @@ pub async fn handle_azure_chat(
     let (parts, body) = request.into_parts();
     let headers = &parts.headers;
 
-    // Extract Access Key
     let access_key = auth::extract_access_key(headers, &state)
         .await
         .map_err(|err| match err {
@@ -353,7 +529,6 @@ pub async fn handle_azure_chat(
             other => ProxyError::from(other),
         })?;
 
-    // Read request body
     let body_bytes = axum::body::to_bytes(body, 32 * 1024 * 1024)
         .await
         .map_err(|e| ProxyError::Internal(format!("Failed to read body: {e}")))?;
@@ -361,7 +536,6 @@ pub async fn handle_azure_chat(
     let body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::Internal(format!("Failed to parse JSON: {e}")))?;
 
-    // Convert Azure format to OpenAI format (mostly passthrough)
     let openai_body = azure_to_openai_request(&body, &deployment);
 
     let requested_model =
@@ -372,12 +546,10 @@ pub async fn handle_azure_chat(
         .and_then(|s| s.as_bool())
         .unwrap_or(false);
 
-    // Resolve target entries
     let all_entries = state.db.get_entries_for_routing()?;
     let auto_entries = state.db.get_enabled_entries_for_auto()?;
     let sort_mode = state.settings.read().await.default_sort_mode.clone();
 
-    // Azure native semantics: try deployment exact-match first, then fallback to normal resolve.
     let mut resolved: Vec<crate::database::ApiEntry> = {
         let deployment_lower = deployment.to_ascii_lowercase();
         all_entries
@@ -403,7 +575,6 @@ pub async fn handle_azure_chat(
         return Err(ProxyError::NoAvailableProvider(requested_model));
     }
 
-    // Forward with retry - handle_azure_chat
     let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> =
         vec![Arc::new(super::middleware::StreamOptionsMiddleware)];
     let caller_kind = super::middleware::CallerKind::AzureChat;
@@ -421,12 +592,88 @@ pub async fn handle_azure_chat(
     )
     .await?;
 
-    // Azure format is same as OpenAI, so just pass through
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::ApiEntry;
+
+    fn sample_entry(id: &str, model: &str, display_name: &str, group_name: Option<&str>) -> ApiEntry {
+        ApiEntry {
+            id: id.to_string(),
+            channel_id: format!("channel-{id}"),
+            model: model.to_string(),
+            display_name: display_name.to_string(),
+            sort_index: 0,
+            enabled: true,
+            cooldown_until: None,
+            circuit_state: "closed".to_string(),
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            channel_name: Some("channel-a".to_string()),
+            channel_api_type: Some("openai".to_string()),
+            owned_by: Some("openai".to_string()),
+            response_ms: None,
+            provider_logo: None,
+            release_date: Some("2024-01-02".to_string()),
+            model_meta_zh: Some("上下文 32k".to_string()),
+            model_meta_en: Some("Context 32k".to_string()),
+            group_name: group_name.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn openai_model_item_includes_created_and_owned_by() {
+        let entry = sample_entry("1", "gpt-4o", "GPT-4o", None);
+        let value = openai_model_item(&entry);
+        assert_eq!(value["id"], "gpt-4o");
+        assert_eq!(value["object"], "model");
+        assert_eq!(value["created"], 1_700_000_000);
+        assert_eq!(value["owned_by"], "openai");
+    }
+
+    #[test]
+    fn claude_model_item_uses_rfc3339_created_at() {
+        let entry = sample_entry("1", "claude-3-5-sonnet", "Claude Sonnet", None);
+        let value = claude_model_item(&entry);
+        assert_eq!(value["type"], "model");
+        assert_eq!(value["id"], "claude-3-5-sonnet");
+        assert_eq!(value["display_name"], "Claude Sonnet");
+        assert_eq!(value["created_at"], "2023-11-14T22:13:20+00:00");
+    }
+
+    #[test]
+    fn gemini_model_item_uses_native_shape() {
+        let entry = sample_entry("1", "gemini-2.0-flash", "Gemini Flash", None);
+        let value = gemini_model_item(&entry);
+        assert_eq!(value["name"], "models/gemini-2.0-flash");
+        assert_eq!(value["displayName"], "Gemini Flash");
+        assert_eq!(value["supportedGenerationMethods"], json!(["generateContent", "streamGenerateContent"]));
+    }
+
+    #[test]
+    fn azure_deployment_item_uses_deployment_object_and_model_fallback() {
+        let entry = sample_entry("1", "deployment-1", "", None);
+        let value = azure_deployment_item(&entry);
+        assert_eq!(value["object"], "deployment");
+        assert_eq!(value["model"], "deployment-1");
+    }
+
+    #[test]
+    fn dedup_models_by_name_keeps_first_case_insensitive_match() {
+        let first = sample_entry("1", "gpt-4o", "First", None);
+        let second = sample_entry("2", "GPT-4O", "Second", None);
+        let items = dedup_models_by_name(vec![first.clone(), second]);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, first.id);
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProxyError {
+
     #[error("No available provider for model: {0}")]
     NoAvailableProvider(String),
 

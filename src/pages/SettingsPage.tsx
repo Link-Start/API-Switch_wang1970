@@ -42,9 +42,6 @@ export function SettingsPage() {
       i18n.changeLanguage(value as string);
       localStorage.setItem("api-switch-locale", value as string);
     }
-    if (key === "default_sort_mode") {
-      localStorage.setItem("api-switch-sort-mode", value as string);
-    }
     if (key === "active_group") {
       // Persist the remembered default group for the API Management page locally for faster UI restoration.
       localStorage.setItem("api-switch-default-group", value as string);

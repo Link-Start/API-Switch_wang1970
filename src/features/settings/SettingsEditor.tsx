@@ -194,19 +194,6 @@ export function SettingsEditor({
               </SelectContent>
             </Select>
           </div>
-<div className="flex items-center justify-between">
-                <Label>{t("settings.general.defaultSortMode")}</Label>
-                <Select value={s.default_sort_mode} onValueChange={(value) => onChange("default_sort_mode", value as AppSettings["default_sort_mode"])}>
-                  <SelectTrigger className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="latest">{t("apiPool.sort.latest")}</SelectItem>
-                    <SelectItem value="fastest">{t("apiPool.sort.fastest")}</SelectItem>
-                    <SelectItem value="custom">{t("apiPool.sort.custom")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
               <div className="flex items-center justify-between">
                 <div>
                   <Label>{t("settings.general.showConversationModel")}</Label>

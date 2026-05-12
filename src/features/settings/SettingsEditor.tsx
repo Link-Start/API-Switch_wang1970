@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+﻿import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -33,8 +33,18 @@ export function SettingsEditor({
   // Local state for text inputs that should only save on blur
   const [editUsername, setEditUsername] = useState(s.web_admin_username);
   const [editPassword, setEditPassword] = useState(s.web_admin_password);
+  const [editPort, setEditPort] = useState(s.listen_port);
+  const [editThreshold, setEditThreshold] = useState(s.circuit_failure_threshold);
+  const [editTimeout, setEditTimeout] = useState(s.proxy_connect_timeout_secs);
+  const [editDisableCodes, setEditDisableCodes] = useState(s.circuit_disable_codes);
+  const [editAdminPort, setEditAdminPort] = useState(s.web_admin_port);
   const usernameEditing = useRef(false);
   const passwordEditing = useRef(false);
+  const portEditing = useRef(false);
+  const thresholdEditing = useRef(false);
+  const timeoutEditing = useRef(false);
+  const disableCodesEditing = useRef(false);
+  const adminPortEditing = useRef(false);
 
   // Sync from props when not actively editing
   useEffect(() => {
@@ -59,8 +69,13 @@ export function SettingsEditor({
             <Input
               type="number"
               className="w-32"
-              value={s.listen_port}
-              onChange={(event) => onChange("listen_port", parseInt(event.target.value) || 9090)}
+              value={editPort}
+              onFocus={() => { portEditing.current = true; }}
+              onChange={(event) => setEditPort(parseInt(event.target.value) || 9090)}
+              onBlur={() => {
+                portEditing.current = false;
+                onChange("listen_port", editPort);
+              }}
             />
           </div>
           <div className="flex items-center justify-between">
@@ -109,8 +124,13 @@ export function SettingsEditor({
             <Input
               type="number"
               className="w-32"
-              value={s.circuit_failure_threshold}
-              onChange={(event) => onChange("circuit_failure_threshold", parseInt(event.target.value) || 1)}
+              value={editThreshold}
+              onFocus={() => { thresholdEditing.current = true; }}
+              onChange={(event) => setEditThreshold(parseInt(event.target.value) || 1)}
+              onBlur={() => {
+                thresholdEditing.current = false;
+                onChange("circuit_failure_threshold", editThreshold);
+              }}
             />
           </div>
           <div className="flex items-center justify-between">
@@ -123,8 +143,13 @@ export function SettingsEditor({
               min={1}
               max={300}
               className="w-32"
-              value={s.proxy_connect_timeout_secs}
-              onChange={(event) => onChange("proxy_connect_timeout_secs", Math.min(300, Math.max(1, parseInt(event.target.value) || 30)))}
+              value={editTimeout}
+              onFocus={() => { timeoutEditing.current = true; }}
+              onChange={(event) => setEditTimeout(Math.min(300, Math.max(1, parseInt(event.target.value) || 30)))}
+              onBlur={() => {
+                timeoutEditing.current = false;
+                onChange("proxy_connect_timeout_secs", editTimeout);
+              }}
             />
           </div>
           <div className="space-y-2">
@@ -133,17 +158,24 @@ export function SettingsEditor({
               <span className="text-sm text-muted-foreground w-16 text-right">{s.circuit_recovery_secs}s</span>
             </div>
             <Slider
-              min={300}
+              min={30}
               max={1800}
               step={30}
               value={s.circuit_recovery_secs}
               onValueChange={(value) => onChange("circuit_recovery_secs", value)}
             />
-            <p className="text-xs text-muted-foreground">300s – 1800s</p>
+            <p className="text-xs text-muted-foreground">30s – 1800s</p>
           </div>
           <div className="space-y-2">
             <Label>{t("settings.circuit.disableCodes")}</Label>
-            <Input value={s.circuit_disable_codes} onChange={(event) => onChange("circuit_disable_codes", event.target.value)} />
+            <Input value={editDisableCodes}
+              onFocus={() => { disableCodesEditing.current = true; }}
+              onChange={(event) => setEditDisableCodes(event.target.value)}
+              onBlur={() => {
+                disableCodesEditing.current = false;
+                onChange("circuit_disable_codes", editDisableCodes);
+              }}
+            />
             <p className="text-xs text-muted-foreground">{t("settings.circuit.disableDesc")}</p>
           </div>
         </CardContent>
@@ -168,8 +200,13 @@ export function SettingsEditor({
                 min={1}
                 max={65535}
                 className="w-32"
-                value={s.web_admin_port}
-                onChange={(event) => onChange("web_admin_port", Math.min(65535, Math.max(1, parseInt(event.target.value) || 9099)))}
+                value={editAdminPort}
+                onFocus={() => { adminPortEditing.current = true; }}
+                onChange={(event) => setEditAdminPort(Math.min(65535, Math.max(1, parseInt(event.target.value) || 9099)))}
+                onBlur={() => {
+                  adminPortEditing.current = false;
+                  onChange("web_admin_port", editAdminPort);
+                }}
               />
             </div>
             <div className="space-y-2">

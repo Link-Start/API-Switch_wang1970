@@ -1,4 +1,4 @@
-//! OpenAI Responses API 上游适配器（Beta）
+﻿//! OpenAI Responses API 上游适配器（Beta）
 //!
 //! 作为 channel.api_type = "responses" 时的 adapter，把 chat.completions
 //! 中间格式翻译成 Responses API 请求发给上游，再把 Responses API 响应
@@ -221,12 +221,17 @@ pub fn responses_hosted_tools_degradation_prompt(tool_types: &[String]) -> Optio
     }
 
     Some(format!(
-        "当前请求包含 Responses 原生工具：{}。\n\
-API Switch 当前通过 Chat-compatible 上游转发，不能把这些 hosted tools 原样透传给该上游。\n\n\
-请不要声称已经调用或执行了 Responses 原生工具。\n\
-请根据任务目标，改用当前运行环境可用的本地方式完成任务，例如 PowerShell、curl、Python、浏览器、Playwright、HTTP API、本地命令、文件系统搜索、数据库查询、本地索引或其他可调用工具。\n\
-所有结果必须来自实际执行、实际读取或实际可验证的信息；不要编造搜索结果、文件内容、图片结果或工具执行结果。",
-        tool_types.join("、")
+        "The current request contains Responses native tool(s): {}, which are unavailable in the current environment.\n\n\
+Instead, accomplish the task using methods available in your runtime, for example:\n\
+- Shell commands (PowerShell/cmd/bash)\n\
+- HTTP requests (curl/Invoke-WebRequest)\n\
+- Scripts (Python/Node.js)\n\
+- Web automation (Playwright/browser)\n\
+- File system search and read\n\
+- Database queries\n\
+- Any other registered local tools\n\n\
+All results must come from actual execution or verifiable information. Do not fabricate results of any kind.",
+        tool_types.join(", ")
     ))
 }
 

@@ -1,4 +1,4 @@
-//! POST /v1/responses — OpenAI Responses API compatibility layer.
+﻿//! POST /v1/responses — OpenAI Responses API compatibility layer.
 //!
 //! Converts a subset of Responses API requests (text and function tools)
 //! to Chat Completions format. Non-streaming responses are returned as
@@ -509,7 +509,7 @@ mod tests {
         assert!(prompt.contains("PowerShell"));
         assert!(prompt.contains("curl"));
         assert!(prompt.contains("Python"));
-        assert!(prompt.contains("不要编造"));
+        assert!(prompt.contains("Do not fabricate"));
         assert!(!prompt.contains("切换到支持"));
         assert!(!prompt.contains("粘贴文件内容"));
     }
@@ -532,7 +532,7 @@ mod tests {
         let content = messages[0]["content"].as_str().unwrap();
         assert!(content.contains("保持简洁。"));
         assert!(content.contains("web_search"));
-        assert!(content.contains("当前运行环境可用的本地方式"));
+        assert!(content.contains("methods available in your runtime"));
 
         let tools = chat_body["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);

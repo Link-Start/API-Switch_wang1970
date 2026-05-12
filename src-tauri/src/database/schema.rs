@@ -147,7 +147,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
         ("proxy_enabled", "1"),
         ("listen_port", "9090"),
         ("access_key_required", "0"),
-        ("circuit_failure_threshold", "3"),
+        ("circuit_failure_threshold", "5"),
         ("proxy_connect_timeout_secs", "30"),
         ("circuit_recovery_secs", "300"),
         ("circuit_disable_codes", "401,403,410"),
@@ -164,7 +164,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
         ("web_admin_username", ""),
         ("web_admin_password", ""),
         ("web_admin_port", "9099"),
-        ("show_conversation_model", "1"),
+        ("show_conversation_model", "0"),
         ("app_version", "0.6.2"),
     ];
 
@@ -179,7 +179,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
     // Migrate old default circuit values to the personal-version cooldown defaults.
     // Preserve explicitly customized values by only rewriting the previous defaults.
     conn.execute(
-        "UPDATE config SET value = '3' WHERE key = 'circuit_failure_threshold' AND value IN ('1', '4')",
+        "UPDATE config SET value = '5' WHERE key = 'circuit_failure_threshold' AND value IN ('1', '3', '4')",
         [],
     )
     .map_err(|e| AppError::Database(e.to_string()))?;

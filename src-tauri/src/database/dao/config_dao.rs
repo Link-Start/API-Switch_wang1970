@@ -37,7 +37,7 @@ impl Default for AppSettings {
             proxy_enabled: true,
             listen_port: 9090,
             access_key_required: false,
-            circuit_failure_threshold: 3,
+            circuit_failure_threshold: 5,
             proxy_connect_timeout_secs: 30,
             circuit_recovery_secs: 300,
             circuit_disable_codes: "401,403,410".to_string(),
@@ -52,7 +52,7 @@ impl Default for AppSettings {
             web_admin_username: "admin".to_string(),
             web_admin_password: "admin".to_string(),
             web_admin_port: 9099,
-            show_conversation_model: true,
+            show_conversation_model: false,
             app_version: "0.6.2".to_string(),
             locale: String::new(),
             theme: String::new(),
@@ -85,7 +85,7 @@ impl Database {
             settings.access_key_required = v == "1";
         }
         if let Some(v) = kv.get("circuit_failure_threshold") {
-            settings.circuit_failure_threshold = v.parse().unwrap_or(3);
+            settings.circuit_failure_threshold = v.parse().unwrap_or(5);
         }
         if let Some(v) = kv.get("proxy_connect_timeout_secs") {
             settings.proxy_connect_timeout_secs = v.parse().unwrap_or(30);

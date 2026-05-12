@@ -1115,9 +1115,9 @@ api-switch/
 
 | # | 改动项 | 说明 |
 |---|--------|------|
-| 1 | **冷却策略改为"连续失败关闭"** | 任何错误都计数，达到阈值（默认 3 次）→ `enabled=false` + 24h 冷却。计数纯内存，重启归零。用户手动开启时清除计数+冷却。 |
+| 1 | **冷却策略改为"连续失败关闭"** | 任何错误都计数，达到阈值（默认 5 次）→ `enabled=false` + 6h 冷却。计数纯内存，重启归零。用户手动开启时清除计数+冷却。 |
 | 2 | **`ProxyState` 新增 `failure_counts`** | `HashMap<String, u32>` 内存计数器，与 `AppState` 共享，Tauri 命令和代理服务器共用。 |
-| 3 | **`forwarder.rs` 冷却逻辑重写** | `cool_down_entry` / `spawn_cool_down_entry` 均改为：计数+1 → 未达阈值则临时冷却 → 已达阈值则移出 AUTO 并设置 24h 长冷却；显式模型仍以冷却状态判断可用性。 |
+| 3 | **`forwarder.rs` 冷却逻辑重写** | `cool_down_entry` / `spawn_cool_down_entry` 均改为：计数+1 → 未达阈值则临时冷却 → 已达阈值则移出 AUTO 并设置 6h 长冷却；显式模型仍以冷却状态判断可用性。 |
 | 4 | **`record_circuit_success` / `spawn_record_circuit_success` 清除计数** | 成功请求时清除内存计数。 |
 | 5 | **`toggle_entry` 手动开启时重置** | 用户手动开启入口时清除 `failure_counts` + `cooldown_until`。 |
 | 6 | **设置页标签语义更新** | "连续失败次数"→"连续失败关闭次数"，"恢复等待时间(秒)"→"冷却恢复时间(秒)"，英文同步。 |

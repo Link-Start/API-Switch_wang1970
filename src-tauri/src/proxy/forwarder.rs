@@ -1531,10 +1531,10 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
     drop(counts);
 
     // Any failure is counted. Before threshold: temporary cooldown.
-    // At/above threshold: remove from AUTO and set a 24h long cooldown.
+    // At/above threshold: remove from AUTO and set a 6h long cooldown.
     if current_count >= threshold {
-        let one_day_later = chrono::Utc::now().timestamp() + 86400;
-        let _ = state.db.set_entry_cooldown(&entry.id, Some(one_day_later));
+        let six_hours_later = chrono::Utc::now().timestamp() + 21600;
+        let _ = state.db.set_entry_cooldown(&entry.id, Some(six_hours_later));
         let _ = state.db.toggle_entry(&entry.id, false);
         let _ = state.app_handle.emit("entries-changed", ());
         refresh_tray(&state.app_handle);
@@ -1543,7 +1543,7 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
         breakers.remove(&entry.id);
 
         log::warn!(
-            "Entry {} disabled after {} consecutive failures. Long cooldown: 24h.",
+            "Entry {} disabled after {} consecutive failures. Long cooldown: 6h.",
             entry.id,
             current_count
         );
@@ -1621,10 +1621,10 @@ fn spawn_cool_down_entry(
         drop(counts);
 
         // Any failure is counted. Before threshold: temporary cooldown.
-        // At/above threshold: remove from AUTO and set a 24h long cooldown.
+        // At/above threshold: remove from AUTO and set a 6h long cooldown.
         if current_count >= threshold {
-            let one_day_later = chrono::Utc::now().timestamp() + 86400;
-            let _ = db.set_entry_cooldown(&entry_id, Some(one_day_later));
+            let six_hours_later = chrono::Utc::now().timestamp() + 21600;
+            let _ = db.set_entry_cooldown(&entry_id, Some(six_hours_later));
             let _ = db.toggle_entry(&entry_id, false);
             let _ = app_handle.emit("entries-changed", ());
             refresh_tray(&app_handle);
@@ -1633,7 +1633,7 @@ fn spawn_cool_down_entry(
             breakers.remove(&entry_id);
 
             log::warn!(
-                "Entry {} disabled after {} consecutive failures. Long cooldown: 24h.",
+                "Entry {} disabled after {} consecutive failures. Long cooldown: 6h.",
                 entry_id,
                 current_count
             );

@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { DEFAULT_SETTINGS, type AppSettings } from "@/types";
 import { SettingsEditor } from "@/features/settings/SettingsEditor";
 
-const APP_VERSION = "0.4.10";
+const APP_VERSION = "0.6.6";
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation();

@@ -55,6 +55,10 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/admin/channels/:id/response-ms",
             put(channel_handlers::update_response_ms),
         )
+        .route(
+            "/admin/channels/:id/test",
+            post(channel_handlers::test_channel),
+        )
         // Pool API routes – all require auth
         .route(
             "/admin/pool",

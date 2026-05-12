@@ -7,7 +7,9 @@ use crate::admin::error::{
 use crate::admin::state::AdminState;
 use crate::database::{Channel, ModelInfo};
 use crate::services::channel_service;
-use crate::services::channel_service::{ChannelOperationError, FetchModelsResult, ProbeResult};
+use crate::services::channel_service::{
+    ChannelOperationError, FetchModelsResult, ProbeResult, TestChannelResult,
+};
 use axum::extract::{Json, Path, State};
 use serde::Deserialize;
 
@@ -225,4 +227,45 @@ pub async fn update_response_ms(
         },
     )?;
     Ok(Json(serde_json::json!({"ok": true})))
+}
+
+pub async fn test_channel(
+    State(state): State<AdminState>,
+    Path(id): Path<String>,
+) -> Result<Json<TestChannelResult>, AdminError> {
+    let channel = state.db.get_channel(&id)?;
+    let model = channel
+        .selected_models
+        .first()
+        .or_else(|| channel.available_models.first().map(|m| &m.name))
+        .cloned()
+        .unwrap_or_else(|| "gpt-3.5-turbo".to_string());
+    let result = channel_service::test_channel_chat(
+        &channel.base_url,
+        &channel.api_key,
+        &channel.api_type,
+        &model,
+    )
+    .await;
+    if result.success && result.status_code == Some(200) {
+        let _ = state
+            .db
+            .update_channel_response_ms(&channel.id, &result.latency_ms.to_string());
+        let _ = channel_service::update_channel(
+            &state.db,
+            None,
+            channel_service::UpdateChannelParams {
+                id: channel.id.clone(),
+                name: None,
+                api_type: None,
+                base_url: None,
+                api_key: None,
+                enabled: Some(true),
+                notes: None,
+            },
+        );
+    } else {
+        let _ = state.db.disable_channel(&channel.id);
+    }
+    Ok(Json(result))
 }

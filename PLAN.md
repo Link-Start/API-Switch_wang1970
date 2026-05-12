@@ -490,6 +490,16 @@ AUTO 路由 → 只选择 enabled=true 且未冷却、未熔断的模型
     - **现状**: 失败多表现为上游原始错误，例如 `function is not set`、`Tools[N].Type invalid`。
     - **目标**: 在代理内部提前识别能力不匹配，写入结构化错误分类，例如 `gateway_capability_check`、`unsupported_tool_type`、`unsafe_protocol_downgrade`。
     - **收益**: 日志分析可以区分“上游故障”和“本代理拒绝不安全转换”，避免把协议设计问题误判为模型或 API Key 问题。
+- [ ] **流式错误冷却策略分层（防误判冷却）**:
+    - **现状**: `forwarder.rs` 的流式 `stream_read` 错误分支会把所有 upstream body 读取错误都记录为 `upstream_error` 并触发 `spawn_cool_down_entry()`。当上游已返回 HTTP 200、首 chunk 已到，但后续 body decode/read timeout 时，也会被误判为模型/渠道不可用。
+    - **高频误判样例**: `status_code=200`、`first_token_ms>0`、`chunk_count>0`、`streamed_bytes>0`、`error.is_timeout=true`、`error.is_decode=true`、`error.is_body=false`、`has_valid_output=false`。
+    - **临时策略**: 这类错误仍记录为本次请求失败，但归类为 `decode_timeout`，不触发普通冷却、不增加长期 disable 阈值。
+    - **后续正式方案**:
+        1. 抽取 `classify_stream_failure()`，把冷却动作分为 `cooldown` / `suppress` / `short_cooldown` / `downrank`。
+        2. 扩展 `StreamEndReason`：`ReadTimeout`、`DecodeTimeout`、`IdleTimeout`、`NoValidOutput`、`SseError`、`BufferLimit`。
+        3. 在 `usage_logs.other` 中记录 `cooldown_action`、`cooldown_decision_reason`、`stream_failure_class`，避免 UI 和后续分析只能解析错误字符串。
+        4. 只有上游明确拒绝、建连/发送失败、HTTP 429/5xx、SSE 明确 error、首 chunk 前超时等真正表明上游不可用的情况才推进冷却和连续失败计数。
+    - **涉及文件**: `src-tauri/src/proxy/forwarder.rs`, `src-tauri/src/proxy/circuit_breaker.rs`, `src-tauri/src/database/dao/usage_dao.rs`。
 
 
 - [ ] **统一运行时适配层契约（Desktop/Web Adapter Parity）**:

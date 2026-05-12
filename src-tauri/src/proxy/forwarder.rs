@@ -35,6 +35,7 @@ enum StreamEndReason {
     Done,
     UpstreamError,
     Timeout,
+    DecodeTimeout,
     Dropped,
 }
 
@@ -44,6 +45,7 @@ impl StreamEndReason {
             StreamEndReason::Done => "done",
             StreamEndReason::UpstreamError => "upstream_error",
             StreamEndReason::Timeout => "timeout",
+            StreamEndReason::DecodeTimeout => "decode_timeout",
             StreamEndReason::Dropped => "dropped",
         }
     }
@@ -59,6 +61,60 @@ fn is_completed_stream_success(
     // 仅在 HTTP 200、无 SSE 错误且存在有效输出时判定成功。
     // 有效输出定义为：出现文本 delta、出现工具调用、或返回的 completion_tokens>0。
     status_code == 200 && !has_sse_error && (has_text_delta || has_tool_calls || completion_tokens > 0)
+}
+
+fn is_recoverable_decode_timeout_after_stream_started(
+    status_code: i32,
+    first_token_ms: i64,
+    chunk_count: i64,
+    streamed_bytes: i64,
+    has_text_delta: bool,
+    has_tool_calls: bool,
+    completion_tokens: i64,
+    has_sse_error: bool,
+    is_timeout: bool,
+    is_decode: bool,
+    is_body: bool,
+) -> bool {
+    let stream_started = status_code == 200
+        && (first_token_ms > 0 || chunk_count > 0 || streamed_bytes > 0);
+    let has_valid_output = has_text_delta || has_tool_calls || completion_tokens > 0;
+
+    // 临时止血：HTTP 200 且已经开始推流后出现 body/decode timeout，
+    // 更像传输中途不完整，而不是模型、Token 或上游入口不可用。
+    // 本次请求仍记录失败，但不触发普通冷却/长期禁用阈值。
+    stream_started
+        && is_timeout
+        && is_decode
+        && !is_body
+        && !has_valid_output
+        && !has_sse_error
+}
+
+fn is_decode_timeout_after_stream_started(
+    err: &reqwest::Error,
+    status_code: i32,
+    first_token_ms: i64,
+    chunk_count: i64,
+    streamed_bytes: i64,
+    has_text_delta: bool,
+    has_tool_calls: bool,
+    completion_tokens: i64,
+    has_sse_error: bool,
+) -> bool {
+    is_recoverable_decode_timeout_after_stream_started(
+        status_code,
+        first_token_ms,
+        chunk_count,
+        streamed_bytes,
+        has_text_delta,
+        has_tool_calls,
+        completion_tokens,
+        has_sse_error,
+        err.is_timeout(),
+        err.is_decode(),
+        err.is_body(),
+    )
 }
 
 /// 判断客户端断开的流是否算成功。
@@ -954,6 +1010,22 @@ fn build_streaming_response(
                         let has_text_output = has_text_delta.load(Ordering::SeqCst);
                         let has_tool_output = has_tool_calls.load(Ordering::SeqCst);
                         let has_error = has_sse_error.load(Ordering::SeqCst);
+                        let suppress_cooldown = is_decode_timeout_after_stream_started(
+                            &err,
+                            status_code,
+                            ft,
+                            chunk_total,
+                            byte_total,
+                            has_text_output,
+                            has_tool_output,
+                            ct,
+                            has_error,
+                        );
+                        let stream_end_reason = if suppress_cooldown {
+                            StreamEndReason::DecodeTimeout
+                        } else {
+                            StreamEndReason::UpstreamError
+                        };
                         let diagnostic = build_stream_diagnostic(
                             "stream_read",
                             Some(&err),
@@ -1002,17 +1074,19 @@ fn build_streaming_response(
                                 false,
                                 Some(error_message.as_str()),
                                 Some(attempt_path.as_str()),
-                                Some(StreamEndReason::UpstreamError),
+                                Some(stream_end_reason),
                             );
                         });
-                        spawn_cool_down_entry(
-                            circuit_breakers.clone(),
-                            failure_counts.clone(),
-                            settings_cache.clone(),
-                            db.clone(),
-                            entries_app_handle.clone(),
-                            entry_id.clone(),
-                        );
+                        if !suppress_cooldown {
+                            spawn_cool_down_entry(
+                                circuit_breakers.clone(),
+                                failure_counts.clone(),
+                                settings_cache.clone(),
+                                db.clone(),
+                                entries_app_handle.clone(),
+                                entry_id.clone(),
+                            );
+                        }
                     }
                     Poll::Ready(Some(Err(std::io::Error::new(
                         std::io::ErrorKind::Other,
@@ -1685,6 +1759,57 @@ data: [DONE]\n"
         assert!(output.contains("\n\n"));
         assert!(output.ends_with("data: [DONE]\n\n"));
         assert!(!output.contains("data: [DONE]\n\ndata: [DONE]"));
+    }
+
+    #[test]
+    fn decode_timeout_after_stream_started_suppresses_cooldown_classification() {
+        assert!(is_recoverable_decode_timeout_after_stream_started(
+            200,
+            3705,
+            1,
+            218,
+            false,
+            false,
+            0,
+            false,
+            true,
+            true,
+            false,
+        ));
+    }
+
+    #[test]
+    fn decode_timeout_before_stream_started_does_not_suppress_cooldown() {
+        assert!(!is_recoverable_decode_timeout_after_stream_started(
+            200,
+            0,
+            0,
+            0,
+            false,
+            false,
+            0,
+            false,
+            true,
+            true,
+            false,
+        ));
+    }
+
+    #[test]
+    fn decode_timeout_with_sse_error_does_not_suppress_cooldown() {
+        assert!(!is_recoverable_decode_timeout_after_stream_started(
+            200,
+            1000,
+            1,
+            128,
+            false,
+            false,
+            0,
+            true,
+            true,
+            true,
+            false,
+        ));
     }
 
     #[test]

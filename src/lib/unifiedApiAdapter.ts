@@ -334,13 +334,15 @@ export const apiAdapter: ApiAdapter = {
               model_meta_en: '',
             })),
           })
-        : webRequest<void>('POST', '/pool/backfill-catalog-meta', {
-            items: items.map((item) => ({
+        : webRequest<void>('POST', '/pool/backfill-catalog-meta',
+            items.map((item) => ({
               id: item.entryId,
-              catalog_provider: item.catalogProvider,
-              catalog_model_id: item.catalogModelId,
+              providerLogo: '',
+              releaseDate: '',
+              modelMetaZh: '',
+              modelMetaEn: '',
             })),
-          }),
+          ),
 
     getGroups: () =>
       useTauri()

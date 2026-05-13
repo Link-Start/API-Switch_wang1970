@@ -3,7 +3,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { isTauriRuntime, useApiAdapter } from "@/lib/useApiAdapter";
+import { useApiAdapter } from "@/lib/useApiAdapter";
 import type { UsageLog } from "@/types";
 
 const LOG_PAGE_SIZE = 40;
@@ -46,7 +46,6 @@ function formatAttemptPath(meta: UsageLogMeta | null): string[] {
 export function LogViewer() {
   const { t } = useTranslation();
   const adapter = useApiAdapter();
-  const pageRefreshInterval = isTauriRuntime() ? false : 2000;
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
@@ -67,7 +66,6 @@ export function LogViewer() {
     getNextPageParam: (lastPage) =>
       lastPage.page * lastPage.page_size < lastPage.total ? lastPage.page + 1 : undefined,
     initialPageParam: 1,
-    refetchInterval: pageRefreshInterval,
     staleTime: 2000,
   });
 

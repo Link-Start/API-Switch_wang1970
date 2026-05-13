@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { isTauriRuntime, useApiAdapter } from "@/lib/useApiAdapter";
+import { useApiAdapter } from "@/lib/useApiAdapter";
 import { useTauriEvent } from "@/lib/useTauriEvent";
 import { useEvent } from "@/lib/events";
 import { type ApiEntry, type Channel, type PaginatedResult } from "@/types";
@@ -524,9 +524,9 @@ export function PoolManager() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const adapter = useApiAdapter();
-  const pageRefreshInterval = isTauriRuntime() ? false : 2000;
   const [localOrder, setLocalOrder] = useState<string[] | null>(null);
   const [filterText, setFilterText] = useState("");
+  const [debouncedFilter, setDebouncedFilter] = useState("");
   const [filterChannel, setFilterChannel] = useState<string>("all");
   const [showAdd, setShowAdd] = useState(false);
   const [testEntry, setTestEntry] = useState<ApiEntry | null>(null);
@@ -536,6 +536,12 @@ export function PoolManager() {
   const [deleteTarget, setDeleteTarget] = useState<ApiEntry | null>(null);
   const [groupFilter, setGroupFilter] = useState<string>("auto");
 
+  // 搜索输入 300ms 防抖，避免每次按键都触发后端请求
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedFilter(filterText), 300);
+    return () => clearTimeout(timer);
+  }, [filterText]);
+
   // 无限滚动分页加载 entries
   const {
     data: entriesPages,
@@ -544,29 +550,27 @@ export function PoolManager() {
     isFetchingNextPage,
     isLoading,
   } = useInfiniteQuery({
-    queryKey: ["entries", "paginated", groupFilter, filterChannel, filterText],
+    queryKey: ["entries", "paginated", groupFilter, filterChannel, debouncedFilter],
     queryFn: ({ pageParam = 1 }) =>
       adapter.pool.listPaginated({
         page: pageParam,
         pageSize: 20,
         groupName: groupFilter !== "all" ? groupFilter : undefined,
         channelId: filterChannel !== "all" ? filterChannel : undefined,
-        search: filterText.trim() || undefined,
+        search: debouncedFilter.trim() || undefined,
       }) as Promise<PaginatedResult<ApiEntry>>,
     getNextPageParam: (lastPage) =>
       lastPage.page * lastPage.page_size < lastPage.total ? lastPage.page + 1 : undefined,
     initialPageParam: 1,
-    refetchInterval: pageRefreshInterval,
     staleTime: 2000,
   });
 
-  const { data: channels, isLoading: channelsLoading } = useQuery({ queryKey: ["channels", "all"], queryFn: () => adapter.channels.list() as Promise<Channel[]>, refetchInterval: pageRefreshInterval, staleTime: 2000 });
+  const { data: channels, isLoading: channelsLoading } = useQuery({ queryKey: ["channels", "all"], queryFn: () => adapter.channels.list() as Promise<Channel[]>, staleTime: 2000 });
 
   // 分组列表从轻量接口单独拉取
   const { data: groupList } = useQuery({
     queryKey: ["groups"],
     queryFn: () => adapter.pool.getGroups() as Promise<string[]>,
-    refetchInterval: pageRefreshInterval,
     staleTime: 2000,
   });
   const groups = useMemo(() => {
@@ -601,7 +605,7 @@ export function PoolManager() {
   }, [groupFilter, filterText, filterChannel]);
 
    // Desktop-only: Real-time tray reprioritisation via Tauri event.
-   // This hook is a no-op on web builds (isTauriRuntime() returns false).
+   // This hook is a no-op on web builds (useTauriEvent returns false).
    // Event: "tray-priority-changed" — triggered when user reorders entries via system tray.
    useTauriEvent("tray-priority-changed", () => {
      queryClient.invalidateQueries({ queryKey: ["entries"] });
@@ -609,9 +613,12 @@ export function PoolManager() {
    });
 
    // Event-driven refresh: invalidate entries when the backend signals a change.
-   // This supplements the fallback refetchInterval (30s) for real-time updates.
    useEvent("entries-changed", () => {
      queryClient.invalidateQueries({ queryKey: ["entries"] });
+   });
+
+   useEvent("channels-changed", () => {
+     queryClient.invalidateQueries({ queryKey: ["channels", "all"] });
    });
 
   const catalogMap = useMemo(() => {

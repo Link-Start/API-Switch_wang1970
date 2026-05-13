@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn, formatResponseMs } from '@/lib/utils';
 import { getCatalogModel, getCatalogProviderLogo, formatTokenCount } from '@/lib/modelsCatalog';
-import { isTauriRuntime, useApiAdapter } from '../../lib/useApiAdapter';
+import { useApiAdapter } from '../../lib/useApiAdapter';
 import { useEvent } from '@/lib/events';
 import { getChannelErrorMessage } from './channelErrors';
 import type { PaginatedResult } from '@/types';
@@ -168,7 +168,6 @@ export const ChannelManager: React.FC = () => {
   const { t } = useTranslation();
   const api = useApiAdapter();
   const queryClient = useQueryClient();
-  const pageRefreshInterval = isTauriRuntime() ? false : 2000;
   const {
     data: channelPages,
     fetchNextPage,
@@ -183,13 +182,11 @@ export const ChannelManager: React.FC = () => {
     getNextPageParam: (lastPage) =>
       lastPage.page * lastPage.page_size < lastPage.total ? lastPage.page + 1 : undefined,
     initialPageParam: 1,
-    refetchInterval: pageRefreshInterval,
     staleTime: 2000,
   });
   const { data: entries } = useQuery({
     queryKey: ["entries", "all"],
     queryFn: () => api.pool.list(),
-    refetchInterval: pageRefreshInterval,
     staleTime: 2000,
   });
   const rawChannels = useMemo(() => channelPages?.pages.flatMap((page) => page.items) ?? [], [channelPages]);
@@ -223,15 +220,18 @@ export const ChannelManager: React.FC = () => {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   useEvent("channels-changed", () => {
-    queryClient.invalidateQueries({ queryKey: ["channels"] });
+    queryClient.invalidateQueries({ queryKey: ["channels", "paginated"] });
+    queryClient.invalidateQueries({ queryKey: ["channels", "all"] });
   });
 
   useEvent("entries-changed", () => {
-    queryClient.invalidateQueries({ queryKey: ["channels"] });
+    queryClient.invalidateQueries({ queryKey: ["channels", "paginated"] });
+    queryClient.invalidateQueries({ queryKey: ["channels", "all"] });
+    queryClient.invalidateQueries({ queryKey: ["entries"] });
   });
 
   const refreshChannels = async () => {
-    await queryClient.refetchQueries({ queryKey: ["channels"] });
+    await queryClient.refetchQueries({ queryKey: ["channels", "paginated"] });
   };
 
   const openCreate = () => {

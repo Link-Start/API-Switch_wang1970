@@ -14,7 +14,7 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { isTauriRuntime, useApiAdapter } from "@/lib/useApiAdapter";
+import { useApiAdapter } from "@/lib/useApiAdapter";
 import { toast } from "sonner";
 import type { AccessKey, PaginatedResult } from "@/types";
 
@@ -22,7 +22,6 @@ export function TokenPage() {
   const { t } = useTranslation();
   const api = useApiAdapter();
   const queryClient = useQueryClient();
-  const pageRefreshInterval = isTauriRuntime() ? false : 2000;
   const [showCreate, setShowCreate] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
   const [createdKey, setCreatedKey] = useState<AccessKey | null>(null);
@@ -42,7 +41,6 @@ export function TokenPage() {
     getNextPageParam: (lastPage) =>
       lastPage.page * lastPage.page_size < lastPage.total ? lastPage.page + 1 : undefined,
     initialPageParam: 1,
-    refetchInterval: pageRefreshInterval,
     staleTime: 2000,
   });
   const keys = keysPages?.pages.flatMap(p => p.items) ?? [];
@@ -62,7 +60,7 @@ export function TokenPage() {
   const createMutation = useMutation({
     mutationFn: (name: string) => api.tokens.create(name),
     onSuccess: (key) => {
-      queryClient.invalidateQueries({ queryKey: ["accessKeys"] });
+      queryClient.invalidateQueries({ queryKey: ["accessKeys", "paginated"] });
       setShowCreate(false);
       setCreatedKey(key);
       setNewKeyName("");
@@ -75,7 +73,7 @@ export function TokenPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.tokens.delete(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["accessKeys"] });
+      queryClient.invalidateQueries({ queryKey: ["accessKeys", "paginated"] });
       setDeleteTarget(null);
     },
     onError: (err) => {
@@ -86,7 +84,7 @@ export function TokenPage() {
   const toggleMutation = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
       api.tokens.toggle(id, enabled),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["accessKeys"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["accessKeys", "paginated"] }),
     onError: (err) => {
       toast.error(`${t("common.toggle")} ${t("common.failed")}: ${err}`);
     },

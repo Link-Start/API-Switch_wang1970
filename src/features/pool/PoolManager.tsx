@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { GripVertical, Plus, MessageSquare, RefreshCw, XCircle, X, Trash2, Check, ChevronsUpDown, Tag } from "lucide-react";
 import { toast } from "sonner";
@@ -25,7 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useApiAdapter } from "@/lib/useApiAdapter";
 import { useTauriEvent } from "@/lib/useTauriEvent";
 import { useEvent } from "@/lib/events";
-import { type ApiEntry, type Channel } from "@/types";
+import { type ApiEntry, type Channel, type PaginatedResult } from "@/types";
 import { cn, formatResponseMs, parseResponseMs } from "@/lib/utils";
 import { TestChatDialog } from "@/components/proxy/TestChatDialog";
 import { getCatalogModel, getCatalogModelExact, getCatalogProviderLogo, formatTokenCount } from "@/lib/modelsCatalog";
@@ -535,20 +535,59 @@ export function PoolManager() {
   const [deleteTarget, setDeleteTarget] = useState<ApiEntry | null>(null);
   const [groupFilter, setGroupFilter] = useState<string>("auto");
 
-   const { data: entries, isLoading } = useQuery({ queryKey: ["entries"], queryFn: () => adapter.pool.list() as Promise<ApiEntry[]>, refetchInterval: 30_000, staleTime: 30_000 });
+  // 无限滚动分页加载 entries
+  const {
+    data: entriesPages,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+  } = useInfiniteQuery({
+    queryKey: ["entries", groupFilter],
+    queryFn: ({ pageParam = 1 }) =>
+      adapter.pool.listPaginated({
+        page: pageParam,
+        pageSize: 20,
+        groupName: groupFilter !== "all" ? groupFilter : undefined,
+      }) as Promise<PaginatedResult<ApiEntry>>,
+    getNextPageParam: (lastPage) =>
+      lastPage.items.length >= 20 ? lastPage.page + 1 : undefined,
+    initialPageParam: 1,
+    refetchInterval: 30_000,
+    staleTime: 30_000,
+  });
+
   const { data: channels, isLoading: channelsLoading } = useQuery({ queryKey: ["channels"], queryFn: () => adapter.channels.list() as Promise<Channel[]> });
 
+  // 分组列表从轻量接口单独拉取
+  const { data: groupList } = useQuery({
+    queryKey: ["groups"],
+    queryFn: () => adapter.pool.getGroups() as Promise<string[]>,
+  });
   const groups = useMemo(() => {
-    const values = new Set<string>(["auto"]);
-    for (const entry of entries || []) {
-      values.add(entry.group_name || "auto");
-    }
-    return Array.from(values).filter(Boolean).sort((a, b) => {
+    const vals = groupList ?? [];
+    return [...new Set(["auto", ...vals])].filter(Boolean).sort((a, b) => {
       if (a === "auto") return -1;
       if (b === "auto") return 1;
       return a.localeCompare(b);
     });
-  }, [entries]);
+  }, [groupList]);
+
+  // 所有已加载的 entries 拍平
+  const entries = useMemo(() => entriesPages?.pages.flatMap((p) => p.items) ?? [], [entriesPages]);
+
+  // 无限滚动：IntersectionObserver 触发加载更多
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasNextPage || isFetchingNextPage) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) fetchNextPage(); },
+      { rootMargin: "200px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
    // Desktop-only: Real-time tray reprioritisation via Tauri event.
    // This hook is a no-op on web builds (isTauriRuntime() returns false).
@@ -798,6 +837,13 @@ export function PoolManager() {
                     const meta = getEntryDisplayMeta(entry, catalogMap);
                     return <SortablePoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={setDeleteTarget} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
                   })}
+                  {/* 无限滚动 sentinel */}
+                  <div ref={sentinelRef} className="h-4" />
+                  {isFetchingNextPage && (
+                    <div className="flex justify-center py-4 text-sm text-muted-foreground">
+                      Loading...
+                    </div>
+                  )}
                 </div>
               </SortableContext>
             </DndContext>

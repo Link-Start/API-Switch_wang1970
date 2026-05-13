@@ -1,7 +1,6 @@
 use crate::database::dao::PaginatedResult;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
-use rusqlite::params_from_iter;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

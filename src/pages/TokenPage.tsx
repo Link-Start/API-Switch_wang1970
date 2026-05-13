@@ -14,7 +14,7 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { useApiAdapter } from "@/lib/useApiAdapter";
+import { isTauriRuntime, useApiAdapter } from "@/lib/useApiAdapter";
 import { toast } from "sonner";
 import type { AccessKey, PaginatedResult } from "@/types";
 
@@ -22,6 +22,7 @@ export function TokenPage() {
   const { t } = useTranslation();
   const api = useApiAdapter();
   const queryClient = useQueryClient();
+  const pageRefreshInterval = isTauriRuntime() ? false : 2000;
   const [showCreate, setShowCreate] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
   const [createdKey, setCreatedKey] = useState<AccessKey | null>(null);
@@ -35,12 +36,14 @@ export function TokenPage() {
     isFetchingNextPage,
     isLoading,
   } = useInfiniteQuery({
-    queryKey: ["accessKeys"],
+    queryKey: ["accessKeys", "paginated"],
     queryFn: ({ pageParam = 1 }) =>
-      api.tokens.listPaginated({ page: pageParam, pageSize: 20 }) as Promise<PaginatedResult<AccessKey>>,
+      api.tokens.listPaginated({ page: pageParam, pageSize: 40 }) as Promise<PaginatedResult<AccessKey>>,
     getNextPageParam: (lastPage) =>
-      lastPage.items.length >= 20 ? lastPage.page + 1 : undefined,
+      lastPage.page * lastPage.page_size < lastPage.total ? lastPage.page + 1 : undefined,
     initialPageParam: 1,
+    refetchInterval: pageRefreshInterval,
+    staleTime: 2000,
   });
   const keys = keysPages?.pages.flatMap(p => p.items) ?? [];
 

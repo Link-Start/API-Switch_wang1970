@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -17,9 +17,10 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn, formatResponseMs } from '@/lib/utils';
 import { getCatalogModel, getCatalogProviderLogo, formatTokenCount } from '@/lib/modelsCatalog';
-import { useApiAdapter } from '../../lib/useApiAdapter';
+import { isTauriRuntime, useApiAdapter } from '../../lib/useApiAdapter';
 import { useEvent } from '@/lib/events';
 import { getChannelErrorMessage } from './channelErrors';
+import type { PaginatedResult } from '@/types';
 import type { Channel, CreateChannelParams, ModelInfo, UpdateChannelParams, ModelCatalogMetaUpdate } from './types';
 
 type ChannelFormState = {
@@ -167,15 +168,32 @@ export const ChannelManager: React.FC = () => {
   const { t } = useTranslation();
   const api = useApiAdapter();
   const queryClient = useQueryClient();
-  const { data: rawChannels, isLoading: loading, error: queryError } = useQuery({
-    queryKey: ["channels"],
-    queryFn: () => api.channels.list() as Promise<Channel[]>,
+  const pageRefreshInterval = isTauriRuntime() ? false : 2000;
+  const {
+    data: channelPages,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading: loading,
+    error: queryError,
+  } = useInfiniteQuery({
+    queryKey: ["channels", "paginated"],
+    queryFn: ({ pageParam = 1 }) =>
+      api.channels.listPaginated({ page: pageParam, pageSize: 40 }) as Promise<PaginatedResult<Channel>>,
+    getNextPageParam: (lastPage) =>
+      lastPage.page * lastPage.page_size < lastPage.total ? lastPage.page + 1 : undefined,
+    initialPageParam: 1,
+    refetchInterval: pageRefreshInterval,
+    staleTime: 2000,
   });
   const { data: entries } = useQuery({
-    queryKey: ["entries"],
+    queryKey: ["entries", "all"],
     queryFn: () => api.pool.list(),
+    refetchInterval: pageRefreshInterval,
+    staleTime: 2000,
   });
-  const channels = useMemo(() => sortChannels(rawChannels ?? []), [rawChannels]);
+  const rawChannels = useMemo(() => channelPages?.pages.flatMap((page) => page.items) ?? [], [channelPages]);
+  const channels = useMemo(() => sortChannels(rawChannels), [rawChannels]);
   const entryCountMap = useMemo(() => {
     const map = new Map<string, number>();
     for (const entry of entries ?? []) {
@@ -191,6 +209,18 @@ export const ChannelManager: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<Channel | null>(null);
 
   const error = queryError ? getChannelErrorMessage(queryError, t('channel.editor.listLoadFailed', '渠道列表加载失败')) : null;
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasNextPage || isFetchingNextPage) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) fetchNextPage(); },
+      { rootMargin: '200px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   useEvent("channels-changed", () => {
     queryClient.invalidateQueries({ queryKey: ["channels"] });
@@ -416,6 +446,10 @@ export const ChannelManager: React.FC = () => {
               )}
             </tbody>
           </table>
+          <div ref={sentinelRef} className="h-4" />
+          {isFetchingNextPage && (
+            <div className="flex justify-center py-4 text-sm text-muted-foreground">Loading...</div>
+          )}
         </div>
 
         <ChannelEditorDialog

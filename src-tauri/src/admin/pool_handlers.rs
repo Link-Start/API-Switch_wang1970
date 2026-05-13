@@ -54,6 +54,8 @@ pub struct PoolPageParams {
     pub page: Option<i32>,
     pub page_size: Option<i32>,
     pub group_name: Option<String>,
+    pub search: Option<String>,
+    pub channel_id: Option<String>,
 }
 
 /// GET /admin/pool/paginated - List API entries with pagination
@@ -66,6 +68,8 @@ pub async fn list_paginated(
         params.page.unwrap_or(1),
         params.page_size.unwrap_or(20),
         params.group_name.as_deref(),
+        params.search.as_deref(),
+        params.channel_id.as_deref(),
     )?;
     Ok(Json(entries))
 }

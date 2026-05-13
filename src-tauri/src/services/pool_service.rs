@@ -48,8 +48,10 @@ pub fn list_entries_paginated(
     page: i32,
     page_size: i32,
     group_name: Option<&str>,
+    search: Option<&str>,
+    channel_id: Option<&str>,
 ) -> Result<PaginatedResult<ApiEntry>, AppError> {
-    db.list_entries_paginated(page, page_size, group_name)
+    db.list_entries_paginated(page, page_size, group_name, search, channel_id)
 }
 
 /// Toggle an entry's enabled state.

@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useApiAdapter } from "@/lib/useApiAdapter";
+import { isTauriRuntime, useApiAdapter } from "@/lib/useApiAdapter";
 import { useTauriEvent } from "@/lib/useTauriEvent";
 import { useEvent } from "@/lib/events";
 import { type ApiEntry, type Channel, type PaginatedResult } from "@/types";
@@ -524,6 +524,7 @@ export function PoolManager() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const adapter = useApiAdapter();
+  const pageRefreshInterval = isTauriRuntime() ? false : 2000;
   const [localOrder, setLocalOrder] = useState<string[] | null>(null);
   const [filterText, setFilterText] = useState("");
   const [filterChannel, setFilterChannel] = useState<string>("all");
@@ -543,26 +544,30 @@ export function PoolManager() {
     isFetchingNextPage,
     isLoading,
   } = useInfiniteQuery({
-    queryKey: ["entries", groupFilter],
+    queryKey: ["entries", "paginated", groupFilter, filterChannel, filterText],
     queryFn: ({ pageParam = 1 }) =>
       adapter.pool.listPaginated({
         page: pageParam,
         pageSize: 20,
         groupName: groupFilter !== "all" ? groupFilter : undefined,
+        channelId: filterChannel !== "all" ? filterChannel : undefined,
+        search: filterText.trim() || undefined,
       }) as Promise<PaginatedResult<ApiEntry>>,
     getNextPageParam: (lastPage) =>
       lastPage.page * lastPage.page_size < lastPage.total ? lastPage.page + 1 : undefined,
     initialPageParam: 1,
-    refetchInterval: 30_000,
-    staleTime: 30_000,
+    refetchInterval: pageRefreshInterval,
+    staleTime: 2000,
   });
 
-  const { data: channels, isLoading: channelsLoading } = useQuery({ queryKey: ["channels"], queryFn: () => adapter.channels.list() as Promise<Channel[]> });
+  const { data: channels, isLoading: channelsLoading } = useQuery({ queryKey: ["channels", "all"], queryFn: () => adapter.channels.list() as Promise<Channel[]>, refetchInterval: pageRefreshInterval, staleTime: 2000 });
 
   // 分组列表从轻量接口单独拉取
   const { data: groupList } = useQuery({
     queryKey: ["groups"],
     queryFn: () => adapter.pool.getGroups() as Promise<string[]>,
+    refetchInterval: pageRefreshInterval,
+    staleTime: 2000,
   });
   const groups = useMemo(() => {
     const vals = groupList ?? [];
@@ -588,6 +593,12 @@ export function PoolManager() {
     observer.observe(el);
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // 过滤条件变化时滚到顶部，避免中间位置出现“无显示”错觉
+  useEffect(() => {
+    setLocalOrder(null);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [groupFilter, filterText, filterChannel]);
 
    // Desktop-only: Real-time tray reprioritisation via Tauri event.
    // This hook is a no-op on web builds (isTauriRuntime() returns false).
@@ -622,20 +633,15 @@ export function PoolManager() {
    }, [entries]);
 
    const displayEntries = useMemo(() => {
-     return localOrder
-       ? (localOrder.map((id) => sorted.find((e) => e.id === id)).filter(Boolean) as ApiEntry[])
-       : sorted;
-   }, [localOrder, sorted]);
+      if (!localOrder) return sorted;
+      const ordered = localOrder.map((id) => sorted.find((e) => e.id === id)).filter(Boolean) as ApiEntry[];
+      const missing = sorted.filter((entry) => !localOrder.includes(entry.id));
+      return [...ordered, ...missing];
+    }, [localOrder, sorted]);
 
-  const filteredEntries = useMemo(() => {
-    const term = filterText.trim().toLowerCase();
-    return displayEntries.filter((entry) => {
-      const matchesChannel = filterChannel === "all" || entry.channel_id === filterChannel;
-      const matchesGroup = (entry.group_name || "auto") === groupFilter;
-      const matchesTerm = !term || [entry.display_name, entry.model, entry.channel_name || ""].join(" ").toLowerCase().includes(term);
-      return matchesChannel && matchesGroup && matchesTerm;
-    });
-  }, [displayEntries, filterChannel, filterText, groupFilter]);
+  // 过滤条件已进入 queryKey 并由后端分页接口处理，这里只消费当前页结果
+  const filteredEntries = useMemo(() => displayEntries, [displayEntries]);
+  const canReorder = !hasNextPage && groupFilter === "all" && filterChannel === "all" && !filterText.trim();
 
   const reorderMutation = useMutation({
     mutationFn: (orderedIds: string[]) => adapter.pool.reorder(orderedIds),
@@ -699,6 +705,7 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
 
 
    const handleDragEnd = (event: DragEndEvent) => {
+     if (!canReorder) return;
      const { active, over } = event;
      if (!over || active.id === over.id) return;
      const oldIndex = filteredEntries.findIndex((e) => e.id === active.id);
@@ -713,8 +720,8 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
    };
 
   const testAllEntries = useCallback(async () => {
-    if (!entries || testProgress) return;
-    const scopedEntries = entries.filter((entry) => (entry.group_name || "auto") === groupFilter);
+    if (!filteredEntries.length || testProgress) return;
+    const scopedEntries = filteredEntries;
     const results: Record<string, string> = {};
     let completed = 0;
     const total = scopedEntries.length;
@@ -754,7 +761,7 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
     setTestResults({});
     setTestProgress(null);
     queryClient.invalidateQueries({ queryKey: ["entries"] });
-  }, [adapter.pool, entries, queryClient, testProgress, groupFilter]);
+  }, [adapter.pool, filteredEntries, queryClient, testProgress]);
 
   if (isLoading) {
     return (
@@ -826,7 +833,7 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
         <CardContent className="p-4 pt-4">
           {!entries?.length ? (
             <div className="flex h-48 items-center justify-center text-muted-foreground">{t("apiPool.empty")}</div>
-          ) : (
+          ) : canReorder ? (
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
               <SortableContext items={filteredEntries.map((e) => e.id)} strategy={verticalListSortingStrategy}>
                 <div className="flex flex-col gap-3">
@@ -844,6 +851,19 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
                 </div>
               </SortableContext>
             </DndContext>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {filteredEntries.map((entry) => {
+                const meta = getEntryDisplayMeta(entry, catalogMap);
+                return <PoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={setDeleteTarget} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
+              })}
+              <div ref={sentinelRef} className="h-4" />
+              {isFetchingNextPage && (
+                <div className="flex justify-center py-4 text-sm text-muted-foreground">
+                  Loading...
+                </div>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>

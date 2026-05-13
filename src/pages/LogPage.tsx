@@ -49,9 +49,6 @@ export function LogPage() {
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  // Desktop-only: Real-time log push via event abstraction.
-  // This hook is a no-op on web builds (isEventSystemActive() returns false).
-  // Event: "new-usage-log" — triggered when backend writes a new usage log.
   useEvent("new-usage-log", () => {
     queryClient.invalidateQueries({ queryKey: ["usageLogs"] });
   });
@@ -61,112 +58,78 @@ export function LogPage() {
     queryFn: () => api.usage.getLogs(filter),
   });
 
-const logs = result?.items || [];
-const totalPrompt = logs.reduce((sum, log) => sum + log.prompt_tokens, 0);
-const totalCompletion = logs.reduce((sum, log) => sum + log.completion_tokens, 0);
-const successCount = logs.filter((log) => log.success).length;
+  const logs = result?.items || [];
+  const totalPrompt = logs.reduce((sum, log) => sum + log.prompt_tokens, 0);
+  const totalCompletion = logs.reduce((sum, log) => sum + log.completion_tokens, 0);
+  const successCount = logs.filter((log) => log.success).length;
 
-if (isLoading) {
-  return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div className="h-6 w-32 animate-pulse bg-muted rounded" />
-        <div className="flex items-center gap-2">
-          <div className="h-4 w-12 animate-pulse bg-muted rounded" />
-          <div className="h-4 w-12 animate-pulse bg-muted rounded" />
+  if (isLoading) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div className="h-6 w-32 animate-pulse bg-muted rounded" />
+          <div className="flex items-center gap-2">
+            <div className="h-4 w-12 animate-pulse bg-muted rounded" />
+            <div className="h-4 w-12 animate-pulse bg-muted rounded" />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="p-4">
+                <div className="h-4 w-24 animate-pulse bg-muted rounded mb-2" />
+                <div className="h-8 w-16 animate-pulse bg-muted rounded" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        <div className="rounded-md border overflow-x-hidden">
+          <table className="w-full table-fixed text-sm">
+            <colgroup>
+              <col className="w-40" />
+              <col className="w-28" />
+              <col className="w-24" />
+              <col />
+              <col className="w-28" />
+              <col className="w-16" />
+              <col className="w-16" />
+              <col className="w-20" />
+            </colgroup>
+            <thead>
+              <tr className="border-b bg-muted/50">
+                <th className="px-3 py-2 text-left font-medium whitespace-nowrap"><div className="h-4 w-20 animate-pulse bg-muted rounded" /></th>
+                <th className="px-3 py-2 text-left font-medium truncate"><div className="h-4 w-16 animate-pulse bg-muted rounded" /></th>
+                <th className="px-3 py-2 text-left font-medium truncate"><div className="h-4 w-12 animate-pulse bg-muted rounded" /></th>
+                <th className="px-3 py-2 text-left font-medium truncate"><div className="h-4 w-24 animate-pulse bg-muted rounded" /></th>
+                <th className="px-3 py-2 text-left font-medium whitespace-nowrap"><div className="h-4 w-16 animate-pulse bg-muted rounded" /></th>
+                <th className="px-3 py-2 text-right font-medium"><div className="h-4 w-12 animate-pulse bg-muted rounded ml-auto" /></th>
+                <th className="px-3 py-2 text-right font-medium"><div className="h-4 w-12 animate-pulse bg-muted rounded ml-auto" /></th>
+                <th className="px-3 py-2 text-left font-medium whitespace-nowrap"><div className="h-4 w-14 animate-pulse bg-muted rounded" /></th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <tr key={i} className="border-b">
+                  <td className="px-3 py-2 whitespace-nowrap"><div className="h-4 w-32 animate-pulse bg-muted rounded" /></td>
+                  <td className="px-3 py-2 min-w-0"><div className="h-4 w-20 animate-pulse bg-muted rounded" /></td>
+                  <td className="px-3 py-2 min-w-0"><div className="h-4 w-16 animate-pulse bg-muted rounded" /></td>
+                  <td className="px-3 py-2 font-mono text-xs min-w-0"><div className="h-4 w-24 animate-pulse bg-muted rounded" /></td>
+                  <td className="px-3 py-2 whitespace-nowrap"><div className="h-4 w-28 animate-pulse bg-muted rounded" /></td>
+                  <td className="px-3 py-2 text-right"><div className="h-4 w-10 animate-pulse bg-muted rounded ml-auto" /></td>
+                  <td className="px-3 py-2 text-right"><div className="h-4 w-10 animate-pulse bg-muted rounded ml-auto" /></td>
+                  <td className="px-3 py-2 whitespace-nowrap"><div className="h-4 w-12 animate-pulse bg-muted rounded" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
+    );
+  }
 
-      {/* Stats Cards Skeleton */}
-      <div className="grid gap-4 md:grid-cols-4 mb-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}>
-            <CardContent className="p-4">
-              <div className="h-4 w-24 animate-pulse bg-muted rounded mb-2" />
-              <div className="h-8 w-16 animate-pulse bg-muted rounded" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Table Skeleton */}
-      <div className="rounded-md border overflow-x-hidden">
-        <table className="w-full table-fixed text-sm">
-          <colgroup>
-            <col className="w-40" />
-            <col className="w-28" />
-            <col className="w-24" />
-            <col />
-            <col className="w-28" />
-            <col className="w-16" />
-            <col className="w-16" />
-            <col className="w-20" />
-          </colgroup>
-          <thead>
-            <tr className="border-b bg-muted/50">
-              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">
-                <div className="h-4 w-20 animate-pulse bg-muted rounded" />
-              </th>
-              <th className="px-3 py-2 text-left font-medium truncate">
-                <div className="h-4 w-16 animate-pulse bg-muted rounded" />
-              </th>
-              <th className="px-3 py-2 text-left font-medium truncate">
-                <div className="h-4 w-12 animate-pulse bg-muted rounded" />
-              </th>
-              <th className="px-3 py-2 text-left font-medium truncate">
-                <div className="h-4 w-24 animate-pulse bg-muted rounded" />
-              </th>
-              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">
-                <div className="h-4 w-16 animate-pulse bg-muted rounded" />
-              </th>
-              <th className="px-3 py-2 text-right font-medium">
-                <div className="h-4 w-12 animate-pulse bg-muted rounded ml-auto" />
-              </th>
-              <th className="px-3 py-2 text-right font-medium">
-                <div className="h-4 w-12 animate-pulse bg-muted rounded ml-auto" />
-              </th>
-              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">
-                <div className="h-4 w-14 animate-pulse bg-muted rounded" />
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {Array.from({ length: 5 }).map((_, i) => (
-              <tr key={i} className="border-b">
-                <td className="px-3 py-2 whitespace-nowrap">
-                  <div className="h-4 w-32 animate-pulse bg-muted rounded" />
-                </td>
-                <td className="px-3 py-2 min-w-0">
-                  <div className="h-4 w-20 animate-pulse bg-muted rounded" />
-                </td>
-                <td className="px-3 py-2 min-w-0">
-                  <div className="h-4 w-16 animate-pulse bg-muted rounded" />
-                </td>
-                <td className="px-3 py-2 font-mono text-xs min-w-0">
-                  <div className="h-4 w-24 animate-pulse bg-muted rounded" />
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap">
-                  <div className="h-4 w-28 animate-pulse bg-muted rounded" />
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <div className="h-4 w-10 animate-pulse bg-muted rounded ml-auto" />
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <div className="h-4 w-10 animate-pulse bg-muted rounded ml-auto" />
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap">
-                  <div className="h-4 w-12 animate-pulse bg-muted rounded" />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-const toggleErrorsOnly = (checked: boolean) => {
+  const toggleErrorsOnly = (checked: boolean) => {
     setErrorsOnly(checked);
     setFilter((f) => ({
       ...f,
@@ -180,13 +143,9 @@ const toggleErrorsOnly = (checked: boolean) => {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold">{t("log.title")}</h1>
         <div className="flex items-center gap-2 text-sm">
-          <span className={errorsOnly ? "text-red-500" : "text-muted-foreground"}>
-            {t("log.all")}
-          </span>
+          <span className="text-muted-foreground">{t("log.all")}</span>
           <Switch checked={errorsOnly} onCheckedChange={toggleErrorsOnly} />
-          <span className={!errorsOnly ? "text-muted-foreground" : "text-red-500"}>
-            {t("log.failed")}
-          </span>
+          <span className="text-muted-foreground">{t("log.failed")}</span>
         </div>
       </div>
 
@@ -212,14 +171,11 @@ const toggleErrorsOnly = (checked: boolean) => {
         <Card>
           <CardContent className="p-4">
             <div className="text-sm text-muted-foreground">{t("log.successRate")}</div>
-            <div className="text-2xl font-semibold mt-1">
-              {logs.length ? `${((successCount / logs.length) * 100).toFixed(1)}%` : "0%"}
-            </div>
+            <div className="text-2xl font-semibold mt-1">{logs.length ? `${((successCount / logs.length) * 100).toFixed(1)}%` : "0%"}</div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Table */}
       <div className="rounded-md border overflow-x-hidden">
         <table className="w-full table-fixed text-sm">
           <colgroup>
@@ -239,8 +195,8 @@ const toggleErrorsOnly = (checked: boolean) => {
               <th className="px-3 py-2 text-left font-medium truncate">{t("log.token")}</th>
               <th className="px-3 py-2 text-left font-medium truncate">{t("log.model")}</th>
               <th className="px-3 py-2 text-left font-medium whitespace-nowrap">{t("log.duration")}</th>
-<th className="px-3 py-2 text-right font-medium">{t("log.promptTokens")}</th>
-<th className="px-3 py-2 text-right font-medium">{t("log.completionTokens")}</th>
+              <th className="px-3 py-2 text-right font-medium">{t("log.promptTokens")}</th>
+              <th className="px-3 py-2 text-right font-medium">{t("log.completionTokens")}</th>
               <th className="px-3 py-2 text-left font-medium whitespace-nowrap">{t("log.status")}</th>
             </tr>
           </thead>
@@ -253,32 +209,15 @@ const toggleErrorsOnly = (checked: boolean) => {
               const attemptPath = formatAttemptPath(meta);
               return (
                 <Fragment key={log.id}>
-                  <tr
-                    className="border-b hover:bg-muted/30 cursor-pointer"
-                    onClick={() => setExpandedId(isExpanded ? null : log.id)}
-                  >
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <div>{new Date(log.created_at * 1000).toLocaleString()}</div>
-                    </td>
-                    <td className="px-3 py-2 min-w-0">
-                      <div className="truncate" title={log.channel_name}>{log.channel_name}</div>
-                    </td>
-                    <td className="px-3 py-2 min-w-0">
-                      <div className="truncate" title={log.token_name || log.access_key_name || undefined}>{log.token_name || log.access_key_name || <span className="text-muted-foreground">-</span>}</div>
-                    </td>
-                    <td className="px-3 py-2 font-mono text-xs min-w-0">
-                      <div className="truncate" title={resolvedModel}>{resolvedModel}</div>
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <div>{`${log.use_time || Math.ceil(log.latency_ms / 1000)}s${log.is_stream && log.first_token_ms > 0 ? ` / ${(log.first_token_ms / 1000).toFixed(1)}s` : ""}  ${log.is_stream ? t("log.streamShort") : t("log.nonStreamShort")}`}</div>
-                    </td>
+                  <tr className="border-b hover:bg-muted/30 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : log.id)}>
+                    <td className="px-3 py-2 whitespace-nowrap"><div>{new Date(log.created_at * 1000).toLocaleString()}</div></td>
+                    <td className="px-3 py-2 min-w-0"><div className="truncate" title={log.channel_name}>{log.channel_name}</div></td>
+                    <td className="px-3 py-2 min-w-0"><div className="truncate" title={log.token_name || log.access_key_name || undefined}>{log.token_name || log.access_key_name || <span className="text-muted-foreground">-</span>}</div></td>
+                    <td className="px-3 py-2 font-mono text-xs min-w-0"><div className="truncate" title={resolvedModel}>{resolvedModel}</div></td>
+                    <td className="px-3 py-2 whitespace-nowrap"><div>{`${log.use_time || Math.ceil(log.latency_ms / 1000)}s${log.is_stream && log.first_token_ms > 0 ? ` / ${(log.first_token_ms / 1000).toFixed(1)}s` : ""}  ${log.is_stream ? t("log.streamShort") : t("log.nonStreamShort")}`}</div></td>
                     <td className="px-3 py-2 text-right">{log.prompt_tokens}</td>
                     <td className="px-3 py-2 text-right">{log.completion_tokens}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <span className={log.success ? "text-green-600" : "text-red-500"}>
-                        {log.success ? t("log.success") : t("log.failed")}
-                      </span>
-                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap"><span className={log.success ? "text-green-600" : "text-red-500"}>{log.success ? t("log.success") : t("log.failed")}</span></td>
                   </tr>
                   {isExpanded ? (
                     <tr className="border-b bg-muted/20">
@@ -286,22 +225,10 @@ const toggleErrorsOnly = (checked: boolean) => {
                         <div className="space-y-2 text-xs max-w-3xl">
                           {meta ? (
                             <div className="grid gap-1 rounded bg-background/60 p-2 text-muted-foreground">
-                              <div>
-                                <span className="font-medium">{t("log.requestedModel")}:</span> {requestedModel || "-"}
-                              </div>
-                              <div>
-                                <span className="font-medium">{t("log.resolvedModel")}:</span> {resolvedModel || "-"}
-                              </div>
-                              {attemptPath.length ? (
-                                <div>
-                                  <span className="font-medium">{t("log.attemptPath")}:</span> {attemptPath.join(" → ")}
-                                </div>
-                              ) : null}
-                              {meta.stream_end_reason ? (
-                                <div>
-                                  <span className="font-medium">{t("log.streamEndReason")}:</span> {meta.stream_end_reason}
-                                </div>
-                              ) : null}
+                              <div><span className="font-medium">{t("log.requestedModel")}:</span> {requestedModel || "-"}</div>
+                              <div><span className="font-medium">{t("log.resolvedModel")}:</span> {resolvedModel || "-"}</div>
+                              {attemptPath.length ? <div><span className="font-medium">{t("log.attemptPath")}:</span> {attemptPath.join(" → ")}</div> : null}
+                              {meta.stream_end_reason ? <div><span className="font-medium">{t("log.streamEndReason")}:</span> {meta.stream_end_reason}</div> : null}
                             </div>
                           ) : log.other ? (
                             <div>
@@ -321,9 +248,7 @@ const toggleErrorsOnly = (checked: boolean) => {
                               <pre className="whitespace-pre-wrap break-all text-red-500">{log.error_message}</pre>
                             </div>
                           ) : null}
-                          {!log.content && !log.error_message && !log.other ? (
-                            <span className="text-muted-foreground">{t("log.noError")}</span>
-                          ) : null}
+                          {!log.content && !log.error_message && !log.other ? <span className="text-muted-foreground">{t("log.noError")}</span> : null}
                         </div>
                       </td>
                     </tr>
@@ -336,9 +261,7 @@ const toggleErrorsOnly = (checked: boolean) => {
       </div>
 
       {!logs.length && !isLoading && (
-        <div className="flex h-32 items-center justify-center text-muted-foreground">
-          {t("common.noData")}
-        </div>
+        <div className="flex h-32 items-center justify-center text-muted-foreground">{t("common.noData")}</div>
       )}
     </div>
   );

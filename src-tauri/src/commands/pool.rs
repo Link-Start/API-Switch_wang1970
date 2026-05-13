@@ -64,8 +64,17 @@ pub fn list_entries_paginated(
     page: i32,
     page_size: i32,
     group_name: Option<String>,
+    search: Option<String>,
+    channel_id: Option<String>,
 ) -> Result<PaginatedResult<ApiEntry>, AppError> {
-    pool_service::list_entries_paginated(&state.db, page, page_size, group_name.as_deref())
+    pool_service::list_entries_paginated(
+        &state.db,
+        page,
+        page_size,
+        group_name.as_deref(),
+        search.as_deref(),
+        channel_id.as_deref(),
+    )
 }
 
 #[tauri::command]

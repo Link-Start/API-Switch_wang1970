@@ -3,10 +3,10 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { useApiAdapter } from "@/lib/useApiAdapter";
-import type { UsageLog, UsageLogFilter } from "@/types";
+import { isTauriRuntime, useApiAdapter } from "@/lib/useApiAdapter";
+import type { UsageLog } from "@/types";
 
-const POLL_INTERVAL_MS = 5_000;
+const LOG_PAGE_SIZE = 40;
 
 interface UsageLogMeta {
   requested_model?: string;
@@ -46,7 +46,7 @@ function formatAttemptPath(meta: UsageLogMeta | null): string[] {
 export function LogViewer() {
   const { t } = useTranslation();
   const adapter = useApiAdapter();
-  const [filter, setFilter] = useState<UsageLogFilter>({ page_size: 100 });
+  const pageRefreshInterval = isTauriRuntime() ? false : 2000;
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
@@ -57,17 +57,18 @@ export function LogViewer() {
     isFetchingNextPage,
     isLoading,
   } = useInfiniteQuery({
-    queryKey: ["usageLogs", errorsOnly],
+    queryKey: ["usageLogs", "paginated", errorsOnly],
     queryFn: ({ pageParam = 1 }) =>
       adapter.usage.getLogs({
-        ...filter,
+        page_size: LOG_PAGE_SIZE,
         page: pageParam,
         success: errorsOnly ? false : undefined,
       }),
     getNextPageParam: (lastPage) =>
       lastPage.page * lastPage.page_size < lastPage.total ? lastPage.page + 1 : undefined,
     initialPageParam: 1,
-    refetchInterval: 5_000,
+    refetchInterval: pageRefreshInterval,
+    staleTime: 2000,
   });
 
   const logs: UsageLog[] = pages?.pages.flatMap((p) => p.items) ?? [];
@@ -83,17 +84,17 @@ export function LogViewer() {
     observer.observe(el);
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // 过滤条件变化时滚到顶部，避免中间位置出现“无显示”错觉
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [errorsOnly]);
   const totalPrompt = logs.reduce((sum, log) => sum + log.prompt_tokens, 0);
   const totalCompletion = logs.reduce((sum, log) => sum + log.completion_tokens, 0);
   const successCount = logs.filter((log) => log.success).length;
 
   const toggleErrorsOnly = (checked: boolean) => {
     setErrorsOnly(checked);
-    setFilter((f) => ({
-      ...f,
-      success: checked ? false : undefined,
-      page: 1,
-    }));
   };
 
   return (

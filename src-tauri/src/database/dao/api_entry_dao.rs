@@ -151,6 +151,8 @@ impl Database {
         page: i32,
         page_size: i32,
         group_name: Option<&str>,
+        search: Option<&str>,
+        channel_id: Option<&str>,
     ) -> Result<PaginatedResult<ApiEntry>, AppError> {
         let conn = lock_conn!(self.conn);
         let page = page.max(1);
@@ -164,6 +166,17 @@ impl Database {
             where_clauses.push(format!("e.group_name = ?{}", params.len() + 1));
             params.push(Box::new(gn.to_string()));
         }
+        if let Some(cid) = channel_id {
+            where_clauses.push(format!("e.channel_id = ?{}", params.len() + 1));
+            params.push(Box::new(cid.to_string()));
+        }
+        if let Some(term) = search {
+            let like = format!("%{}%", term.trim());
+            where_clauses.push(format!("(e.display_name LIKE ?{} OR e.model LIKE ?{} OR c.name LIKE ?{})", params.len() + 1, params.len() + 2, params.len() + 3));
+            params.push(Box::new(like.clone()));
+            params.push(Box::new(like.clone()));
+            params.push(Box::new(like));
+        }
 
         let where_str = if where_clauses.is_empty() {
             String::new()
@@ -172,7 +185,10 @@ impl Database {
         };
 
         // Count
-        let count_sql = format!("SELECT COUNT(*) FROM api_entries e {where_str}");
+        let count_sql = format!(
+            "SELECT COUNT(*) FROM api_entries e LEFT JOIN channels c ON e.channel_id = c.id {}",
+            where_str
+        );
         let total: i64 = conn.query_row(&count_sql, params_from_iter(params.iter()), |row| {
             row.get(0)
         })?;

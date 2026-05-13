@@ -2398,3 +2398,1449 @@ protocol types -> concrete provider HTTP client
 一句话总结：
 
 > 现在把方案写稳、边界定稳、风险控稳；等下一开发周期，再从 OpenAI Chat / Responses 的最小闭环开始落地。
+
+---
+
+## 开发前验证风险点测试
+
+本章节定义“进入开发前必须完成的验证测试设计”。由于当前程序处于封版状态，本阶段不执行代码改造，但必须先把测试目标、测试边界、样本要求、判定标准写清楚，避免后续开发时出现“设计上看起来能包容，实际落地却在数据流某一环断掉”的问题。
+
+本章节遵循本项目的联动一致性检查规则：
+
+1. 不能只做静态字段对照。
+2. 必须覆盖协议入口、Envelope 中间态、出口请求、响应回译、流式事件、损耗记录。
+3. 只要任一环可能失败，就不能宣称“已兼容”。
+
+---
+
+### 一、验证目标
+
+开发前验证测试的目标不是验证业务功能，而是验证这套设计是否具备“可安全落地”的前提条件。
+
+必须回答以下问题：
+
+1. 是否真的覆盖了主流协议的核心请求/响应形态？
+2. 是否存在设计上遗漏的顶层字段、内容块类型或生命周期状态？
+3. 是否能在不丢失关键语义的前提下完成 ingress -> envelope -> egress？
+4. 当目标协议不支持某特性时，是否能稳定进入 `strict / lossy / best_effort` 之一？
+5. 是否能明确知道哪些能力第一版支持、哪些只能保留 raw、哪些必须报错？
+
+---
+
+### 二、测试分层
+
+开发前验证测试分为六层。
+
+| 层级 | 名称 | 目标 |
+| --- | --- | --- |
+| L1 | 官方协议核验 | 确认设计字段与官方协议一致 |
+| L2 | 协议样本核验 | 确认样本覆盖了主流请求形态 |
+| L3 | Ingress 归一化核验 | 确认入口协议能正确归一化到 Envelope |
+| L4 | Egress 出口裁剪核验 | 确认目标协议请求生成规则明确 |
+| L5 | Compatibility 风险核验 | 确认所有不兼容特性都有稳定处理策略 |
+| L6 | Streaming / 生命周期核验 | 确认流式事件和后台任务状态可表达 |
+
+只有六层都通过，才可以进入开发阶段。
+
+---
+
+### 三、L1 官方协议核验
+
+#### 目标
+
+确保设计文档中列出的字段、结构和行为模型与官方协议要求一致。
+
+#### 核验对象
+
+| 厂商 | 需核验范围 |
+| --- | --- |
+| OpenAI | Chat Completions、Responses、Structured Outputs、Tools、Reasoning、Streaming |
+| Azure OpenAI | Chat Completions、Responses、Background tasks、MCP tools、API version、deployment path |
+| Anthropic Claude | Messages、Streaming、Tools、Tool use/result、Thinking、Metadata、Stop sequences |
+| Google Gemini | GenerateContent、streamGenerateContent、contents/parts、systemInstruction、functionDeclarations、toolConfig、safetySettings、cachedContent |
+
+#### 必测项
+
+每个协议至少核验以下内容：
+
+- 顶层请求字段。
+- 顶层响应字段。
+- 输入内容块类型。
+- 工具定义格式。
+- 工具调用结果格式。
+- 流式事件类型。
+- 状态生命周期字段。
+- 特有能力字段。
+- Deprecated 兼容字段。
+
+#### 风险判定
+
+| 风险级别 | 判定标准 |
+| --- | --- |
+| P0 | 官方存在的核心字段在设计中完全缺失 |
+| P1 | 设计中有字段承载，但语义位置不对 |
+| P2 | 设计能保留 raw，但无明确转换策略 |
+| P3 | 设计已覆盖，仅缺细节说明 |
+
+#### 通过标准
+
+- 不允许存在 P0 未关闭项。
+- P1 必须在文档中明确调整结构。
+- P2 必须在文档中标明“第一版仅保留 raw / unsupported”。
+- P3 可以进入开发期边做边细化。
+
+---
+
+### 四、L2 协议样本核验
+
+#### 目标
+
+在开发前定义完整样本矩阵，避免后续只拿最简单文本请求做测试，导致实现看似成功但复杂协议一上来就断裂。
+
+#### 每协议最低样本集
+
+每个协议都至少需要以下样本：
+
+| 编号 | 样本类型 | 目的 |
+| --- | --- | --- |
+| S1 | simple_text | 验证最小文本请求 |
+| S2 | system_instruction | 验证系统提示位置 |
+| S3 | stream_basic | 验证流式标记与基础流事件 |
+| S4 | tool_function | 验证 function tool 定义 |
+| S5 | tool_result | 验证 tool result 回传 |
+| S6 | image_input | 验证图像输入内容块 |
+| S7 | json_schema_output | 验证结构化输出 |
+| S8 | reasoning_or_thinking | 验证推理参数与推理输出 |
+| S9 | unsupported_feature | 验证不兼容能力处理 |
+| S10 | metadata_and_user | 验证 provider/client metadata |
+
+#### 各协议额外样本
+
+##### OpenAI Responses 额外样本
+
+- `background_task`
+- `previous_response_id_chain`
+- `mcp_tool`
+- `parallel_tool_calls`
+- `include_and_truncation`
+
+##### OpenAI / Azure Chat 额外样本
+
+- `deprecated_functions`
+- `n_choices`
+- `logit_bias`
+- `response_format_json_object`
+- `response_format_json_schema`
+
+##### Claude 额外样本
+
+- `system_top_level`
+- `tool_use_block`
+- `tool_result_block`
+- `thinking_block`
+- `stop_sequences`
+
+##### Gemini 额外样本
+
+- `system_instruction_parts`
+- `function_declarations`
+- `tool_config`
+- `safety_settings`
+- `cached_content`
+
+#### 样本模板
+
+每个样本应定义：
+
+```yaml
+id: openai_responses.background_task
+source_protocol: openai_responses
+description: Responses background task request
+request_path: /v1/responses
+request_headers: {}
+request_body: {}
+expected_normalized:
+  model: gpt-4.1
+  stream: false
+  execution.background: true
+expected_target:
+  protocol: openai_responses
+  request_body: {}
+expected_losses: []
+expected_unsupported: []
+risk_level: P1
+```
+
+#### 通过标准
+
+- 每个协议至少具备最小样本集。
+- 每个协议特有能力至少有一条专门样本。
+- 每条样本都要写出 `expected_losses` 或 `expected_unsupported`，不能只写 happy path。
+
+---
+
+### 五、L3 Ingress 归一化核验
+
+#### 目标
+
+验证入口适配器设计是否真的能把不同协议安全地转成 RequestEnvelope，而不是只做字段搬运。
+
+#### 必测问题
+
+1. 是否能识别正确的 `source.protocol`？
+2. 是否保留了 `original.body`？
+3. 是否正确填充了 `normalized.model`？
+4. 是否正确映射了系统提示？
+5. 是否正确归一化了内容块类型？
+6. 是否把不认识的块保留到 `UnknownPart`？
+7. 是否把 provider 私有字段放进 `metadata.provider` 或 `raw`？
+8. 是否记录了 ingress 阶段就能确定的不兼容风险？
+
+#### 必测断言
+
+| 断言 | 要求 |
+| --- | --- |
+| `source.protocol` | 必须正确 |
+| `original.body` | 必须保留完整 |
+| `normalized.input.messages` | 必须可重建核心语义 |
+| `normalized.instructions` | 必须保留系统提示语义 |
+| `normalized.tools` | 必须保留工具定义 |
+| `raw / metadata.provider` | 必须保留暂不支持字段 |
+
+#### 高风险点
+
+| 风险点 | 说明 |
+| --- | --- |
+| Responses `input` 既可能是 string 又可能是 array | 归一化容易误压平 |
+| Claude `system` 不在 messages 内 | 容易被误处理成普通 message |
+| Gemini `parts` 是多态结构 | 容易只支持 text，漏掉 functionCall / inlineData |
+| Deprecated `functions` / `function_call` | 如果不兼容旧字段，老客户端会断 |
+| `background` / `previous_response_id` / `cachedContent` | 容易因为不参与 routing 被忽略 |
+
+#### 通过标准
+
+- 不能出现“入口一解析就丢信息”的情况。
+- 对无法归一化的字段，必须保留 raw 或标记 unsupported。
+- 不允许仅用 `messages` 结构替代所有协议语义。
+
+---
+
+### 六、L4 Egress 出口裁剪核验
+
+#### 目标
+
+验证目标协议生成规则是否完整，尤其是“同一份 Envelope 输出到不同目标协议时”是否有稳定规则。
+
+#### 必测问题
+
+1. 是否能根据 `target.protocol` 选择正确的出口适配器？
+2. 是否有系统提示放置规则？
+3. 是否有内容块降级规则？
+4. 是否有工具定义转换规则？
+5. 是否有 tool result 转换规则？
+6. 是否能处理目标协议不支持的字段？
+7. 是否有 Responses / Chat / Claude / Gemini 各自特有结构的生成规则？
+
+#### 高风险转换对
+
+开发前必须重点评审以下转换对：
+
+| 转换对 | 风险说明 |
+| --- | --- |
+| Responses -> OpenAI Chat | `previous_response_id`、`reasoning`、MCP tool、include、background 无法直接表达 |
+| OpenAI Chat -> Responses | messages 不能简单拼文本，tool calls 要重建 input 结构 |
+| Claude -> OpenAI Chat | `system` 顶层、`tool_use` 块、thinking 块都需要重映射 |
+| OpenAI Chat -> Claude | system message 必须提升到顶层，tool result 结构不同 |
+| Gemini -> OpenAI Chat | `parts` 多态、functionCall、inlineData 会丢失风险 |
+| OpenAI Chat -> Gemini | tools 要转 `functionDeclarations`，system 要转 `systemInstruction` |
+
+#### 通过标准
+
+- 每个高风险转换对都必须写出映射规则。
+- 不支持的字段必须写出 compatibility 处理方式。
+- 不允许出现“出口时再临时猜语义”的设计。
+
+---
+
+### 七、L5 Compatibility 风险核验
+
+#### 目标
+
+验证不兼容能力是否都有稳定的处理分支，避免后续开发中隐式丢字段。
+
+#### 必测能力类别
+
+| 类别 | 示例 |
+| --- | --- |
+| 会话延续 | `previous_response_id`、`cachedContent` |
+| 后台执行 | `background` |
+| 安全控制 | `safetySettings` |
+| 推理控制 | `reasoning`、`thinking` |
+| 工具扩展 | MCP、computer_use、web_search、file_search |
+| 结构化输出 | `json_schema` |
+| 多候选输出 | `n > 1` |
+| 上下文截断 | `truncation` |
+| 多模态 | image/audio/video/file |
+
+#### 验证方式
+
+对每种能力都要判断：
+
+```text
+是否原生支持
+是否可降级
+是否只能保留 raw
+是否必须报错
+```
+
+并形成如下矩阵：
+
+| 能力 | OpenAI Chat | Responses | Claude | Gemini | 处理策略 |
+| --- | --- | --- | --- | --- | --- |
+| previous_response_id | 否 | 是 | 否 | 否 | Chat/Claude/Gemini 下 drop 或 move_to_metadata |
+| background | 否 | 是 | 否 | 否 | 非 Responses 目标下 strict error / lossy drop |
+| MCP tool | 否 | 是 | 否 | 否 | 第一版保留 raw / unsupported |
+| safetySettings | 否 | 否 | 否 | 是 | 非 Gemini 目标下 move_to_metadata 或 internal policy |
+
+#### 通过标准
+
+- 每项能力都必须有策略。
+- 不允许出现“暂时先忽略”的未定义状态。
+- 每项策略都要能映射到 `strict / lossy / best_effort`。
+
+---
+
+### 八、L6 Streaming / 生命周期核验
+
+#### 目标
+
+验证设计是否足以承载各协议的流式输出与响应状态变化。
+
+#### 必测问题
+
+1. 是否能表达 text delta？
+2. 是否能表达 tool call delta？
+3. 是否能表达 reasoning delta？
+4. 是否能表达 usage event？
+5. 是否能表达 terminal event？
+6. 是否能表达 Responses 的后台状态变化？
+7. 是否能表达 provider error 和 stream 中断？
+
+#### 建议必备事件
+
+```ts
+type StreamEvent =
+  | StreamStartEvent
+  | StreamStatusEvent
+  | StreamTextDeltaEvent
+  | StreamToolCallDeltaEvent
+  | StreamReasoningDeltaEvent
+  | StreamUsageEvent
+  | StreamEndEvent
+  | StreamErrorEvent;
+```
+
+#### 额外高风险点
+
+| 风险点 | 说明 |
+| --- | --- |
+| OpenAI Chat SSE 只强调 delta chunk | 容易忽略状态语义 |
+| Responses 流中可能有 richer event taxonomy | 不能只当 text delta |
+| Claude stream 有 content block 级事件 | 不能只做 token 文本流 |
+| Gemini stream 可能是 JSON chunk 体系 | 需要内部统一事件层 |
+| background response status | 不是普通 token stream |
+
+#### 通过标准
+
+- StreamEvent 设计必须覆盖文本、工具、reasoning、usage、状态、错误、结束。
+- 不允许把后台任务状态伪装成普通文本事件。
+
+---
+
+### 九、开发前准入测试清单
+
+进入开发阶段前，必须完成以下测试性评审并给出结论。
+
+| 编号 | 检查项 | 结果要求 |
+| --- | --- | --- |
+| G1 | 官方协议核心字段是否已核验 | 必须完成 |
+| G2 | 每协议最小样本集是否齐全 | 必须完成 |
+| G3 | 高风险样本是否齐全 | 必须完成 |
+| G4 | Ingress 是否能保留原始体 | 必须完成 |
+| G5 | Egress 是否有明确映射规则 | 必须完成 |
+| G6 | Compatibility 是否无未定义状态 | 必须完成 |
+| G7 | Streaming 事件是否覆盖生命周期 | 必须完成 |
+| G8 | 第一开发版支持边界是否明确 | 必须完成 |
+| G9 | unsupported feature 是否有处理策略 | 必须完成 |
+| G10 | 是否仍能快速回退到旧路径 | 必须完成 |
+
+准入规则：
+
+- 任一项未完成，不进入开发。
+- 任一 P0 风险未关闭，不进入开发。
+- 任一高风险转换对无映射规则，不进入开发。
+
+---
+
+### 十、建议的测试产物
+
+虽然当前封版不开发，但建议把未来要产出的测试工件先定义清楚。
+
+#### 1. 协议样本库
+
+```text
+docs/protocol-samples/
+  openai-chat/*.json
+  openai-responses/*.json
+  claude-messages/*.json
+  gemini-generate-content/*.json
+  azure-openai/*.json
+```
+
+#### 2. 预期归一化结果
+
+```text
+docs/protocol-expected/
+  normalized/*.yaml
+  compatibility/*.yaml
+  egress/*.yaml
+```
+
+#### 3. 高风险矩阵
+
+```text
+docs/protocol-risk-matrix.md
+```
+
+#### 4. 开发前评审记录
+
+```text
+docs/protocol-review-checklist.md
+```
+
+---
+
+### 十一、最终结论
+
+开发前验证的重点不是证明“设计看起来完整”，而是证明：
+
+1. 设计没有遗漏主流协议的关键语义。
+2. 设计能够解释不兼容，而不是隐藏不兼容。
+3. 设计能为后续实现提供稳定、可测试、可回退的路径。
+
+因此，在进入下一开发周期之前，必须先完成本章节定义的六层验证。
+
+一句话总结：
+
+> 先把风险点测试设计清楚，再开始开发；否则协议层很容易在 ingress、egress、streaming 或 compatibility 任一环出现“设计上觉得可以，实际一做就断”的问题。
+
+---
+
+## 特色功能融入论证与补充注意事项
+
+本章节用于回答一个关键问题：
+
+> API Switch 当前已有的特色功能，在未来接入 Envelope 协议层后，会受到什么影响？哪些方面会变好？哪些方面会变差？还有哪些额外风险需要提前控制？
+
+结论先行：
+
+> Envelope 方案本身不会天然削弱 API Switch 的特色能力；如果边界设计正确，它会把特色能力从“某个协议路径里的特殊逻辑”升级为“平台级能力”。
+>
+> 但如果边界失控，特色逻辑散落到各协议 adapter 中，或者 normalized 设计过重、过薄，都会反过来损害现有特色能力。
+
+---
+
+### 一、哪些特色功能会受影响
+
+结合 API Switch 现有架构，未来会明显受到 Envelope 设计影响的特色能力主要包括：
+
+- 模型池与 group 路由。
+- 渠道选择与模型别名重写。
+- fallback / failover。
+- 熔断与冷却。
+- 排序策略（custom / latest / fastest）。
+- access key 与认证审计。
+- usage log / audit log。
+- 协议翻译中继。
+- 上下游协议补偿。
+- 调试能力与故障定位。
+
+这些能力都不应该继续依附在 OpenAI Chat、Responses、Claude、Gemini 的私有字段结构上，而应转移到平台内核层。
+
+---
+
+### 二、融入后的正面影响
+
+#### 1. 特色能力会从协议分支逻辑升级为平台能力
+
+当前若按协议分别处理，很容易出现：
+
+- OpenAI Chat 有一套增强逻辑。
+- Responses 有另一套增强逻辑。
+- Claude / Gemini 再各补一套特殊判断。
+
+这样会导致每新增一个协议，都要复制一遍特色逻辑。
+
+Envelope 方案下，特色能力可以统一落在：
+
+```ts
+internal: InternalContext
+```
+
+这样未来无论入口协议是什么，都先进入统一平台语义，再走同一套路由、策略、fallback、审计、调试链路。
+
+正面价值：
+
+- 降低协议分支重复逻辑。
+- 保证不同协议入口下的平台行为一致。
+- 让路由、熔断、日志等能力不再依赖某个外部 JSON 结构。
+
+#### 2. 模型路由与渠道选择会更稳定
+
+不同协议下，模型信息可能来自：
+
+- `body.model`
+- `deployment`
+- path 参数
+- `input` 间接语义
+
+如果没有统一中间态，路由层就会不断依赖协议细节。
+
+Envelope 后，可以统一为：
+
+```ts
+internal.routing.requestedModel
+internal.routing.normalizedModel
+internal.routing.selectedModel
+internal.routing.selectedEntryId
+internal.routing.selectedChannelId
+internal.routing.selectedApiType
+```
+
+这样模型池、分组、渠道选择就只依赖内部上下文，不依赖外部协议形态。
+
+#### 3. 协议互通会更可解释
+
+API Switch 的中间层价值之一，不只是“转得过去”，而是“知道怎么转、丢了什么、为什么丢”。
+
+Envelope 里的：
+
+```ts
+compatibility.losses
+compatibility.warnings
+compatibility.unsupported
+```
+
+可以把协议损耗显式化。例如：
+
+- Responses 的 `previous_response_id` 转 Chat 被丢弃。
+- Gemini 的 `safetySettings` 转 OpenAI 被降级。
+- Claude 的 `thinking` 转 Chat 被抑制。
+- MCP tool 在非 Responses 目标下被标记 unsupported。
+
+这会强化你们的特色：
+
+- 用户更容易理解协议行为。
+- 调试更容易。
+- 日志更有价值。
+- 后续 UI 甚至可以展示转换损耗摘要。
+
+#### 4. 为未来扩协议留出稳定接口
+
+如果未来增加更多协议或兼容 provider，仅用两两互转会出现组合爆炸。
+
+Envelope 架构把复杂度收敛为：
+
+```text
+新协议 -> ingress adapter
+Envelope -> 新协议 egress adapter
+```
+
+这样你们自己的特色能力不用为新协议重写。
+
+#### 5. 有利于灰度演进和回退
+
+程序已封版，未来开发一定要稳。
+
+Envelope 可以先以 shadow 模式验证：
+
+```text
+旧路径继续服务
+新协议层只做 shadow parse / compare / log
+```
+
+这样可以：
+
+- 不影响现有用户流量。
+- 提前收集设计与真实请求的偏差。
+- 做新旧输出比对。
+- 保留快速回退能力。
+
+---
+
+### 三、潜在负面影响
+
+#### 1. 如果 normalized 设计过重，会变成超级中间协议
+
+坏处：
+
+- 类型膨胀。
+- 协议更新时核心结构频繁变动。
+- 开发者不敢修改。
+- 每个协议私有语义都被硬塞进 normalized。
+
+控制原则：
+
+> Normalized 只放平台必须理解的公共字段；协议私有细节继续放 `original`、`raw`、`metadata.provider`。
+
+#### 2. 如果特色逻辑被塞进 adapter，会反向耦合
+
+最危险的实现方式是：
+
+- 在 OpenAI adapter 里做路由。
+- 在 Claude adapter 里做 fallback。
+- 在 Gemini adapter 里做 usage log。
+- 在 Responses adapter 里做熔断。
+
+这样每加一个协议，就要复制一套特色能力。
+
+稳定边界必须是：
+
+```text
+Ingress Adapter：只解析来源协议
+Internal Layer：处理 API Switch 特色能力
+Egress Adapter：只生成目标协议
+```
+
+#### 3. 现有特色逻辑中的隐含协议假设会暴露出来
+
+例如某些现有逻辑可能默认：
+
+- 请求一定有 `messages`。
+- system prompt 一定是第一条 message。
+- 模型一定在 body.model。
+- tool call 一定是 OpenAI Chat 结构。
+- stream 一定是 OpenAI SSE chunk。
+
+引入 Envelope 后，这些假设会失效，需要迁移为基于：
+
+```ts
+normalized
+internal
+capabilities
+compatibility
+```
+
+这会增加设计和后续实现成本。
+
+#### 4. 日志和审计结构会更复杂
+
+未来日志需要记录的不只是：
+
+- requested model
+- selected model
+- channel id
+- latency
+- status
+
+还可能需要：
+
+- source protocol
+- target protocol
+- translation mode
+- compatibility losses
+- stream lifecycle
+- response status
+
+这会增加日志设计复杂度，但也是更强审计能力的代价。
+
+#### 5. 流式协议统一是高风险区
+
+不同协议流式模型差异很大：
+
+- OpenAI Chat：delta chunk
+- Responses：typed event stream
+- Claude：content block 事件
+- Gemini：JSON chunk / streamGenerateContent
+
+如果过早把它们都压成“纯文本流”，会损害：
+
+- tool call delta
+- reasoning delta
+- usage event
+- finish reason
+- background status
+- stream error
+
+因此 streaming 必须作为后期能力处理，而不是第一版强行统一。
+
+---
+
+### 四、对各类特色功能的具体影响判断
+
+| 特色功能 | 正面影响 | 风险点 | 设计要求 |
+| --- | --- | --- | --- |
+| 模型路由 | 入口协议差异被屏蔽，路由更统一 | Azure deployment、Gemini path model 可能被误归一化 | 路由只读 `internal.routing` |
+| group / pool | 所有协议共享同一套选择逻辑 | adapter 若擅自改 model，会绕过 group | group 选择必须在 internal 层 |
+| fallback | 可按 capability 做更聪明降级 | stream 中途 fallback 极难 | fallback 决策不放在 adapter |
+| 熔断 / 冷却 | 可以统一按 selected entry 记录 | 协议翻译错误不应记成 provider 失败 | 区分 translation error 与 provider error |
+| 排序策略 | 与协议解耦，可继续复用 | 协议差异可能影响“测速/最新”语义展示 | sort mode 放 `internal.policy` |
+| access key | 与协议无关，天然可复用 | 不同协议 header auth 不能覆盖内部认证 | auth 统一放 internal/auth |
+| usage / audit | 可以更强地记录 source/target/losses | 日志字段膨胀 | 结构化日志与字段分层 |
+| 协议翻译中继 | 入口协议标注后翻译依据更充分 | 归一化过度压平会丢语义 | 保留 original/raw |
+| 调试能力 | 可展示完整转换链路 | 可能暴露敏感 body | 增加敏感字段脱敏策略 |
+
+---
+
+### 五、必须坚持的边界
+
+#### Ingress Adapter 只做什么
+
+只做：
+
+- 协议识别。
+- 原始请求解析。
+- `source.protocol` 填充。
+- `original` 保留。
+- `normalized` 填充。
+- raw / metadata.provider 保留。
+
+不做：
+
+- 路由。
+- fallback。
+- usage log。
+- 熔断。
+- 数据库访问。
+- 渠道选择。
+
+#### Internal Layer 负责什么
+
+只在 internal 层处理平台特色：
+
+```ts
+internal.routing
+internal.policy
+internal.features
+internal.audit
+internal.debug
+```
+
+包括：
+
+- selected entry / channel / group。
+- sort mode。
+- compatibility mode。
+- fallback 策略。
+- feature flags。
+- audit labels。
+- 调试 trace。
+
+#### Egress Adapter 只做什么
+
+只做：
+
+- 根据 `target.protocol` 生成目标请求。
+- 根据 target capability 裁剪字段。
+- 记录 compatibility loss。
+- 生成 provider request。
+
+不做：
+
+- 再次路由。
+- 改变 selected channel。
+- 写数据库。
+- 决定 fallback。
+
+---
+
+### 六、额外需要补充注意的事项
+
+除了前文已有内容，以下事项也建议写入稳定计划。
+
+#### 1. 特色能力的“协议无关输入面”要提前定义
+
+以后所有平台特色能力都应尽量依赖统一输入面，而不是直接读外部协议字段。
+
+建议未来定义：
+
+```ts
+interface InternalFeatureInput {
+  model?: string;
+  messages?: NormalizedMessage[];
+  tools?: NormalizedTool[];
+  stream?: boolean;
+  sourceProtocol: Protocol;
+  targetProtocol?: Protocol;
+  compatibilityMode: CompatibilityMode;
+}
+```
+
+后续无论是模型路由、fallback、审计、风控、翻译增强，都优先基于这层做逻辑。
+
+#### 2. translation error 与 provider error 必须分离
+
+这是一个很重要但容易遗漏的点。
+
+未来日志和熔断中必须区分：
+
+- 翻译层错误：协议不兼容、字段缺失、adapter bug。
+- provider 错误：上游 4xx / 5xx / 超时 / 限流。
+
+如果不分离，会导致：
+
+- 协议 bug 被误判为渠道不稳定。
+- 熔断打错对象。
+- 延迟统计失真。
+- 失败回退策略错误。
+
+建议未来错误结构中固定字段：
+
+```ts
+error.source = "translation" | "provider" | "internal"
+```
+
+#### 3. 敏感字段脱敏策略要提前考虑
+
+因为 Envelope 会保留 `original.body`，这意味着：
+
+- API key
+- 用户输入
+- tools 参数
+- provider metadata
+- 可能的文件内容或 URL
+
+都可能进入调试与日志链路。
+
+所以未来必须补：
+
+- 调试日志脱敏。
+- raw body 采样开关。
+- 敏感字段清单。
+- 按环境控制 debug 可见性。
+
+#### 4. 不要把“能保留 raw”误当成“已经支持”
+
+这是评审时非常容易犯的错。
+
+必须区分三种状态：
+
+| 状态 | 含义 |
+| --- | --- |
+| supported | 设计和实现都明确支持并可稳定转换 |
+| preserved_only | 只保留 raw，尚不能稳定跨协议转换 |
+| unsupported | 明确不支持，必须报错或降级 |
+
+未来设计评审和实现验收都应按这三类标注，不要因为字段被保留了就说“已兼容”。
+
+#### 5. 第一版不要追求跨所有协议完全等价
+
+因为部分协议能力本质上不等价：
+
+- Responses `background`
+- Responses MCP tool
+- Claude thinking
+- Gemini safety settings
+- cachedContent / previous_response_id
+
+第一版目标应是：
+
+> 保证核心能力稳定互通，复杂能力清楚标注损耗或 unsupported。
+
+而不是追求“所有协议 100% 对等”。
+
+---
+
+### 七、建议写入稳定计划的最终补充结论
+
+在封版稳定计划中，应补上以下结论：
+
+1. Envelope 方案对 API Switch 特色功能总体是增强，不是削弱。
+2. 特色功能必须沉淀到 `InternalContext`，不能散落到各协议 adapter。
+3. 所有平台能力必须逐步摆脱对 OpenAI Chat 结构的隐性依赖。
+4. translation error / provider error / internal error 必须明确区分。
+5. raw 保留不等于已支持，必须区分 `supported` / `preserved_only` / `unsupported`。
+6. streaming 是特色能力融合中的最高风险点，必须后置实施。
+7. 调试能力增强的同时，必须补脱敏和安全策略。
+
+一句话总结：
+
+> 这套方案最大的价值，不是“多支持了几个协议”，而是让 API Switch 的特色能力脱离单一协议结构，真正成为平台级能力；最大的风险，也不是协议字段多少，而是边界没守住导致平台能力重新散落回各协议分支里。
+
+---
+
+## 行为补偿机制设计
+
+本章节用于固化 API Switch 的一个重要特色能力：
+
+> 当目标协议或目标上游不支持某些来源协议能力时，除了做字段级降级，还可以通过提示词注入、系统指令补充、运行时能力引导等方式，对下游模型行为进行纠正或补偿。
+
+这个机制不是普通协议字段映射，而是平台级“行为补偿”能力。
+
+---
+
+### 一、为什么要单独设计行为补偿
+
+协议转换里有两类不兼容：
+
+#### 第一类：字段不兼容，但语义可近似补偿
+
+例如：
+
+- Responses 原生工具类型下游不支持。
+- 严格结构化输出下游不支持，但仍可提示“只输出 JSON”。
+- 某些推理开关下游不支持，但可提示“仅输出结果，不展示中间推理”。
+- 某些多模态能力缺失，但可退化为文本模式回答。
+
+这类问题不一定要直接报错，可以通过行为引导让模型尽量采取可替代路径。
+
+#### 第二类：系统能力不兼容，不能靠提示词伪装支持
+
+例如：
+
+- `previous_response_id`
+- `background`
+- `cachedContent`
+- provider-native conversation state
+- provider-side safety enforcement
+- 真正的 MCP server 远程执行
+
+这类能力不属于“模型行为问题”，而属于“平台或协议能力缺失”，不能仅靠提示词声称已支持。
+
+因此必须把“行为补偿”与“字段级兼容”和“系统能力不支持”区分开。
+
+---
+
+### 二、当前代码中的现有雏形
+
+当前项目里，这个能力已经有一个明确雏形，存在于 Responses -> Chat fallback 路径中。
+
+相关位置：
+
+- `D:\Work\api-switch\src-tauri\src\proxy\protocol\responses.rs:218`
+- `D:\Work\api-switch\src-tauri\src\proxy\protocol\responses.rs:238`
+- `D:\Work\api-switch\src-tauri\src\proxy\protocol\responses.rs:251`
+- `D:\Work\api-switch\src-tauri\src\proxy\protocol\responses.rs:270`
+- `D:\Work\api-switch\src-tauri\src\proxy\protocol\responses.rs:2100`
+
+现有实现做了三件事：
+
+1. 识别 Responses request 中哪些工具属于 Chat 上游不支持的原生工具类型。
+2. 对不支持的工具类型，不直接透传给 Chat 上游。
+3. 同时给 system prompt 注入一段“行为纠正提示”，告诉下游模型：
+   - 当前环境没有这些 Responses native tool。
+   - 请改用 shell、HTTP、scripts、browser、filesystem、DB 等当前可用运行时能力完成任务。
+   - 结果必须来自真实执行，不得编造。
+
+这说明当前系统已经不是简单“丢字段”，而是具备：
+
+> 字段级降级 + 行为级补偿
+
+这正是 API Switch 中间层特色能力的一部分，应该正式写进架构设计，而不是继续留在 adapter 的局部逻辑中。
+
+---
+
+### 三、行为补偿的正式定义
+
+建议在设计中增加如下概念：
+
+```ts
+interface BehavioralCompensation {
+  reason: string;
+  sourceProtocol: Protocol;
+  targetProtocol: Protocol;
+  kind:
+    | "tool_unavailable"
+    | "stateful_conversation_unavailable"
+    | "background_execution_unavailable"
+    | "reasoning_capability_degraded"
+    | "safety_control_unavailable"
+    | "structured_output_not_strict"
+    | "multimodal_capability_degraded"
+    | "provider_runtime_capability_gap";
+  strategy: "inject_system_prompt" | "append_instruction" | "metadata_only";
+  prompt?: string;
+  severity: "info" | "warning" | "error";
+  raw?: unknown;
+}
+```
+
+建议挂载位置：
+
+```ts
+interface CompatibilityState {
+  mode: "strict" | "lossy" | "best_effort";
+  losses: CompatibilityLoss[];
+  warnings: CompatibilityWarning[];
+  unsupported: UnsupportedFeature[];
+  compensations?: BehavioralCompensation[];
+}
+```
+
+也可以在 internal policy 中保留运行时决策痕迹：
+
+```ts
+internal.policy.behaviorCompensations?: BehavioralCompensation[];
+```
+
+推荐做法：
+
+- `CompatibilityState.compensations`：对外描述这次协议转换做了哪些行为补偿。
+- `internal.policy.behaviorCompensations`：对内记录平台为什么这样做、由哪个规则触发。
+
+---
+
+### 四、行为补偿与兼容模式的关系
+
+行为补偿不是默认总启用，而应受兼容模式控制。
+
+#### strict
+
+```text
+发现目标协议不支持某能力 -> 直接报错
+```
+
+strict 下通常不应自动注入补偿 prompt，因为 strict 的目标是避免语义漂移。
+
+#### lossy
+
+```text
+优先字段降级/丢弃 -> 记录损耗 -> 仅在明确安全时允许补偿
+```
+
+lossy 下可对少量高价值场景开启行为补偿，但必须记录：
+
+- 原能力是什么
+- 为什么降级
+- 注入了什么补偿
+- 可能存在哪些语义变化
+
+#### best_effort
+
+```text
+允许行为补偿作为主要策略之一
+```
+
+best_effort 是行为补偿最合适的模式。
+
+因此建议：
+
+| 模式 | 是否允许行为补偿 |
+| --- | --- |
+| `strict` | 默认不允许 |
+| `lossy` | 仅允许白名单场景 |
+| `best_effort` | 明确允许 |
+
+---
+
+### 五、适合行为补偿的场景
+
+以下场景适合通过提示词或系统指令进行补偿。
+
+#### 1. 原生工具不可用，但运行时存在可替代能力
+
+典型例子：
+
+- Responses native tools 在 Chat 上游不可用。
+- 目标上游不支持某内置工具，但平台运行时仍有 shell、HTTP、filesystem、browser 等可替代能力。
+
+这类场景适合注入补偿 prompt，引导模型改用当前运行时能力。
+
+#### 2. 结构化输出无法严格保证，但可以要求输出格式
+
+例如：
+
+- 来源协议要求 strict `json_schema`
+- 目标协议只支持普通文本或弱 JSON 模式
+
+可以注入：
+
+- 只输出 JSON
+- 严格遵循以下字段结构
+- 不输出额外解释文本
+
+但必须标记为：
+
+```text
+structured_output_not_strict
+```
+
+#### 3. 推理能力或展示方式降级
+
+例如：
+
+- 来源协议支持 reasoning / thinking
+- 目标协议不支持可见推理块
+
+可以注入行为约束：
+
+- 只给最终答案
+- 不展示中间推理过程
+- 若无法确定，则明确说明不确定性
+
+#### 4. 多模态退化为文本模式
+
+例如：
+
+- 目标协议不支持图像/文件能力
+- 但平台决定允许文本级退化
+
+可注入：
+
+- 如果无法访问原图像/文件，请明确说明限制
+- 仅基于可用文本上下文回答
+
+---
+
+### 六、不适合行为补偿的场景
+
+以下能力不能靠 prompt 假装支持，必须按 unsupported / loss 处理。
+
+#### 1. provider-side state 能力
+
+包括：
+
+- `previous_response_id`
+- `cachedContent`
+- 服务器端对话状态延续
+
+prompt 不能替代真实的服务端会话状态。
+
+#### 2. 真正的后台任务能力
+
+包括：
+
+- `background`
+- polling-based lifecycle
+
+prompt 不能让一个同步接口变成异步后台任务系统。
+
+#### 3. provider-native safety enforcement
+
+`safetySettings` 等字段往往是上游平台侧控制，不是模型自然语言行为可完全替代的能力。
+
+#### 4. 远程 MCP server 真调用
+
+如果目标协议和运行时没有 MCP 执行能力，就不能仅通过 prompt 说“请当成有 MCP”。
+
+#### 5. 严格 schema guarantee
+
+如果目标协议本身不提供强 schema enforcement，prompt 只能做弱约束，不能宣称“等价支持 strict schema”。
+
+---
+
+### 七、行为补偿的触发流程
+
+建议未来统一按以下流程处理：
+
+```mermaid
+flowchart TD
+  A["Envelope + target capability"] --> B["发现来源能力与目标能力不匹配"]
+  B --> C{"能否安全降级?"}
+  C -->|否| D["unsupported / strict error"]
+  C -->|是| E{"是否属于可行为补偿白名单?"}
+  E -->|否| F["lossy drop / metadata only"]
+  E -->|是| G["生成 BehavioralCompensation"]
+  G --> H["注入 system prompt / instruction"]
+  H --> I["记录 compatibility.compensations"]
+```
+
+关键原则：
+
+- 先判断能力不匹配。
+- 再判断是否属于允许行为补偿的白名单。
+- 不在白名单内的，不允许随意注入 prompt 假装支持。
+
+---
+
+### 八、建议的白名单策略
+
+建议未来只对以下类型开启行为补偿白名单：
+
+| kind | 默认策略 |
+| --- | --- |
+| `tool_unavailable` | 允许 |
+| `structured_output_not_strict` | 允许 |
+| `reasoning_capability_degraded` | 允许 |
+| `multimodal_capability_degraded` | 谨慎允许 |
+| `provider_runtime_capability_gap` | 谨慎允许 |
+| `stateful_conversation_unavailable` | 不允许 |
+| `background_execution_unavailable` | 不允许 |
+| `safety_control_unavailable` | 默认不允许 |
+
+这样可以避免行为补偿被滥用成“什么都靠 prompt 糊过去”。
+
+---
+
+### 九、提示词注入的边界要求
+
+行为补偿如果最终采用 `inject_system_prompt`，必须满足以下约束。
+
+#### 1. 不能覆盖用户原始 system/instructions
+
+只能：
+
+- 追加到已有 system 后面
+- 或作为新的低优先级补偿 instruction 插入
+
+不能直接替换原始用户意图。
+
+#### 2. 必须可追踪
+
+需要记录：
+
+- 注入原因
+- 注入策略
+- 注入文本摘要
+- 所属 request id
+
+否则后续难以解释模型为什么表现出某种行为。
+
+#### 3. 必须可禁用
+
+未来至少要支持：
+
+- 全局关闭行为补偿
+- 按兼容模式关闭
+- 按 target protocol 关闭
+- 按 feature kind 关闭
+
+#### 4. 必须脱敏
+
+注入日志或调试信息时，不应把用户敏感输入拼接进通用日志，避免 raw prompt 泄漏。
+
+---
+
+### 十、与现有 responses.rs 实现的映射关系
+
+当前实现可以视为行为补偿机制的第一条已存在规则：
+
+| 项目 | 当前实现 |
+| --- | --- |
+| 触发源 | Responses request 含 Hosted / native tool |
+| 目标 | Chat 上游不支持该 tool 类型 |
+| 行为 | 跳过不支持工具 + 注入 system prompt |
+| 兼容语义 | best-effort behavioral compensation |
+| 记录方式 | 当前主要是 `warn!` 日志 |
+| 未来升级方向 | 进入 `CompatibilityState.compensations` |
+
+建议未来把当前实现抽象为一条正式规则：
+
+```ts
+{
+  kind: "tool_unavailable",
+  sourceProtocol: "openai_responses",
+  targetProtocol: "openai_chat",
+  strategy: "inject_system_prompt",
+  severity: "warning"
+}
+```
+
+也就是说，当前 `responses.rs` 的局部 hardcode 不应被删除，而应被提升为平台正式能力，并逐步迁移到统一 compatibility / policy 层。
+
+---
+
+### 十一、测试与评审要求
+
+行为补偿一旦纳入正式设计，未来开发前必须新增验证项。
+
+#### 样本测试新增要求
+
+至少补充以下样本：
+
+| 样本 | 目的 |
+| --- | --- |
+| responses_tool_unavailable_prompt_compensation | 验证不支持工具时会生成行为补偿 |
+| structured_output_degraded_to_prompt | 验证 strict schema 降级为 prompt 约束 |
+| reasoning_degraded_with_instruction | 验证 reasoning 能力降级时的行为提示 |
+| background_unavailable_should_error | 验证不该补偿的能力必须报错 |
+| previous_response_id_should_not_fake_support | 验证状态能力不能靠 prompt 伪装 |
+
+#### 开发前评审新增问题
+
+1. 本次转换是否使用了行为补偿？
+2. 该补偿是否属于白名单场景？
+3. 该补偿是否会误导系统“已原生支持”？
+4. 该补偿是否可关闭？
+5. 该补偿是否已记录到 compatibility / debug trace？
+
+---
+
+### 十二、最终结论
+
+API Switch 现有的“当目标不支持时，用提示词纠正下游行为”的能力：
+
+- 不是偶然实现，而是一个非常有价值的中间层特色。
+- 当前已经在 Responses -> Chat fallback 中有明确雏形。
+- 完全应该纳入 Envelope 总体设计。
+- 但必须被定义为“行为补偿机制”，而不是普通字段兼容。
+- 必须和 `strict / lossy / best_effort`、`supported / preserved_only / unsupported`、compatibility losses 一起管理。
+
+一句话总结：
+
+> 当协议能力无法等价映射时，API Switch 不只是做“字段降级”，还可以做“行为补偿”；这正是中间层平台价值的一部分，但必须作为受控能力使用，不能变成掩盖真实不兼容的手段。
+
+---
+
+## 支持状态定义
+
+为了避免“文档写了”被误解为“代码已经支持”，本设计统一使用以下状态来描述每个协议字段或能力的当前定位。
+
+| 状态 | 含义 |
+| --- | --- |
+| `implemented` | 已有实现，且已有明确代码路径支撑 |
+| `designed_supported` | 设计已完整定义，目标是后续实现为稳定支持 |
+| `designed_partial` | 设计已定义，但只支持部分协议或部分形态 |
+| `preserved_only` | 设计已考虑，但当前只要求保留 raw / metadata / notes，不承诺跨协议稳定转换 |
+| `unsupported` | 设计已考虑，但明确不支持，必须报错、降级或记录损耗 |
+
+### 判定规则
+
+#### 1. `implemented`
+
+只有在当前代码库中已经存在可定位实现路径时，才能标记为 `implemented`。
+
+例如：
+
+- Responses -> Chat 路径中对不支持 Hosted / native tools 的提示词补偿，已在 `D:\Work\api-switch\src-tauri\src\proxy\protocol\responses.rs:218` 等位置有实现雏形，因此可标记为局部 `implemented`。
+
+#### 2. `designed_supported`
+
+表示：
+
+- 协议字段或能力已经在设计中有明确承载位置。
+- 有清楚的 ingress / egress / compatibility 处理思路。
+- 后续版本计划作为正式支持能力实现。
+
+#### 3. `designed_partial`
+
+表示：
+
+- 设计层面已经定义，但并非所有协议对都能稳定支持。
+- 或仅支持该能力的一部分子集。
+
+典型例子：
+
+- tool conversion 里 function tools 可支持，但 provider-native tools 只能部分支持。
+- structured outputs 可部分降级，但不能保证所有协议对都严格等价。
+
+#### 4. `preserved_only`
+
+表示：
+
+- 该能力已被设计捕获。
+- 当前阶段只保证：不在入口阶段丢失。
+- 不承诺在第一版里实现稳定互转。
+
+这类能力通常保存在：
+
+- `original.body`
+- `raw`
+- `metadata.provider`
+- `UnknownPart`
+- `CompatibilityState.unsupported`
+
+#### 5. `unsupported`
+
+表示：
+
+- 设计上已经明确知道该能力与当前目标协议或当前实现阶段不兼容。
+- 不允许伪装成“已兼容”。
+- 必须进入：
+  - 报错
+  - drop
+  - downgrade
+  - move_to_metadata
+  - 或明确 unsupported 提示
+
+### 重要说明
+
+必须严格区分以下四件事：
+
+1. 协议中存在这个字段。
+2. 设计中已经考虑这个字段。
+3. 当前版本已经实现这个字段。
+4. 当前版本已经稳定支持这个字段的跨协议互转。
+
+只有第 3 和第 4 同时满足时，才可认为用户侧“真的支持”。
+
+一句话原则：
+
+> 写进文档不等于已经支持；保留 raw 也不等于已经兼容。
+
+---
+
+## 协议能力状态总表
+
+本表用于把“协议字段存在性”“设计承载方式”“第一版计划状态”“实现注意事项”集中整理，避免信息散落在各章节中。
+
+说明：
+
+- `设计承载` 表示该能力在文档中的主要落点。
+- `第一版状态` 采用上一节定义的状态。
+- `处理方式` 表示推荐的默认处理策略，而非当前代码已全部实现。
+
+| 协议 | 能力/字段 | 设计承载 | 处理方式 | 第一版状态 | 备注 |
+| --- | --- | --- | --- | --- | --- |
+| OpenAI Chat | `messages` | `normalized.input.messages` | 直接支持 | `designed_supported` | 核心基础能力 |
+| OpenAI Chat | system/developer messages | `normalized.instructions` + messages | 提升或回落 | `designed_supported` | system 需与其他协议位置对齐 |
+| OpenAI Chat | `tools` function | `normalized.tools` | 直接支持 | `designed_supported` | 第一版重点支持 |
+| OpenAI Chat | `tool_choice` | `normalized.toolChoice` | 直接支持 | `designed_supported` | 与 Claude/Gemini 需做模式映射 |
+| OpenAI Chat | deprecated `functions` / `function_call` | `normalized.tools` / `normalized.toolChoice` | 兼容入口映射 | `designed_supported` | 为老客户端保留 |
+| OpenAI Chat | `response_format.json_object` | `normalized.responseFormat` | 直接支持或降级 | `designed_supported` | 文本模型需额外提示 |
+| OpenAI Chat | `response_format.json_schema` | `normalized.responseFormat` | 支持或降级为行为补偿 | `designed_partial` | 跨协议严格保证不足 |
+| OpenAI Chat | `stream` | `normalized.stream` + `StreamEvent` | 直接支持 | `designed_supported` | 第一版只要求基础流语义 |
+| OpenAI Chat | `n` | `generation.n` | 不支持时降为 1 | `preserved_only` | 第一版不建议完整互转 |
+| OpenAI Chat | `user` | `metadata.client.user` | 保留 | `preserved_only` | 非核心转换语义 |
+| OpenAI Chat | `logit_bias` | `generation.logitBias` | 保留或 unsupported | `preserved_only` | 第一版不建议强支持 |
+| OpenAI Chat | `reasoning` | `normalized.reasoning` | 保留或降级 | `designed_partial` | 依目标模型能力而定 |
+| OpenAI Responses | `input` | `normalized.input.messages` + `original.body` | 直接支持 | `designed_supported` | 与 Chat messages 不完全等价 |
+| OpenAI Responses | `instructions` | `normalized.instructions` | 直接支持 | `designed_supported` | 第一版重点支持 |
+| OpenAI Responses | `previous_response_id` | `conversation.previousResponseId` | 非 Responses 目标下 drop / metadata | `preserved_only` | 不能靠 prompt 伪装 |
+| OpenAI Responses | `store` | `conversation.store` | 保留 | `preserved_only` | 第一版不做完整语义支持 |
+| OpenAI Responses | `background` | `execution.background` | 非 Responses 目标 strict error | `unsupported` | 第一版不做代理后台任务 |
+| OpenAI Responses | `truncation` | `conversation.truncation` | 保留 / metadata | `preserved_only` | 第一版不做稳定互转 |
+| OpenAI Responses | `include` | `output.include` | 保留或 drop | `preserved_only` | 第一版可不转换 |
+| OpenAI Responses | native hosted tools / MCP tools | `tools` + `BehavioralCompensation` | function 转换，其余补偿或 unsupported | `designed_partial` | 现有 `responses.rs` 已有局部实现 |
+| OpenAI Responses | `parallel_tool_calls` | `toolOptions.parallelToolCalls` | 保留或降级 | `preserved_only` | 第一版不做完整并行语义 |
+| OpenAI Responses | 状态生命周期 | `NormalizedResponse.status` | 保留 | `preserved_only` | queued/in_progress/completed 等 |
+| OpenAI Responses | typed streaming events | `StreamEvent` | 统一流事件 | `designed_partial` | 第一版不建议全互转 |
+| Azure OpenAI | deployment path | `target.deployment` | 直接支持 | `designed_supported` | Azure 核心差异 |
+| Azure OpenAI | `api-version` | `target` / adapter config | 适配器处理 | `designed_supported` | 不进入 normalized 核心语义 |
+| Azure OpenAI | Chat request/response | Chat 兼容层 | 直接支持 | `designed_supported` | 与 OpenAI Chat 近似 |
+| Azure OpenAI | Responses background / MCP | Responses + execution/tools | 保留或 unsupported | `preserved_only` | 依 Azure 官方演进 |
+| Claude Messages | top-level `system` | `normalized.instructions` | 直接支持 | `designed_supported` | 必须避免误当普通 message |
+| Claude Messages | `messages` | `normalized.input.messages` | 直接支持 | `designed_supported` | 核心基础能力 |
+| Claude Messages | `tool_use` | `ToolCallPart` / tools | 映射为 function tool calls | `designed_partial` | 第一版可先做基础版 |
+| Claude Messages | `tool_result` | `ToolResultPart` | 直接映射 | `designed_partial` | 结构不同于 Chat |
+| Claude Messages | `thinking` | `normalized.reasoning` / `ReasoningPart.raw` | 保留或降级 | `preserved_only` | 第一版不做完整互转 |
+| Claude Messages | `stop_sequences` | `generation.stop` | 直接映射 | `designed_supported` | 需明确入口处理 |
+| Claude Messages | metadata/user_id | `metadata.provider` | 保留 | `preserved_only` | 非核心互转语义 |
+| Gemini | `contents` / `parts` | `normalized.input.messages` | 直接支持 | `designed_supported` | 核心基础能力 |
+| Gemini | `systemInstruction` | `normalized.instructions` | 直接支持 | `designed_supported` | 顶层系统提示 |
+| Gemini | `functionDeclarations` | `normalized.tools` | 映射为 function tools | `designed_partial` | 第一版可支持基础版 |
+| Gemini | `toolConfig` | `normalized.toolChoice.raw` | 保留或部分转换 | `preserved_only` | 第一版可不完整实现 |
+| Gemini | `safetySettings` | `safety` | 非 Gemini 目标下 move_to_metadata / internal | `preserved_only` | 不能宣称等价支持 |
+| Gemini | `cachedContent` | `conversation.cachedContent` | 保留 | `preserved_only` | 不能靠 prompt 伪装 |
+| Gemini | inlineData / fileData | `ImagePart` / `FilePart` / raw | 保留或降级 | `designed_partial` | 第一版多模态仅建议基础支持 |
+| 跨协议共性 | behavior compensation | `CompatibilityState.compensations` | 白名单启用 | `designed_supported` | 现有 Responses -> Chat 已有雏形 |
+| 跨协议共性 | compatibility losses | `CompatibilityState.losses` | 全程记录 | `designed_supported` | 核心平台能力 |
+| 跨协议共性 | provider private fields | `original.body` / `metadata.provider` / `raw` | 保留 | `designed_supported` | 入口不提前丢失 |
+| 跨协议共性 | translation error vs provider error | `NormalizedError` / internal log | 必须区分 | `designed_supported` | 防止熔断和日志误判 |
+| 跨协议共性 | background task polling | `InternalResponseContext.poll` | 第一版不实现 | `unsupported` | 文档已定义，暂不开发 |
+| 跨协议共性 | full streaming lifecycle parity | `StreamEvent` | 分阶段实现 | `designed_partial` | 第一版不追求完全等价 |
+
+### 总表使用原则
+
+后续评审和开发时，必须按以下顺序判断：
+
+1. 该能力协议中是否真实存在。
+2. 文档中是否已有设计承载位置。
+3. 该能力属于 `implemented`、`designed_supported`、`designed_partial`、`preserved_only` 还是 `unsupported`。
+4. 第一版是否真的要实现。
+5. 若不实现，是保留、降级、行为补偿还是报错。
+
+一句话总结：
+
+> 这张总表的目的，不是让第一版什么都做，而是保证“所有重要协议能力都已经被看见、被分类、被安置”。
+

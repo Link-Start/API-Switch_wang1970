@@ -295,13 +295,15 @@ export const apiAdapter: ApiAdapter = {
         ? tauriCmd<ApiEntry[]>('list_entries')
         : webRequest<ApiEntry[]>('GET', '/pool'),
 
-    listPaginated: ({ page, pageSize, groupName }) =>
+    listPaginated: ({ page, pageSize, groupName, search, channelId }) =>
       useTauri()
-        ? tauriCmd<PaginatedResult<ApiEntry>>('list_entries_paginated', { page, pageSize, groupName })
+        ? tauriCmd<PaginatedResult<ApiEntry>>('list_entries_paginated', { page, pageSize, groupName, search, channelId })
         : webRequest<PaginatedResult<ApiEntry>>('GET', '/pool/paginated', undefined, {
             page,
             page_size: pageSize,
             group_name: groupName,
+            search,
+            channel_id: channelId,
           }),
 
     toggle: (id, enabled) =>

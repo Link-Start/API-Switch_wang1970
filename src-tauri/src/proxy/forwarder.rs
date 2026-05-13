@@ -1495,6 +1495,7 @@ async fn disable_entry(state: &ProxyState, entry: &ApiEntry) {
     let _ = state.db.toggle_entry(&entry.id, false);
     let _ = state.db.set_entry_cooldown(&entry.id, Some(cooldown_until));
     if let Some(h) = &state.app_handle { let _ = h.emit("entries-changed", ()); }
+    crate::state_version::bump();
     refresh_tray(&state.app_handle);
 
     let mut breakers = state.circuit_breakers.write().await;
@@ -1504,6 +1505,7 @@ async fn disable_entry(state: &ProxyState, entry: &ApiEntry) {
 async fn record_circuit_success(state: &ProxyState, entry_id: &str) {
     let _ = state.db.set_entry_cooldown(entry_id, None);
     if let Some(h) = &state.app_handle { let _ = h.emit("entries-changed", ()); }
+    crate::state_version::bump();
     refresh_tray(&state.app_handle);
 
     // Clear failure count
@@ -1537,6 +1539,7 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
         let _ = state.db.set_entry_cooldown(&entry.id, Some(six_hours_later));
         let _ = state.db.toggle_entry(&entry.id, false);
         if let Some(h) = &state.app_handle { let _ = h.emit("entries-changed", ()); }
+        crate::state_version::bump();
         refresh_tray(&state.app_handle);
 
         let mut breakers = state.circuit_breakers.write().await;
@@ -1553,6 +1556,7 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
     let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs as i64;
     let _ = state.db.set_entry_cooldown(&entry.id, Some(cooldown_until));
     if let Some(h) = &state.app_handle { let _ = h.emit("entries-changed", ()); }
+    crate::state_version::bump();
     refresh_tray(&state.app_handle);
 
     let mut breakers = state.circuit_breakers.write().await;
@@ -1586,6 +1590,7 @@ fn spawn_record_circuit_success(
 
         let _ = db.set_entry_cooldown(&entry_id, None);
         if let Some(h) = &app_handle { let _ = h.emit("entries-changed", ()); }
+        crate::state_version::bump();
         refresh_tray(&app_handle);
 
         // Clear failure count
@@ -1627,6 +1632,7 @@ fn spawn_cool_down_entry(
             let _ = db.set_entry_cooldown(&entry_id, Some(six_hours_later));
             let _ = db.toggle_entry(&entry_id, false);
             if let Some(h) = &app_handle { let _ = h.emit("entries-changed", ()); }
+            crate::state_version::bump();
             refresh_tray(&app_handle);
 
             let mut breakers = circuit_breakers.write().await;
@@ -1643,6 +1649,7 @@ fn spawn_cool_down_entry(
         let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs as i64;
         let _ = db.set_entry_cooldown(&entry_id, Some(cooldown_until));
         if let Some(h) = &app_handle { let _ = h.emit("entries-changed", ()); }
+        crate::state_version::bump();
         refresh_tray(&app_handle);
 
         let mut breakers = circuit_breakers.write().await;
@@ -1722,6 +1729,7 @@ fn log_usage(
     );
 
     if let Some(h) = app_handle { let _ = h.emit("new-usage-log", ()); }
+    crate::state_version::bump();
 }
 
 #[cfg(test)]

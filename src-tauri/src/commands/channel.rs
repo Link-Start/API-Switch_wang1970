@@ -121,6 +121,7 @@ pub fn create_channel(
         },
     )?;
     let _ = app.emit("channels-changed", ());
+    crate::state_version::bump();
     Ok(channel)
 }
 
@@ -253,6 +254,7 @@ pub fn select_models(
         .sync_entries_for_channel_with_meta(&channel_id, &model_names, &catalog_meta)?;
     let _ = app.emit("entries-changed", ());
     let _ = app.emit("channels-changed", ());
+    crate::state_version::bump();
     crate::refresh_tray_if_enabled(&app);
     Ok(())
 }

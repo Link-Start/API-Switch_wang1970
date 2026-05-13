@@ -232,6 +232,7 @@ pub fn update_channel(
         let _ = app.emit("channels-changed", ());
         crate::refresh_tray_if_enabled(app);
     }
+    crate::state_version::bump();
     db.get_channel(&params.id)
 }
 
@@ -245,6 +246,7 @@ pub fn delete_channel(
         let _ = app.emit("channels-changed", ());
         crate::refresh_tray_if_enabled(app);
     }
+    crate::state_version::bump();
     Ok(())
 }
 

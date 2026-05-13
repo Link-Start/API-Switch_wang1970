@@ -15,6 +15,12 @@ pub async fn version() -> axum::Json<serde_json::Value> {
     }))
 }
 
+pub async fn state_version() -> axum::Json<crate::state_version::StateVersionResponse> {
+    axum::Json(crate::state_version::StateVersionResponse {
+        version: crate::state_version::current(),
+    })
+}
+
 #[derive(Deserialize)]
 pub struct LoginRequest {
     username: String,

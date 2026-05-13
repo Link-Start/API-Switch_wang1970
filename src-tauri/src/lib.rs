@@ -5,6 +5,7 @@ mod error;
 mod proxy;
 mod runtime_mode;
 mod services;
+mod state_version;
 
 use admin::AdminServer;
 use database::{AppSettings, Database};
@@ -374,6 +375,7 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
 
                 // Notify frontend to refresh API Pool list
                 let _ = app.emit("tray-priority-changed", ());
+                crate::state_version::bump();
             }
         }
     }

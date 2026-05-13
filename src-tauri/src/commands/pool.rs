@@ -66,6 +66,7 @@ pub fn toggle_entry(
 ) -> Result<(), AppError> {
     pool_service::toggle_entry(&state.db, &state.failure_counts, &id, enabled)?;
     let _ = app.emit("entries-changed", ());
+    crate::state_version::bump();
     crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
@@ -78,6 +79,7 @@ pub fn reorder_entries(
 ) -> Result<(), AppError> {
     pool_service::reorder_entries(&state.db, &ordered_ids)?;
     let _ = app.emit("entries-changed", ());
+    crate::state_version::bump();
     crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
@@ -90,6 +92,7 @@ pub fn delete_entry(
 ) -> Result<(), AppError> {
     pool_service::delete_entry(&state.db, &id)?;
     let _ = app.emit("entries-changed", ());
+    crate::state_version::bump();
     crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
@@ -102,6 +105,7 @@ pub fn create_entry(
 ) -> Result<ApiEntry, AppError> {
     let entry = pool_service::create_entry(&state.db, params.into())?;
     let _ = app.emit("entries-changed", ());
+    crate::state_version::bump();
     crate::refresh_tray_if_enabled(&app);
     Ok(entry)
 }
@@ -168,6 +172,7 @@ pub fn update_entry_group(
 ) -> Result<(), AppError> {
     pool_service::update_entry_group(&state.db, &id, &group_name)?;
     let _ = app.emit("entries-changed", ());
+    crate::state_version::bump();
     crate::refresh_tray_if_enabled(&app);
     Ok(())
 }

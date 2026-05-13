@@ -2,7 +2,7 @@ import { useState, useEffect, Suspense, lazy, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { WelcomeGuide } from "@/components/WelcomeGuide";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { MainShell, type MainPage } from "@/features/shell/MainShell";
 import { useApiAdapter, isTauriRuntime } from "@/lib/useApiAdapter";
@@ -44,6 +44,22 @@ function MainApp({ onLogout }: { onLogout?: () => void }) {
   const { data: adminStatus } = useQuery({
     queryKey: ["adminStatus"],
     queryFn: () => api.getAdminStatus(),
+    refetchInterval: 2000,
+  });
+
+  // 全局状态版本轮询：后端数据变更时自动刷新 UI
+  const queryClient = useQueryClient();
+  const lastVersion = useRef<number | null>(null);
+  useQuery({
+    queryKey: ["state-version"],
+    queryFn: async () => {
+      const res = await api.getStateVersion();
+      if (lastVersion.current !== null && res.version !== lastVersion.current) {
+        queryClient.invalidateQueries();
+      }
+      lastVersion.current = res.version;
+      return res;
+    },
     refetchInterval: 2000,
   });
 

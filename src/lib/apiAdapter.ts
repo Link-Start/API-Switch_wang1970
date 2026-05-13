@@ -53,6 +53,7 @@ settings: {
   };
   getVersion(): Promise<{ version: string }>;
   getAdminStatus(): Promise<AdminStatus>;
+  getStateVersion(): Promise<{ version: number }>;
 }
 
 // Types referenced above – import from shared definitions

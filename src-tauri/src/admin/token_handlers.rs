@@ -1,8 +1,9 @@
 use crate::admin::error::AdminError;
 use crate::admin::state::AdminState;
+use crate::database::dao::PaginatedResult;
 use crate::database::AccessKey;
 use crate::services::token_service;
-use axum::extract::{Json, Path, State};
+use axum::extract::{Json, Path, Query, State};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -16,6 +17,24 @@ pub async fn list_tokens(
     State(state): State<AdminState>,
 ) -> Result<Json<Vec<AccessKey>>, AdminError> {
     let keys = token_service::list_access_keys(&state.db)?;
+    Ok(Json(keys))
+}
+
+#[derive(Deserialize)]
+pub struct TokenPageParams {
+    pub page: Option<i32>,
+    pub page_size: Option<i32>,
+}
+
+pub async fn list_tokens_paginated(
+    State(state): State<AdminState>,
+    Query(params): Query<TokenPageParams>,
+) -> Result<Json<PaginatedResult<AccessKey>>, AdminError> {
+    let keys = token_service::list_access_keys_paginated(
+        &state.db,
+        params.page.unwrap_or(1),
+        params.page_size.unwrap_or(20),
+    )?;
     Ok(Json(keys))
 }
 

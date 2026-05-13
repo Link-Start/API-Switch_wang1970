@@ -1,6 +1,7 @@
 export interface ApiAdapter {
   channels: {
     list(): Promise<Channel[]>;
+    listPaginated(params: { page: number; pageSize: number }): Promise<PaginatedResult<Channel>>;
     create(params: CreateChannelParams): Promise<Channel>;
     update(params: UpdateChannelParams): Promise<Channel>;
     delete(id: string): Promise<void>;
@@ -21,6 +22,7 @@ export interface ApiAdapter {
   };
   pool: {
     list(): Promise<ApiEntry[]>;
+    listPaginated(params: { page: number; pageSize: number; groupName?: string }): Promise<PaginatedResult<ApiEntry>>;
     toggle(id: string, enabled: boolean): Promise<void>;
     reorder(orderedIds: string[]): Promise<void>;
     create(params: { channelId: string; model: string; displayName?: string; groupName?: string }): Promise<ApiEntry>;
@@ -32,6 +34,7 @@ export interface ApiAdapter {
   };
   tokens: {
     list(): Promise<AccessKey[]>;
+    listPaginated(params: { page: number; pageSize: number }): Promise<PaginatedResult<AccessKey>>;
     create(name: string): Promise<AccessKey>;
     delete(id: string): Promise<void>;
     toggle(id: string, enabled: boolean): Promise<void>;

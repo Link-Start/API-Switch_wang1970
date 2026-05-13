@@ -5,12 +5,13 @@ use crate::admin::error::{
     ERROR_CODE_TIMEOUT, ERROR_CODE_UNSUPPORTED_PROVIDER,
 };
 use crate::admin::state::AdminState;
+use crate::database::dao::PaginatedResult;
 use crate::database::{Channel, ModelInfo};
 use crate::services::channel_service;
 use crate::services::channel_service::{
     ChannelOperationError, FetchModelsResult, ProbeResult, TestChannelResult,
 };
-use axum::extract::{Json, Path, State};
+use axum::extract::{Json, Path, Query, State};
 use serde::Deserialize;
 
 // Types for request bodies – reuse the same definitions as in the Tauri commands
@@ -123,6 +124,24 @@ fn ensure_probe_result(result: ProbeResult) -> Result<ProbeResult, AdminError> {
 
 pub async fn list(State(state): State<AdminState>) -> Result<Json<Vec<Channel>>, AdminError> {
     let res = channel_service::list_channels(&state.db)?;
+    Ok(Json(res))
+}
+
+#[derive(Deserialize)]
+pub struct SimplePageParams {
+    pub page: Option<i32>,
+    pub page_size: Option<i32>,
+}
+
+pub async fn list_paginated(
+    State(state): State<AdminState>,
+    Query(params): Query<SimplePageParams>,
+) -> Result<Json<PaginatedResult<Channel>>, AdminError> {
+    let res = channel_service::list_channels_paginated(
+        &state.db,
+        params.page.unwrap_or(1),
+        params.page_size.unwrap_or(20),
+    )?;
     Ok(Json(res))
 }
 

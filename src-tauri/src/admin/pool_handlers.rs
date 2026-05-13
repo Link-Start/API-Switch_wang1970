@@ -1,8 +1,9 @@
 use crate::admin::error::AdminError;
 use crate::admin::state::AdminState;
+use crate::database::dao::PaginatedResult;
 use crate::database::ApiEntry;
 use crate::services::pool_service;
-use axum::extract::{Json, Path, State};
+use axum::extract::{Json, Path, Query, State};
 use serde::Deserialize;
 
 // ---------- Request/Response Types -----------------------------------------
@@ -45,6 +46,27 @@ pub struct ReorderParams {
 /// GET /admin/pool - List all API entries
 pub async fn list(State(state): State<AdminState>) -> Result<Json<Vec<ApiEntry>>, AdminError> {
     let entries = pool_service::list_entries(&state.db)?;
+    Ok(Json(entries))
+}
+
+#[derive(Deserialize)]
+pub struct PoolPageParams {
+    pub page: Option<i32>,
+    pub page_size: Option<i32>,
+    pub group_name: Option<String>,
+}
+
+/// GET /admin/pool/paginated - List API entries with pagination
+pub async fn list_paginated(
+    State(state): State<AdminState>,
+    Query(params): Query<PoolPageParams>,
+) -> Result<Json<PaginatedResult<ApiEntry>>, AdminError> {
+    let entries = pool_service::list_entries_paginated(
+        &state.db,
+        params.page.unwrap_or(1),
+        params.page_size.unwrap_or(20),
+        params.group_name.as_deref(),
+    )?;
     Ok(Json(entries))
 }
 

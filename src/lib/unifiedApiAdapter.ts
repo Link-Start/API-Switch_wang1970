@@ -203,6 +203,14 @@ export const apiAdapter: ApiAdapter = {
         ? tauriCmd<Channel[]>('list_channels')
         : webRequest<Channel[]>('GET', '/channels'),
 
+    listPaginated: ({ page, pageSize }) =>
+      useTauri()
+        ? tauriCmd<PaginatedResult<Channel>>('list_channels_paginated', { page, pageSize })
+        : webRequest<PaginatedResult<Channel>>('GET', '/channels/paginated', undefined, {
+            page,
+            page_size: pageSize,
+          }),
+
     create: (params) =>
       useTauri()
         ? tauriCmd<Channel>('create_channel', { params })
@@ -287,6 +295,15 @@ export const apiAdapter: ApiAdapter = {
         ? tauriCmd<ApiEntry[]>('list_entries')
         : webRequest<ApiEntry[]>('GET', '/pool'),
 
+    listPaginated: ({ page, pageSize, groupName }) =>
+      useTauri()
+        ? tauriCmd<PaginatedResult<ApiEntry>>('list_entries_paginated', { page, pageSize, groupName })
+        : webRequest<PaginatedResult<ApiEntry>>('GET', '/pool/paginated', undefined, {
+            page,
+            page_size: pageSize,
+            group_name: groupName,
+          }),
+
     toggle: (id, enabled) =>
       useTauri()
         ? tauriCmd<void>('toggle_entry', { id, enabled })
@@ -360,6 +377,14 @@ export const apiAdapter: ApiAdapter = {
       useTauri()
         ? tauriCmd<AccessKey[]>('list_access_keys')
         : webRequest<AccessKey[]>('GET', '/tokens'),
+
+    listPaginated: ({ page, pageSize }) =>
+      useTauri()
+        ? tauriCmd<PaginatedResult<AccessKey>>('list_access_keys_paginated', { page, pageSize })
+        : webRequest<PaginatedResult<AccessKey>>('GET', '/tokens/paginated', undefined, {
+            page,
+            page_size: pageSize,
+          }),
 
     create: (name) =>
       useTauri()

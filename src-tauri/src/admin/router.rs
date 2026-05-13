@@ -29,6 +29,7 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/admin/channels",
             get(channel_handlers::list).post(channel_handlers::create),
         )
+        .route("/admin/channels/paginated", get(channel_handlers::list_paginated))
         .route(
             "/admin/channels/:id",
             get(channel_handlers::list)
@@ -64,6 +65,7 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/admin/pool",
             get(pool_handlers::list).post(pool_handlers::create),
         )
+        .route("/admin/pool/paginated", get(pool_handlers::list_paginated))
         .route("/admin/pool/:id/toggle", put(pool_handlers::toggle))
         .route("/admin/pool/:id", delete(pool_handlers::delete))
         .route("/admin/pool/reorder", post(pool_handlers::reorder))
@@ -82,6 +84,7 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/admin/tokens",
             get(token_handlers::list_tokens).post(token_handlers::create_token),
         )
+        .route("/admin/tokens/paginated", get(token_handlers::list_tokens_paginated))
         .route("/admin/tokens/:id", delete(token_handlers::delete_token))
         .route(
             "/admin/tokens/:id/toggle",

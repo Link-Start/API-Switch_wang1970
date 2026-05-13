@@ -72,7 +72,7 @@ pub async fn start(
         port,
         runtime.db.clone(),
         runtime.settings.clone(),
-        app_handle.clone(),
+Some(app_handle.clone()),
         runtime.failure_counts.clone(),
     );
 

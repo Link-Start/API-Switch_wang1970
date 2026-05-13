@@ -1,3 +1,4 @@
+use crate::database::dao::PaginatedResult;
 use crate::database::{ApiEntry, Database, EntryCatalogMetaInput};
 use crate::error::AppError;
 use crate::proxy::protocol::get_adapter;
@@ -40,6 +41,15 @@ pub struct TestLatencyResult {
 /// List all API entries from the database.
 pub fn list_entries(db: &Database) -> Result<Vec<ApiEntry>, AppError> {
     db.list_entries()
+}
+
+pub fn list_entries_paginated(
+    db: &Database,
+    page: i32,
+    page_size: i32,
+    group_name: Option<&str>,
+) -> Result<PaginatedResult<ApiEntry>, AppError> {
+    db.list_entries_paginated(page, page_size, group_name)
 }
 
 /// Toggle an entry's enabled state.

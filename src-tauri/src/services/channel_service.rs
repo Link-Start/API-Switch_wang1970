@@ -5,6 +5,7 @@ use crate::admin::{
     ERROR_CODE_INVALID_URL, ERROR_CODE_RATE_LIMITED, ERROR_CODE_TIMEOUT,
     ERROR_CODE_UNSUPPORTED_PROVIDER,
 };
+use crate::database::dao::PaginatedResult;
 use crate::database::{Channel, Database, ModelInfo};
 use crate::error::AppError;
 use crate::proxy::protocol::get_adapter;
@@ -199,6 +200,14 @@ pub fn update_channel_response_ms(
 
 pub fn list_channels(db: &Database) -> Result<Vec<Channel>, AppError> {
     db.list_channels()
+}
+
+pub fn list_channels_paginated(
+    db: &Database,
+    page: i32,
+    page_size: i32,
+) -> Result<PaginatedResult<Channel>, AppError> {
+    db.list_channels_paginated(page, page_size)
 }
 
 pub fn create_channel(db: &Database, params: CreateChannelParams) -> Result<Channel, AppError> {

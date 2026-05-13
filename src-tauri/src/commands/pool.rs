@@ -1,3 +1,4 @@
+use crate::database::dao::PaginatedResult;
 use crate::database::ApiEntry;
 use crate::error::AppError;
 use crate::services::pool_service;
@@ -55,6 +56,16 @@ impl From<CreateEntryParams> for pool_service::CreateEntryParams {
 #[tauri::command]
 pub fn list_entries(state: State<'_, AppState>) -> Result<Vec<ApiEntry>, AppError> {
     pool_service::list_entries(&state.db)
+}
+
+#[tauri::command]
+pub fn list_entries_paginated(
+    state: State<'_, AppState>,
+    page: i32,
+    page_size: i32,
+    group_name: Option<String>,
+) -> Result<PaginatedResult<ApiEntry>, AppError> {
+    pool_service::list_entries_paginated(&state.db, page, page_size, group_name.as_deref())
 }
 
 #[tauri::command]

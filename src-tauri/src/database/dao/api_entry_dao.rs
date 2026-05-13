@@ -1,5 +1,7 @@
+use crate::database::dao::PaginatedResult;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
+use rusqlite::params_from_iter;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,6 +144,62 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(entries)
+    }
+
+    pub fn list_entries_paginated(
+        &self,
+        page: i32,
+        page_size: i32,
+        group_name: Option<&str>,
+    ) -> Result<PaginatedResult<ApiEntry>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let page = page.max(1);
+        let page_size = page_size.max(1).min(100);
+        let offset = (page - 1) * page_size;
+
+        let mut where_clauses = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+        if let Some(gn) = group_name {
+            where_clauses.push(format!("e.group_name = ?{}", params.len() + 1));
+            params.push(Box::new(gn.to_string()));
+        }
+
+        let where_str = if where_clauses.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", where_clauses.join(" AND "))
+        };
+
+        // Count
+        let count_sql = format!("SELECT COUNT(*) FROM api_entries e {where_str}");
+        let total: i64 = conn.query_row(&count_sql, params_from_iter(params.iter()), |row| {
+            row.get(0)
+        })?;
+
+        // Query
+        let query_sql = format!(
+            "{} {} ORDER BY e.sort_index, e.created_at LIMIT ?{} OFFSET ?{}",
+            ENTRY_SELECT_WITH_CHANNEL,
+            where_str,
+            params.len() + 1,
+            params.len() + 2
+        );
+        params.push(Box::new(page_size));
+        params.push(Box::new(offset));
+
+        let mut stmt = conn.prepare(&query_sql)?;
+        let entries = stmt
+            .query_map(params_from_iter(params.iter()), |row| row_to_entry(row, true))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        Ok(PaginatedResult {
+            items: entries,
+            total,
+            page,
+            page_size,
+        })
     }
 
     pub fn create_entry(

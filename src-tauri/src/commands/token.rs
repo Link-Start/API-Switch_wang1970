@@ -1,3 +1,4 @@
+use crate::database::dao::PaginatedResult;
 use crate::database::AccessKey;
 use crate::error::AppError;
 use crate::services::token_service;
@@ -7,6 +8,15 @@ use tauri::{AppHandle, State};
 #[tauri::command]
 pub fn list_access_keys(state: State<'_, AppState>) -> Result<Vec<AccessKey>, AppError> {
     token_service::list_access_keys(&state.db)
+}
+
+#[tauri::command]
+pub fn list_access_keys_paginated(
+    state: State<'_, AppState>,
+    page: i32,
+    page_size: i32,
+) -> Result<PaginatedResult<AccessKey>, AppError> {
+    token_service::list_access_keys_paginated(&state.db, page, page_size)
 }
 
 #[tauri::command]

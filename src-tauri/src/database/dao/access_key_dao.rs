@@ -1,3 +1,4 @@
+use crate::database::dao::PaginatedResult;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,48 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(keys)
+    }
+
+    pub fn list_access_keys_paginated(
+        &self,
+        page: i32,
+        page_size: i32,
+    ) -> Result<PaginatedResult<AccessKey>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let page = page.max(1);
+        let page_size = page_size.max(1).min(100);
+        let offset = (page - 1) * page_size;
+
+        let total: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM access_keys",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, name, key, enabled, created_at FROM access_keys ORDER BY created_at LIMIT ?1 OFFSET ?2",
+        )?;
+
+        let keys = stmt
+            .query_map(rusqlite::params![page_size, offset], |row| {
+                let enabled: i32 = row.get(3)?;
+                Ok(AccessKey {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    key: row.get(2)?,
+                    enabled: enabled != 0,
+                    created_at: row.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        Ok(PaginatedResult {
+            items: keys,
+            total,
+            page,
+            page_size,
+        })
     }
 
     pub fn create_access_key(&self, name: &str) -> Result<AccessKey, AppError> {

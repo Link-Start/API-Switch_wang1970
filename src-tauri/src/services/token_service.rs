@@ -1,9 +1,18 @@
+use crate::database::dao::PaginatedResult;
 use crate::database::{AccessKey, Database};
 use crate::error::AppError;
 
 /// List all access keys
 pub fn list_access_keys(db: &Database) -> Result<Vec<AccessKey>, AppError> {
     db.list_access_keys()
+}
+
+pub fn list_access_keys_paginated(
+    db: &Database,
+    page: i32,
+    page_size: i32,
+) -> Result<PaginatedResult<AccessKey>, AppError> {
+    db.list_access_keys_paginated(page, page_size)
 }
 
 /// Create a new access key

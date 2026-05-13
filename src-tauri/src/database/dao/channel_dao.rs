@@ -1,5 +1,7 @@
+use crate::database::dao::PaginatedResult;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
+use rusqlite::params_from_iter;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +65,62 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(channels)
+    }
+
+    pub fn list_channels_paginated(
+        &self,
+        page: i32,
+        page_size: i32,
+    ) -> Result<PaginatedResult<Channel>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let page = page.max(1);
+        let page_size = page_size.max(1).min(100);
+        let offset = (page - 1) * page_size;
+
+        let total: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM channels",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, name, api_type, base_url, api_key, available_models, selected_models,
+                    enabled, last_fetch_at, notes, response_ms, created_at, updated_at
+             FROM channels ORDER BY created_at LIMIT ?1 OFFSET ?2",
+        )?;
+
+        let channels = stmt
+            .query_map(rusqlite::params![page_size, offset], |row| {
+                let available_models_str: String = row.get(5)?;
+                let selected_models_str: String = row.get(6)?;
+                let enabled: i32 = row.get(7)?;
+
+                Ok(Channel {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    api_type: row.get(2)?,
+                    base_url: row.get(3)?,
+                    api_key: row.get(4)?,
+                    available_models: serde_json::from_str(&available_models_str)
+                        .unwrap_or_default(),
+                    selected_models: serde_json::from_str(&selected_models_str).unwrap_or_default(),
+                    enabled: enabled != 0,
+                    last_fetch_at: row.get(8)?,
+                    notes: row.get(9)?,
+                    response_ms: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        Ok(PaginatedResult {
+            items: channels,
+            total,
+            page,
+            page_size,
+        })
     }
 
     pub fn create_channel(

@@ -1,3 +1,4 @@
+use crate::database::dao::PaginatedResult;
 use crate::database::{Channel, ModelInfo};
 use crate::error::AppError;
 use crate::services::channel_service::{self, FetchModelsResult, ProbeResult, TestChannelResult};
@@ -102,6 +103,15 @@ pub fn update_channel_response_ms(
 #[tauri::command]
 pub fn list_channels(state: State<'_, AppState>) -> Result<Vec<Channel>, AppError> {
     channel_service::list_channels(&state.db)
+}
+
+#[tauri::command]
+pub fn list_channels_paginated(
+    state: State<'_, AppState>,
+    page: i32,
+    page_size: i32,
+) -> Result<PaginatedResult<Channel>, AppError> {
+    channel_service::list_channels_paginated(&state.db, page, page_size)
 }
 
 #[tauri::command]

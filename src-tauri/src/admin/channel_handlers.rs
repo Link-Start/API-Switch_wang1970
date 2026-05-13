@@ -24,9 +24,8 @@ pub struct CreateChannelParams {
     pub notes: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct UpdateChannelParams {
-    pub _id: String,
     pub name: Option<String>,
     pub api_type: Option<String>,
     pub base_url: Option<String>,

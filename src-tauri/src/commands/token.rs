@@ -25,7 +25,7 @@ pub fn create_access_key(state: State<'_, AppState>, name: String) -> Result<Acc
 }
 
 #[tauri::command]
-pub fn delete_access_key(
+pub async fn delete_access_key(
     app: AppHandle,
     state: State<'_, AppState>,
     id: String,
@@ -34,7 +34,7 @@ pub fn delete_access_key(
 }
 
 #[tauri::command]
-pub fn toggle_access_key(
+pub async fn toggle_access_key(
     app: AppHandle,
     state: State<'_, AppState>,
     id: String,

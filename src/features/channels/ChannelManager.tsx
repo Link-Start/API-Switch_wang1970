@@ -236,7 +236,7 @@ export const ChannelManager: React.FC = () => {
   });
 
   const refreshChannels = async () => {
-    await queryClient.refetchQueries({ queryKey: ["channels", "paginated"] });
+    queryClient.invalidateQueries({ queryKey: ["channels", "paginated"] });
   };
 
   const openCreate = () => {
@@ -517,7 +517,9 @@ function ChannelRow({
       await api.channels.update({ id: channel.id, enabled: !channel.enabled });
       await onChanged();
     } catch (err) {
-      setRowError(getChannelErrorMessage(err, t('channel.editor.saveStatusFailed', '保存渠道状态失败')));
+      const msg = (err && typeof err === 'object' && 'message' in err) ? String((err as {message:unknown}).message) : String(err);
+      console.error('[toggleEnabled]', err);
+      toast.error(msg || t('channel.editor.saveStatusFailed', '保存渠道状态失败'));
     } finally {
       setSaving(false);
     }

@@ -78,7 +78,7 @@ pub fn list_entries_paginated(
 }
 
 #[tauri::command]
-pub fn toggle_entry(
+pub async fn toggle_entry(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     id: String,
@@ -94,7 +94,7 @@ pub fn toggle_entry(
 /// Batch toggle entries: single IPC call to toggle multiple entries.
 /// Prevents Tauri IPC storm when user shift+clicks to toggle all visible entries.
 #[tauri::command]
-pub fn batch_toggle_entries(
+pub async fn batch_toggle_entries(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     ids: Vec<String>,
@@ -108,7 +108,7 @@ pub fn batch_toggle_entries(
 }
 
 #[tauri::command]
-pub fn reorder_entries(
+pub async fn reorder_entries(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     ordered_ids: Vec<String>,
@@ -121,7 +121,7 @@ pub fn reorder_entries(
 }
 
 #[tauri::command]
-pub fn delete_entry(
+pub async fn delete_entry(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     id: String,
@@ -134,7 +134,7 @@ pub fn delete_entry(
 }
 
 #[tauri::command]
-pub fn create_entry(
+pub async fn create_entry(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     params: CreateEntryParams,
@@ -147,7 +147,7 @@ pub fn create_entry(
 }
 
 #[tauri::command]
-pub fn backfill_entry_catalog_meta(
+pub async fn backfill_entry_catalog_meta(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     items: Vec<EntryCatalogMetaUpdate>,
@@ -185,7 +185,7 @@ pub async fn test_entry_latency(
 }
 
 #[tauri::command]
-pub fn update_entry_response_ms(
+pub async fn update_entry_response_ms(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     entry_id: String,
@@ -204,7 +204,7 @@ pub fn get_all_groups(state: State<'_, AppState>) -> Result<Vec<String>, AppErro
 }
 
 #[tauri::command]
-pub fn update_entry_group(
+pub async fn update_entry_group(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     id: String,

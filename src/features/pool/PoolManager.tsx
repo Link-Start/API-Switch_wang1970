@@ -559,6 +559,7 @@ export function PoolManager() {
         channelId: filterChannel !== "all" ? filterChannel : undefined,
         search: debouncedFilter.trim() || undefined,
       }) as Promise<PaginatedResult<ApiEntry>>,
+    placeholderData: (previousData) => previousData,
     getNextPageParam: (lastPage) =>
       lastPage.page * lastPage.page_size < lastPage.total ? lastPage.page + 1 : undefined,
     initialPageParam: 1,
@@ -598,11 +599,10 @@ export function PoolManager() {
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  // 过滤条件变化时滚到顶部，避免中间位置出现“无显示”错觉
+  // 过滤条件变化时清除本地排序
   useEffect(() => {
     setLocalOrder(null);
-    window.scrollTo({ top: 0, behavior: "auto" });
-  }, [groupFilter, filterText, filterChannel]);
+  }, [groupFilter, debouncedFilter, filterChannel]);
 
    // Desktop-only: Real-time tray reprioritisation via Tauri event.
    // This hook is a no-op on web builds (useTauriEvent returns false).

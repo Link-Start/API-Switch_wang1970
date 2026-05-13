@@ -136,7 +136,7 @@ pub fn create_channel(
 }
 
 #[tauri::command]
-pub fn update_channel(
+pub async fn update_channel(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     params: UpdateChannelParams,
@@ -157,7 +157,7 @@ pub fn update_channel(
 }
 
 #[tauri::command]
-pub fn delete_channel(
+pub async fn delete_channel(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     id: String,
@@ -240,7 +240,7 @@ pub async fn fetch_models(
 }
 
 #[tauri::command]
-pub fn select_models(
+pub async fn select_models(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     channel_id: String,

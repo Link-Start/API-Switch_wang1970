@@ -45,6 +45,7 @@ pub struct ApiEntry {
 #[derive(Debug, Clone, Deserialize)]
 pub struct EntryCatalogMetaInput {
     pub id: String,
+    pub display_name: String,
     pub provider_logo: String,
     pub release_date: String,
     pub model_meta_zh: String,
@@ -54,6 +55,8 @@ pub struct EntryCatalogMetaInput {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelCatalogMetaInput {
     pub model: String,
+    #[serde(default)]
+    pub display_name: String,
     pub provider_logo: String,
     pub release_date: String,
     pub model_meta_zh: String,
@@ -402,11 +405,13 @@ impl Database {
         {
             let mut stmt = tx.prepare(
                 "UPDATE api_entries
-                 SET provider_logo = ?1, release_date = ?2, model_meta_zh = ?3, model_meta_en = ?4, updated_at = ?5
-                 WHERE id = ?6"
+                 SET display_name = ?1, provider_logo = ?2, release_date = ?3,
+                     model_meta_zh = ?4, model_meta_en = ?5, updated_at = ?6
+                 WHERE id = ?7"
             )?;
             for item in items {
                 stmt.execute(rusqlite::params![
+                    item.display_name,
                     item.provider_logo,
                     item.release_date,
                     item.model_meta_zh,
@@ -485,12 +490,13 @@ impl Database {
             let meta = catalog_meta.iter().find(|item| item.model == *model);
             if !current_models.contains(model) {
                 let id = uuid::Uuid::new_v4().to_string();
+                let alias = meta.map(|m| m.display_name.as_str()).filter(|s| !s.is_empty()).unwrap_or(model);
                 conn.execute(
                     "INSERT INTO api_entries (
                     id, channel_id, model, display_name, sort_index, enabled,
                     provider_logo, release_date, model_meta_zh, model_meta_en, group_name,
                     created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?3, ?4, 1, ?5, ?6, ?7, ?8, 'auto', ?9, ?9)",
+                ) VALUES (?1, ?2, ?3, ?10, ?4, 1, ?5, ?6, ?7, ?8, 'auto', ?9, ?9)",
                     rusqlite::params![
                         id,
                         channel_id,
@@ -501,15 +507,19 @@ impl Database {
                         meta.map(|m| m.model_meta_zh.as_str()).unwrap_or(""),
                         meta.map(|m| m.model_meta_en.as_str()).unwrap_or(""),
                         now,
+                        alias,
                     ],
                 )?;
                 next_sort += 1;
             } else if let Some(meta) = meta {
+                let alias = if meta.display_name.is_empty() { model.as_str() } else { &meta.display_name };
                 conn.execute(
                     "UPDATE api_entries
-                     SET provider_logo = ?1, release_date = ?2, model_meta_zh = ?3, model_meta_en = ?4, updated_at = ?5
-                     WHERE channel_id = ?6 AND model = ?7",
+                     SET display_name = ?1, provider_logo = ?2, release_date = ?3,
+                         model_meta_zh = ?4, model_meta_en = ?5, updated_at = ?6
+                     WHERE channel_id = ?7 AND model = ?8",
                     rusqlite::params![
+                        alias,
                         meta.provider_logo,
                         meta.release_date,
                         meta.model_meta_zh,

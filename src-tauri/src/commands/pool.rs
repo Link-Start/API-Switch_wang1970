@@ -32,6 +32,7 @@ pub struct CreateEntryParams {
 #[derive(Deserialize)]
 pub struct EntryCatalogMetaUpdate {
     pub id: String,
+    pub display_name: String,
     pub provider_logo: String,
     pub release_date: String,
     pub model_meta_zh: String,
@@ -156,6 +157,7 @@ pub async fn backfill_entry_catalog_meta(
         .into_iter()
         .map(|item| pool_service::CatalogMetaUpdate {
             id: item.id,
+            display_name: item.display_name,
             provider_logo: item.provider_logo,
             release_date: item.release_date,
             model_meta_zh: item.model_meta_zh,

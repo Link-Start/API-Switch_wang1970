@@ -29,6 +29,8 @@ pub struct CreateEntryParams {
 #[serde(rename_all = "camelCase")]
 pub struct CatalogMetaUpdate {
     pub id: String,
+    #[serde(default)]
+    pub display_name: String,
     pub provider_logo: String,
     pub release_date: String,
     pub model_meta_zh: String,
@@ -152,6 +154,7 @@ pub async fn backfill_catalog_meta(
         .into_iter()
         .map(|item| pool_service::CatalogMetaUpdate {
             id: item.id,
+            display_name: item.display_name,
             provider_logo: item.provider_logo,
             release_date: item.release_date,
             model_meta_zh: item.model_meta_zh,

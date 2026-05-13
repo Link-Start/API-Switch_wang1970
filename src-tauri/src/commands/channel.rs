@@ -9,6 +9,8 @@ use tauri::{Emitter, State};
 #[derive(Deserialize)]
 pub struct ModelCatalogMetaInput {
     pub model: String,
+    #[serde(default)]
+    pub display_name: String,
     pub provider_logo: String,
     pub release_date: String,
     pub model_meta_zh: String,
@@ -255,6 +257,7 @@ pub async fn select_models(
         .into_iter()
         .map(|item| crate::database::ModelCatalogMetaInput {
             model: item.model,
+            display_name: item.display_name,
             provider_logo: item.provider_logo,
             release_date: item.release_date,
             model_meta_zh: item.model_meta_zh,

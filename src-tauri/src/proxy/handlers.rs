@@ -34,8 +34,13 @@ async fn load_sorted_entries(
 }
 
 fn dedup_models_by_name(mut entries: Vec<crate::database::ApiEntry>) -> Vec<crate::database::ApiEntry> {
+    // 按分组+模型名校验去重，确保相同模型在不同分组下分别保留
     let mut seen = HashSet::new();
-    entries.retain(|entry| seen.insert(entry.model.to_ascii_lowercase()));
+    entries.retain(|entry| {
+        let group = entry.group_name.as_deref().unwrap_or("").to_ascii_lowercase();
+        let key = format!("{}::{}", group, entry.model.to_ascii_lowercase());
+        seen.insert(key)
+    });
     entries
 }
 
@@ -48,11 +53,18 @@ fn group_created_at(entries: &[crate::database::ApiEntry], group: &str) -> i64 {
 }
 
 fn openai_model_item(entry: &crate::database::ApiEntry) -> Value {
+    let alias = if entry.display_name.trim().is_empty() {
+        entry.model.clone()
+    } else {
+        entry.display_name.clone()
+    };
     json!({
         "id": entry.model,
         "object": "model",
         "created": entry_created_at(entry),
         "owned_by": entry_owned_by(entry, "openai"),
+        "display_name": alias,
+        "group_name": entry.group_name,
     })
 }
 

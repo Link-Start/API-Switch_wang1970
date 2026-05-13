@@ -34,6 +34,7 @@ export interface ModelInfo {
 
 export interface ModelCatalogMetaUpdate {
   model: string;
+  displayName?: string;
   provider_logo: string;
   release_date: string;
   model_meta_zh: string;

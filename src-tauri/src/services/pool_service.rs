@@ -26,6 +26,7 @@ pub struct CreateEntryParams {
 #[derive(Deserialize)]
 pub struct CatalogMetaUpdate {
     pub id: String,
+    pub display_name: String,
     pub provider_logo: String,
     pub release_date: String,
     pub model_meta_zh: String,
@@ -132,6 +133,7 @@ fn to_catalog_meta_inputs(items: Vec<CatalogMetaUpdate>) -> Vec<EntryCatalogMeta
         .into_iter()
         .map(|item| EntryCatalogMetaInput {
             id: item.id,
+            display_name: item.display_name,
             provider_logo: item.provider_logo,
             release_date: item.release_date,
             model_meta_zh: item.model_meta_zh,

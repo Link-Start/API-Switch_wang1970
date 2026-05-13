@@ -175,6 +175,8 @@ pub async fn test_entry_latency(
 ) -> Result<TestResult, AppError> {
     let db = state.db.clone();
     let result = pool_service::test_entry_latency(&db, &entry_id).await?;
+    let _ = app.emit("entries-changed", ());
+    crate::state_version::bump();
     crate::refresh_tray_if_enabled(&app);
     Ok(TestResult {
         status: result.status,
@@ -190,6 +192,8 @@ pub fn update_entry_response_ms(
     response_ms: String,
 ) -> Result<(), AppError> {
     pool_service::update_entry_response_ms(&state.db, &entry_id, &response_ms)?;
+    let _ = app.emit("entries-changed", ());
+    crate::state_version::bump();
     crate::refresh_tray_if_enabled(&app);
     Ok(())
 }

@@ -213,6 +213,8 @@ pub async fn test_channel(
         );
     } else {
         let _ = state.db.disable_channel(&channel_id);
+        let _ = app.emit("channels-changed", ());
+        crate::state_version::bump();
     }
 
     Ok(result)

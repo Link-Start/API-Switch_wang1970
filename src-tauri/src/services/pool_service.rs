@@ -241,7 +241,9 @@ pub async fn test_entry_latency(
 
     let response_ms = latency_ms.to_string();
     db.update_entry_response_ms(entry_id, &response_ms)?;
+    // 启用 entry 并清理冷却，确保后续自动路由能命中
     db.toggle_entry(entry_id, true)?;
+    let _ = db.set_entry_cooldown(entry_id, None);
 
     Ok(TestLatencyResult {
         status: "ok".to_string(),

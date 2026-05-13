@@ -8,7 +8,9 @@ pub fn list_access_keys(db: &Database) -> Result<Vec<AccessKey>, AppError> {
 
 /// Create a new access key
 pub fn create_access_key(db: &Database, name: &str) -> Result<AccessKey, AppError> {
-    db.create_access_key(name)
+    let key = db.create_access_key(name)?;
+    crate::state_version::bump();
+    Ok(key)
 }
 
 /// Delete an access key by ID
@@ -21,6 +23,7 @@ pub fn delete_access_key(
     if let Some(app) = app {
         crate::refresh_tray_if_enabled(app);
     }
+    crate::state_version::bump();
     Ok(())
 }
 
@@ -35,5 +38,6 @@ pub fn toggle_access_key(
     if let Some(app) = app {
         crate::refresh_tray_if_enabled(app);
     }
+    crate::state_version::bump();
     Ok(())
 }

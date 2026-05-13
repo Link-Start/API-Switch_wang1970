@@ -238,6 +238,7 @@ pub async fn patch_settings(
 
     // 5. 保存到数据库
     state.db.update_settings(&merged)?;
+    crate::state_version::bump();
 
     // 6. 更新 L1 缓存
     *state.settings.write().await = merged.clone();
@@ -310,6 +311,7 @@ pub async fn update_settings(
     }
 
     state.db.update_settings(&payload.data)?;
+    crate::state_version::bump();
     let refreshed = state.db.get_settings()?;
     *state.settings.write().await = refreshed;
 

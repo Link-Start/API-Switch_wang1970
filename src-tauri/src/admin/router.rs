@@ -125,6 +125,7 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/admin/translation-relay",
             get(translation_handlers::get_translation_relay),
         )
+        .route("/admin/state-version", get(handlers::state_version))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_auth));
 
     Router::new()
@@ -150,7 +151,6 @@ pub fn build_admin_router(state: AdminState) -> Router {
         .route("/admin/login", post(handlers::login))
         .route("/admin/health", get(handlers::health))
         .route("/admin/version", get(handlers::version))
-        .route("/admin/state-version", get(handlers::state_version))
         .merge(protected)
         .with_state(state)
         .route_layer(middleware::from_fn(apply_admin_cors))

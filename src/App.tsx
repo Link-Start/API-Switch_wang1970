@@ -55,7 +55,7 @@ function MainApp({ onLogout }: { onLogout?: () => void }) {
     queryFn: async () => {
       const res = await api.getStateVersion();
       if (lastVersion.current !== null && res.version !== lastVersion.current) {
-        queryClient.invalidateQueries();
+        queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'state-version' });
       }
       lastVersion.current = res.version;
       return res;

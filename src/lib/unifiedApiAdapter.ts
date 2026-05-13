@@ -459,7 +459,7 @@ export const apiAdapter: ApiAdapter = {
     }));
   },
   getStateVersion: () =>
-    webRequest<{ version: number }>('GET', '/admin/state-version'),
+    webRequest<{ version: number }>('GET', '/state-version'),
 };
 
 // Type import for translation relay response shape used only in the web path

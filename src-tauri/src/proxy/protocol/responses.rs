@@ -29,6 +29,61 @@ pub fn responses_sse_done() -> bytes::Bytes {
     bytes::Bytes::from("data: [DONE]\n\n")
 }
 
+// ─── Responses SSE → Chat SSE 辅助函数（上游方向） ───────────────
+
+/// 把 Responses `response.output_text.delta` 转为 Chat SSE 文本增量。
+fn chat_sse_text_delta(delta: &str) -> String {
+    serde_json::to_string(&json!({
+        "choices": [{"index": 0, "delta": {"content": delta}}]
+    }))
+    .unwrap_or_default()
+}
+
+/// 把 Responses `response.output_item.added` (function_call) 转为 Chat SSE 工具调用开始。
+fn chat_sse_tool_call_begin(output_index: u64, call_id: &str, name: &str, arguments: &str) -> String {
+    serde_json::to_string(&json!({
+        "choices": [{"index": 0, "delta": {
+            "tool_calls": [{
+                "index": output_index,
+                "id": call_id,
+                "function": {
+                    "name": name,
+                    "arguments": arguments
+                }
+            }]
+        }}]
+    }))
+    .unwrap_or_default()
+}
+
+/// 把 Responses `response.function_call_arguments.delta` 转为 Chat SSE 工具参数增量。
+fn chat_sse_tool_call_args(output_index: u64, delta: &str) -> String {
+    serde_json::to_string(&json!({
+        "choices": [{"index": 0, "delta": {
+            "tool_calls": [{
+                "index": output_index,
+                "function": {
+                    "arguments": delta
+                }
+            }]
+        }}]
+    }))
+    .unwrap_or_default()
+}
+
+/// 把 Responses `response.completed` 转为 Chat SSE 结束信号（finish_reason + usage）。
+fn chat_sse_completed(finish_reason: &str, input_tokens: i64, output_tokens: i64) -> String {
+    serde_json::to_string(&json!({
+        "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+        "usage": {
+            "prompt_tokens": input_tokens,
+            "completion_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens
+        }
+    }))
+    .unwrap_or_default()
+}
+
 pub fn responses_function_call_done_event(
     response_id: &str,
     item_id: &str,
@@ -951,10 +1006,10 @@ impl ProtocolAdapter for ResponsesAdapter {
     }
 
     fn needs_sse_transform(&self) -> bool {
-        // v1: Responses 流式事件 → chat.completions SSE 的翻译非常复杂
-        // 暂时只支持非流式，needs_sse_transform=false 表示 SSE 直通
-        // 完整 SSE 翻译在后续迭代中补齐
-        false
+        // 启用 SSE 转换：将上游 Responses 原生 SSE 事件翻译为 Chat Completions SSE，
+        // 使 forwarder 的成功判定和下游 handler 都能正确识别流输出。
+        // 详见 docs/REFACTOR_PLAN.md 第九节"补齐 SSE 翻译"。
+        true
     }
 
     fn extract_sse_usage(&self, data_line: &str) -> (i64, i64) {
@@ -988,9 +1043,100 @@ impl ProtocolAdapter for ResponsesAdapter {
         (prompt, completion)
     }
 
+    /// 把 Responses 原生 SSE 事件行翻译为 Chat Completions SSE 格式。
+    ///
+    /// 映射规则：
+    /// | Responses 事件 | Chat SSE 输出 | 说明 |
+    /// |---|---:|---|
+    /// | `response.output_text.delta` | `choices[0].delta.content` | 文本增量 |
+    /// | `response.output_item.added` (function_call) | `choices[0].delta.tool_calls[N]` (含 id + name) | 工具调用开始 |
+    /// | `response.function_call_arguments.delta` | `choices[0].delta.tool_calls[N].function.arguments` | 工具参数增量 |
+    /// | `response.completed` | `choices[0].finish_reason` + `usage` | 流结束信号 |
+    /// | `response.created` / `.done` / 其他状态事件 | `None`（跳过） | 无 Chat 对应事件 |
     fn transform_sse_line(&self, data_line: &str) -> Option<String> {
-        // needs_sse_transform=false，理论上不会被调用
-        Some(data_line.to_string())
+        let Ok(value) = serde_json::from_str::<Value>(data_line) else {
+            // 非 JSON 行（如注释行）原样透传
+            return Some(data_line.to_string());
+        };
+
+        let typ = match value.get("type").and_then(|v| v.as_str()) {
+            Some(t) => t,
+            None => {
+                // 无 type 字段的行（如 Chat SSE 用法事件）原样透传
+                return Some(data_line.to_string());
+            }
+        };
+
+        match typ {
+            // ── 文本增量 ──────────────────────────────────────────────
+            "response.output_text.delta" => {
+                let delta = value.get("delta").and_then(|v| v.as_str()).unwrap_or("");
+                if delta.is_empty() {
+                    return None;
+                }
+                Some(chat_sse_text_delta(delta))
+            }
+
+            // ── 工具调用开始（output_item.added + function_call） ────
+            "response.output_item.added" => {
+                let item = value.get("item")?;
+                let item_type = item.get("type").and_then(|v| v.as_str())?;
+                if item_type != "function_call" {
+                    // 非 function 的 output item 没有 Chat SSE 对应事件
+                    return None;
+                }
+                let output_index = value.get("output_index").and_then(|v| v.as_u64()).unwrap_or(0);
+                let call_id = item
+                    .get("id")
+                    .or_else(|| item.get("call_id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let arguments = item.get("arguments").and_then(|v| v.as_str()).unwrap_or("");
+                Some(chat_sse_tool_call_begin(output_index, call_id, name, arguments))
+            }
+
+            // ── 工具参数增量 ──────────────────────────────────────────
+            "response.function_call_arguments.delta" => {
+                let delta = value.get("delta").and_then(|v| v.as_str()).unwrap_or("");
+                if delta.is_empty() {
+                    return None;
+                }
+                let output_index = value.get("output_index").and_then(|v| v.as_u64()).unwrap_or(0);
+                Some(chat_sse_tool_call_args(output_index, delta))
+            }
+
+            // ── 流完成 ──────────────────────────────────────────────
+            "response.completed" => {
+                let resp = value.get("response");
+                let status = resp
+                    .and_then(|r| r.get("status"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("completed");
+                let finish_reason = match status {
+                    "incomplete" => "length",
+                    "failed" => "error",
+                    _ => "stop",
+                };
+                let usage = resp.and_then(|r| r.get("usage"));
+                let input_tokens = usage
+                    .and_then(|u| u.get("input_tokens"))
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                let output_tokens = usage
+                    .and_then(|u| u.get("output_tokens"))
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+
+                Some(chat_sse_completed(finish_reason, input_tokens, output_tokens))
+            }
+
+            // ── 无 Chat SSE 对应的事件 ────────────────────────────────
+            "response.created" | "response.output_item.done" | "response.incomplete" | "response.failed" => None,
+
+            // ── 未知事件 → 跳过 ───────────────────────────────────────
+            _ => None,
+        }
     }
 
     fn parse_models_response(&self, body: &Value) -> Vec<(String, Option<String>)> {

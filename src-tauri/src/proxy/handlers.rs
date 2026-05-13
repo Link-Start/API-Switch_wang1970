@@ -74,6 +74,8 @@ fn claude_model_item(entry: &crate::database::ApiEntry) -> Value {
         "id": entry.model,
         "display_name": claude_display_name(entry),
         "created_at": entry_created_at_rfc3339(entry),
+        "group_name": entry.group_name,
+        "object": "model",
     })
 }
 
@@ -86,17 +88,25 @@ fn gemini_model_item(entry: &crate::database::ApiEntry) -> Value {
         "description": gemini_description(entry),
         "inputTokenLimit": token_limit,
         "outputTokenLimit": token_limit,
-        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"]
+        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
+        "group_name": entry.group_name,
     })
 }
 
 fn azure_deployment_item(entry: &crate::database::ApiEntry) -> Value {
+    let alias = if entry.display_name.trim().is_empty() {
+        entry.model.clone()
+    } else {
+        entry.display_name.clone()
+    };
     json!({
         "id": entry.model,
         "object": "deployment",
         "created": entry_created_at(entry),
         "owned_by": entry_owned_by(entry, "openai"),
-        "model": if entry.display_name.trim().is_empty() { entry.model.clone() } else { entry.display_name.clone() },
+        "model": alias,
+        "display_name": alias,
+        "group_name": entry.group_name,
     })
 }
 

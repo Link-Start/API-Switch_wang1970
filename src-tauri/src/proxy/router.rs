@@ -144,6 +144,19 @@ pub async fn resolve(
         return exact_model_matches;
     }
 
+    // 2.7 Exact alias (display_name) match (case-insensitive)
+    let alias_matches: Vec<ApiEntry> = all_available
+        .iter()
+        .filter(|entry| {
+            !entry.display_name.trim().is_empty()
+                && entry.display_name.to_ascii_lowercase() == normalized_model_lower
+        })
+        .cloned()
+        .collect();
+    if !alias_matches.is_empty() {
+        return alias_matches;
+    }
+
     let model_matches: Vec<ApiEntry> = all_available
         .iter()
         .filter(|entry| {

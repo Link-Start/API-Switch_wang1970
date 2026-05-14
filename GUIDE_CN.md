@@ -33,6 +33,23 @@ API Key 留空即可（未开启访问密钥验证时）。
 
 ---
 
+## 上游 API 类型
+
+API Switch 支持接入以下类型的上游 API 服务：
+
+| API 类型 | 说明 | 默认 Base URL |
+|----------|------|---------------|
+| `OpenAI` | 标准 OpenAI API | `https://api.openai.com` |
+| `Anthropic` | Claude 系列模型，自动做协议转换 | `https://api.anthropic.com` |
+| `Google Gemini` | Gemini 系列模型，自动做协议转换 | `https://generativelanguage.googleapis.com` |
+| `Azure OpenAI` | Azure 部署，需填写部署名称 | — |
+| `OpenAI-compatible` | 兼容 OpenAI 协议的第三方服务（中转站、硅基流动等自定义服务） | — |
+| `OpenAI Responses (Beta)` | OpenAI Responses API，支持 `/v1/responses` 端点 | `https://api.openai.com` |
+
+> 添加渠道时，Base URL 不需要带 `/v1` 后缀。如使用 CODING PLAN 等中转站选择 `OpenAI-compatible` 类型。
+
+---
+
 ## 无头服务（Headless）模式
 
 无需桌面环境，仅启动 API 转发服务和 Web 管理界面，适合部署在服务器上。
@@ -79,6 +96,48 @@ API_SWITCH_HEADLESS=1 ./api-switch
 登录后可查看仪表盘、管理渠道和 API、查看日志等。默认用户/密码可在「系统设置 → Web 管理」中修改。
 
 > **环境变量覆盖**：启动前设置 `API_SWITCH_ADMIN_USER` 和 `API_SWITCH_ADMIN_PASS` 可覆盖默认管理员账号密码。
+
+---
+
+## 下游接入说明
+
+客户端通过代理端口（默认 `9090`）接入，支持如下协议端点：
+
+### 代理端口（默认 9090）
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/v1/chat/completions` | POST | OpenAI 标准聊天补全（stream 与非 stream） |
+| `/v1/messages` | POST | Anthropic Claude 协议格式（自动转换） |
+| `/v1/responses` | POST | OpenAI Responses API |
+| `/v1/models` | GET | OpenAI 格式模型列表 |
+| `/anthropic/v1/models` | GET | Anthropic 格式模型列表 |
+| `/v1beta/models` | GET | Gemini 格式模型列表 |
+| `/openai/deployments` | GET | Azure 格式部署列表 |
+| `/v1beta/models/{model}:generateContent` | POST | Gemini 原生格式 |
+| `/openai/deployments/{deployment}/chat/completions` | POST | Azure 原生格式 |
+| `/health` | GET | 健康检查 |
+
+客户端配置示例：
+
+```
+# OpenAI 兼容客户端
+API Base URL: http://127.0.0.1:9090/v1
+API Key:      <留空或访问密钥>
+
+# Claude 客户端（如 Claude Code）
+API Base URL: http://127.0.0.1:9090
+API Key:      <留空或访问密钥>
+```
+
+### Web 管理端口
+
+| 模式 | 默认端口 | 说明 |
+|------|---------|------|
+| 合并模式（默认） | `9090`（与代理同端口） | 访问 `http://127.0.0.1:9090/admin` |
+| 独立模式 | `9099` | 访问 `http://127.0.0.1:9099/admin` |
+
+Web 管理端口可在「系统设置 → Web 管理」中修改。
 
 ---
 

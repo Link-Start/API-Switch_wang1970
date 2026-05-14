@@ -47,7 +47,8 @@ function MainApp({ onLogout }: { onLogout?: () => void }) {
     refetchInterval: 2000,
   });
 
-  // 全局状态版本轮询：后端数据变更时自动刷新 UI
+  // 状态版本检测：组件挂载时检测一次，不轮询
+  // 数据看板等页面不再 2 秒自动刷新，进去有一次数据即可
   const queryClient = useQueryClient();
   const lastVersion = useRef<number | null>(null);
   useQuery({
@@ -60,7 +61,6 @@ function MainApp({ onLogout }: { onLogout?: () => void }) {
       lastVersion.current = res.version;
       return res;
     },
-    refetchInterval: 2000,
   });
 
   const [guideOpen, setGuideOpen] = useState(false);

@@ -5,8 +5,6 @@ import { toast } from "sonner";
 import { DEFAULT_SETTINGS, type AppSettings } from "@/types";
 import { SettingsEditor } from "@/features/settings/SettingsEditor";
 
-const APP_VERSION = "0.6.6";
-
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
   const queryClient = useQueryClient();
@@ -72,7 +70,7 @@ export function SettingsPage() {
       <SettingsEditor
         settings={s}
         proxyStatus={proxyStatus}
-        appVersion={APP_VERSION}
+        appVersion={s.app_version}
         isWeb={!isTauriRuntime()}
         groups={groups}
         onChange={update}

@@ -263,7 +263,7 @@ export const DEFAULT_SETTINGS: VersionedAppSettings = {
   web_admin_username: "admin",
   web_admin_password: "admin",
   web_admin_port: 9099,
-  app_version: "0.6.6",
+  app_version: "0.6.9",
   _version: 0,
 };
 

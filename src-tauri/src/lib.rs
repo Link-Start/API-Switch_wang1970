@@ -106,6 +106,11 @@ pub fn run() {
 
             let mut settings_cache = db.get_settings().unwrap_or_default();
             admin::apply_admin_env(&mut settings_cache);
+            // 版本号同步：确保 DB 中 app_version 与实际编译版本一致
+            let compiled_version = env!("CARGO_PKG_VERSION");
+            if settings_cache.app_version != compiled_version {
+                settings_cache.app_version = compiled_version.to_string();
+            }
             db.update_settings(&settings_cache)?;
 
         let state = AppState {
@@ -473,6 +478,11 @@ fn run_headless() {
         db.create_tables().expect("Failed to create tables");
         let mut settings = db.get_settings().unwrap_or_default();
         admin::apply_admin_env(&mut settings);
+        // 版本号同步
+        let compiled_version = env!("CARGO_PKG_VERSION");
+        if settings.app_version != compiled_version {
+            settings.app_version = compiled_version.to_string();
+        }
         db.update_settings(&settings).ok();
 
         let settings = Arc::new(RwLock::new(settings));

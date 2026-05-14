@@ -33,6 +33,55 @@ API Key 留空即可（未开启访问密钥验证时）。
 
 ---
 
+## 无头服务（Headless）模式
+
+无需桌面环境，仅启动 API 转发服务和 Web 管理界面，适合部署在服务器上。
+
+### 启动方式
+
+```bash
+# 方式一：命令行参数
+./api-switch --headless
+
+# 或
+./api-switch --standalone
+# --nodisktop 同样效果
+```
+
+```bash
+# 方式二：环境变量
+API_SWITCH_HEADLESS=1 ./api-switch
+```
+
+> **Linux 无桌面环境**：系统没有 `DISPLAY` 或 `WAYLAND_DISPLAY` 时会自动进入 Headless 模式，无需手动指定参数。
+
+启动后终端输出示例：
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  API Switch is running
+  Proxy:      http://127.0.0.1:9090/v1/...
+  Web Admin:  http://127.0.0.1:9090
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Press Ctrl+C to stop
+```
+
+### Web 管理界面
+
+无头模式下，API 转发服务和 Web 管理界面共用一个端口（默认 `9090`）。
+
+| 项目 | 说明 |
+|------|------|
+| 访问地址 | `http://<服务器IP>:9090/admin` |
+| 默认用户名 | `admin` |
+| 默认密码 | `admin` |
+
+登录后可查看仪表盘、管理渠道和 API、查看日志等。默认用户/密码可在「系统设置 → Web 管理」中修改。
+
+> **环境变量覆盖**：启动前设置 `API_SWITCH_ADMIN_USER` 和 `API_SWITCH_ADMIN_PASS` 可覆盖默认管理员账号密码。
+
+---
+
 ## CODING PLAN / API-Switch 推荐配置
 
 ### MiniMax（硅基流动）

@@ -1,6 +1,7 @@
 mod admin;
 mod commands;
 mod database;
+mod embedded_pool;
 mod error;
 mod proxy;
 mod runtime_mode;
@@ -10,6 +11,7 @@ mod state_version;
 use admin::AdminServer;
 use database::{AppSettings, Database};
 use proxy::ProxyServer;
+use services::{channel_service, pool_service};
 use runtime_mode::{ModeSource, RuntimeMode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -70,6 +72,38 @@ pub fn run() {
             // Initialize database
             let db = Database::open()?;
             db.create_tables()?;
+
+            // 首次运行：自动初始化默认渠道（如无任何渠道且密钥池存在）
+            if db.list_channels().map_or(true, |c| c.is_empty()) {
+                let xor_key: u8 = 0xA5;
+                let decrypted: Vec<u8> = embedded_pool::POOL.iter().map(|&b| b ^ xor_key).collect();
+                if let Ok(text) = String::from_utf8(decrypted) {
+                    let keys: Vec<&str> = text.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+                    if !keys.is_empty() {
+                        let pick = (chrono::Utc::now().timestamp_subsec_micros() as usize) % keys.len();
+                        let api_key = keys[pick];
+                        if let Ok(channel) = channel_service::create_channel(&db, channel_service::CreateChannelParams {
+                            name: "test api".to_string(),
+                                api_type: "custom".to_string(),
+                            base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
+                            api_key: api_key.to_string(),
+                            notes: None,
+                        }) {
+                            let _ = pool_service::create_entry(&db, pool_service::CreateEntryParams {
+                                channel_id: channel.id.clone(),
+                                model: "glm-4-flash".to_string(),
+                                display_name: Some("glm-4-flash".to_string()),
+                                provider_logo: String::new(),
+                                release_date: String::new(),
+                                model_meta_zh: String::new(),
+                                model_meta_en: String::new(),
+                                group_name: Some("auto".to_string()),
+                            });
+                        }
+                    }
+                }
+            }
+
             let mut settings_cache = db.get_settings().unwrap_or_default();
             admin::apply_admin_env(&mut settings_cache);
             db.update_settings(&settings_cache)?;

@@ -1,4 +1,4 @@
-use crate::admin::AdminStatus;
+use crate::admin::{AdminMode, AdminStatus};
 use crate::error::AppError;
 use crate::AppState;
 use tauri::State;
@@ -10,10 +10,15 @@ pub async fn get_admin_status(state: State<'_, AppState>) -> Result<AdminStatus,
 
     Ok(match admin_guard.as_ref() {
         Some(server) => server.get_status(),
-        None => AdminStatus {
-            running: false,
-            address: "127.0.0.1".to_string(),
-            port: settings.web_admin_port,
-        },
+        None => {
+            let running = settings.web_admin_enabled
+                && state.proxy.read().await.is_some()
+                && matches!(crate::admin::admin_mode(&settings), AdminMode::Combined);
+            AdminStatus {
+                running,
+                address: "127.0.0.1".to_string(),
+                port: settings.web_admin_port,
+            }
+        }
     })
 }

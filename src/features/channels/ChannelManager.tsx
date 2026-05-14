@@ -34,12 +34,12 @@ type ChannelFormState = {
 };
 
 const API_TYPES = [
-  { value: 'custom', label: 'Custom' },
+  { value: 'custom', label: 'OpenAI-compatible' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'claude', label: 'Claude' },
   { value: 'gemini', label: 'Gemini' },
   { value: 'azure', label: 'Azure' },
-  { value: 'responses', label: 'OpenAI Responses (Beta)' },
+  { value: 'responses', label: 'OpenAI-Responses(bate)' },
 ];
 
 const DEFAULT_FORM: ChannelFormState = {
@@ -987,7 +987,7 @@ function ChannelEditorDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {API_TYPES.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>{t(`channel.providers.${item.value}`, item.label)}</SelectItem>
+                    <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

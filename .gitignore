@@ -59,6 +59,14 @@ test-results/
 *-verified.png
 i18n_implementation_plan.md
 
+# Reference docs
+azure_openai_reference.html
+azure_openai_reference.md
+azure_responses.html
+azure_responses.md
+openai_chat_ref.html
+openai_docs_response.html
+
 # Design assets (not for repo)
 design/
 /icon.jpg

@@ -22,7 +22,9 @@ pub use claude::{
     ClaudeSSETransformer,
 };
 pub use common::join_url;
-pub use gemini::{gemini_to_openai_request, openai_to_gemini_response};
+pub use gemini::{
+    gemini_to_openai_request, openai_to_gemini_response, transform_openai_sse_to_gemini_stream,
+};
 
 use serde_json::Value;
 

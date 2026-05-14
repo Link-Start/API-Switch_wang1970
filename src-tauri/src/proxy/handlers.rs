@@ -3,6 +3,7 @@ use super::forwarder;
 use super::protocol::{
     azure_to_openai_request, claude_to_openai_request, gemini_to_openai_request,
     openai_to_claude_response, openai_to_gemini_response, transform_openai_sse_to_claude_stream,
+    transform_openai_sse_to_gemini_stream,
 };
 use super::router;
 use super::server::ProxyState;
@@ -13,6 +14,21 @@ use axum::Json;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::Arc;
+
+/// Gemini 单模型格式（用于 /v1beta/models/{model}）
+fn gemini_single_model_item(entry: &crate::database::ApiEntry) -> Value {
+    let token_limit = parse_context_limit(entry);
+    json!({
+        "name": format!("models/{}", entry.model),
+        "version": gemini_version(entry),
+        "displayName": gemini_display_name(entry),
+        "description": gemini_description(entry),
+        "inputTokenLimit": token_limit,
+        "outputTokenLimit": token_limit,
+        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
+        "group_name": entry.group_name,
+    })
+}
 
 fn normalize_requested_model(model: Option<&str>) -> String {
     let trimmed = model.unwrap_or("auto").trim();
@@ -454,7 +470,11 @@ pub async fn handle_list_models_azure(
     })))
 }
 
-/// Handle /v1beta/models/{model}:generateContent (Gemini native)
+/// Handle /v1beta/models/{model}:{action} (Gemini native)
+///
+/// 支持 action:
+/// - `generateContent`        — 非流式内容生成（已有）
+/// - `streamGenerateContent`  — 流式内容生成（新增，OpenAI SSE → Gemini SSE 转换）
 pub async fn handle_gemini_native(
     State(state): State<ProxyState>,
     Path(rest): Path<String>,
@@ -464,12 +484,21 @@ pub async fn handle_gemini_native(
         return Err(ProxyError::Internal("Invalid Gemini path".to_string()));
     };
 
-    if action != "generateContent" {
-        return Err(ProxyError::Internal(format!(
+    match action {
+        "generateContent" => handle_gemini_generate_content(State(state), model, request).await,
+        "streamGenerateContent" => handle_gemini_stream_generate_content(State(state), model, request).await,
+        _ => Err(ProxyError::Internal(format!(
             "Unsupported Gemini action: {action}"
-        )));
+        ))),
     }
+}
 
+/// 非流式 Gemini 内容生成（:generateContent）
+async fn handle_gemini_generate_content(
+    State(state): State<ProxyState>,
+    model: &str,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ProxyError> {
     let (parts, body) = request.into_parts();
     let headers = &parts.headers;
 
@@ -528,6 +557,90 @@ pub async fn handle_gemini_native(
 
     let gemini_response = openai_to_gemini_response(&body);
     Ok(Json(gemini_response).into_response())
+}
+
+/// 流式 Gemini 内容生成（:streamGenerateContent）
+///
+/// 流程:
+/// 1. Gemini 原生请求 → OpenAI 格式
+/// 2. 强制 stream=true，通过 forwarder 转发
+/// 3. forwarder 返回 OpenAI SSE 流 (chat.completion.chunk)
+/// 4. 逐行转换为 Gemini 原生 SSE 格式 (candidates)
+/// 5. 返回流式响应给客户端
+async fn handle_gemini_stream_generate_content(
+    State(state): State<ProxyState>,
+    model: &str,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ProxyError> {
+    let (parts, body) = request.into_parts();
+    let headers = &parts.headers;
+
+    let body_bytes = axum::body::to_bytes(body, 32 * 1024 * 1024)
+        .await
+        .map_err(|e| ProxyError::Internal(format!("Failed to read body: {e}")))?;
+
+    let body: Value = serde_json::from_slice(&body_bytes)
+        .map_err(|e| ProxyError::Internal(format!("Failed to parse JSON: {e}")))?;
+
+    let openai_body = gemini_to_openai_request(&body);
+    let mut openai_body = openai_body;
+    openai_body["model"] = json!(model);
+    openai_body["stream"] = json!(true);
+
+    let requested_model = normalize_requested_model(Some(model));
+
+    let all_entries = state.db.get_entries_for_routing()?;
+    let auto_entries = state.db.get_enabled_entries_for_auto()?;
+    let sort_mode = state.settings.read().await.default_sort_mode.clone();
+    let resolved = router::resolve(
+        &requested_model,
+        &all_entries,
+        &auto_entries,
+        &state.circuit_breakers,
+        &sort_mode,
+    )
+    .await;
+
+    if resolved.is_empty() {
+        return Err(ProxyError::NoAvailableProvider(requested_model));
+    }
+
+    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> =
+        vec![Arc::new(super::middleware::StreamOptionsMiddleware)];
+    let caller_kind = super::middleware::CallerKind::GeminiNative;
+
+    let response = forwarder::forward_with_retry(
+        &state,
+        &resolved,
+        &openai_body,
+        headers,
+        &requested_model,
+        None,
+        true, // is_stream = true
+        &middleware,
+        caller_kind,
+    )
+    .await?;
+
+    // 将 forwarder 返回的 OpenAI SSE 流转换为 Gemini 原生 SSE 流
+    transform_openai_sse_to_gemini_stream(response).map_err(ProxyError::from)
+}
+
+/// Handle GET /v1beta/models/{model} — Gemini 单模型详情
+pub async fn handle_gemini_model_detail(
+    State(state): State<ProxyState>,
+    Path(model): Path<String>,
+) -> Result<Json<Value>, ProxyError> {
+    // 从 DB 查找该模型
+    let entries = state.db.get_entries_for_routing()?;
+    let model_lower = model.to_ascii_lowercase();
+
+    if let Some(entry) = entries.iter().find(|e| e.model.to_ascii_lowercase() == model_lower) {
+        return Ok(Json(gemini_single_model_item(entry)));
+    }
+
+    // 没找到 → 返回 Gemini 格式的 404
+    Err(ProxyError::Internal(format!("Model '{}' not found", model)))
 }
 
 /// Handle /openai/deployments/{deployment}/chat/completions (Azure native)

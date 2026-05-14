@@ -787,6 +787,194 @@ pub fn openai_to_gemini_response(openai: &Value) -> Value {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  OpenAI SSE → Gemini SSE 流式转换
+// ═══════════════════════════════════════════════════════════════════
+//
+// 当 /v1beta/models/{model}:streamGenerateContent 接收到 Gemini 原生流式请求后，
+// 内部转换为 OpenAI 格式转发，上游返回 OpenAI SSE (chat.completion.chunk)，
+// 需要在此处逐行转换为 Gemini 原生 SSE 格式再返回给客户端。
+//
+// OpenAI 格式:
+//   data: {"id":"...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+//
+// Gemini 格式:
+//   data: {"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"},"finishReason":null}]}
+
+use axum::body::Body;
+use bytes::Bytes;
+use futures::StreamExt;
+use std::time::Duration;
+
+/// 将单个 OpenAI SSE data line 转换为 Gemini 原生 SSE 格式。
+///
+/// OpenAI chunk → Gemini chunk 字段映射：
+/// - choices[0].delta.content                → candidates[0].content.parts[0].text
+/// - choices[0].finish_reason (stop/length)   → candidates[0].finishReason (STOP/MAX_TOKENS)
+/// - usage.prompt_tokens                      → usageMetadata.promptTokenCount
+/// - usage.completion_tokens                  → usageMetadata.candidatesTokenCount
+fn openai_sse_chunk_to_gemini(data_line: &str) -> Option<String> {
+    if data_line == "[DONE]" {
+        return None;
+    }
+
+    let Ok(value) = serde_json::from_str::<Value>(data_line) else {
+        return None;
+    };
+
+    let mut text = String::new();
+    let mut finish_reason: Option<String> = None;
+
+    if let Some(choices) = value.get("choices").and_then(|c| c.as_array()) {
+        if let Some(choice) = choices.first() {
+            if let Some(delta) = choice.get("delta") {
+                if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
+                    text.push_str(content);
+                }
+            }
+            if let Some(fr) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+                if !fr.is_empty() && fr != "null" {
+                    finish_reason = Some(match fr {
+                        "stop" => "STOP",
+                        "length" => "MAX_TOKENS",
+                        "content_filter" => "SAFETY",
+                        "tool_calls" => "TOOL_CALLS",
+                        other => other,
+                    }.to_string());
+                }
+            }
+        }
+    }
+
+    let mut candidate = json!({
+        "content": {
+            "parts": [{"text": text}],
+            "role": "model"
+        }
+    });
+
+    if let Some(fr) = finish_reason {
+        candidate["finishReason"] = json!(fr);
+    }
+
+    let mut gemini_chunk = json!({
+        "candidates": [candidate]
+    });
+
+    // 最后一个 chunk 可能携带 usage 信息
+    if let Some(usage) = value.get("usage") {
+        let prompt = usage.get("prompt_tokens").and_then(Value::as_i64).unwrap_or(0);
+        let completion = usage.get("completion_tokens").and_then(Value::as_i64).unwrap_or(0);
+        gemini_chunk["usageMetadata"] = json!({
+            "promptTokenCount": prompt,
+            "candidatesTokenCount": completion,
+            "totalTokenCount": prompt + completion,
+        });
+    }
+
+    // 透传 model 字段
+    if let Some(model) = value.get("model").and_then(|m| m.as_str()) {
+        gemini_chunk["model"] = json!(model);
+    }
+
+    Some(serde_json::to_string(&gemini_chunk).unwrap_or_default())
+}
+
+/// 将上游返回的 OpenAI SSE 流转换为 Gemini 原生 SSE 流。
+///
+/// 输入: OpenAI chat.completion.chunk SSE 流（来自 forwarder）
+/// 输出: Gemini candidates SSE 流（返回给 Gemini 原生客户端）
+pub fn transform_openai_sse_to_gemini_stream(
+    response: axum::response::Response,
+) -> Result<axum::response::Response, crate::error::AppError> {
+    let upstream_stream = response.into_body().into_data_stream();
+
+    let sse_buffer = String::new();
+    let sse_utf8_remainder: Vec<u8> = Vec::new();
+
+    let transformed_stream = futures::stream::unfold(
+        (upstream_stream, sse_buffer, sse_utf8_remainder, 0usize),
+        |(mut stream, mut sse_buffer, mut sse_utf8_remainder, mut streamed_bytes)| async move {
+            loop {
+                if crate::proxy::sse::stream_buffer_exceeded(
+                    &sse_buffer, &sse_utf8_remainder, streamed_bytes,
+                ) {
+                    return Some((
+                        Err::<Bytes, std::io::Error>(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "stream buffer exceeds 10MB limit",
+                        )),
+                        (stream, sse_buffer, sse_utf8_remainder, streamed_bytes),
+                    ));
+                }
+
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(300)) => {
+                        return Some((
+                            Err::<Bytes, std::io::Error>(std::io::Error::new(
+                                std::io::ErrorKind::TimedOut,
+                                "stream idle timeout",
+                            )),
+                            (stream, sse_buffer, sse_utf8_remainder, streamed_bytes),
+                        ));
+                    }
+                    chunk_result = stream.next() => {
+                        match chunk_result {
+                            Some(Ok(chunk)) => {
+                                streamed_bytes += chunk.len();
+                                crate::proxy::sse::append_utf8_safe(
+                                    &mut sse_buffer, &mut sse_utf8_remainder, &chunk,
+                                );
+                            }
+                            Some(Err(e)) => {
+                                return Some((
+                                    Err::<Bytes, std::io::Error>(std::io::Error::new(
+                                        std::io::ErrorKind::Other,
+                                        format!("Stream read error: {e}"),
+                                    )),
+                                    (stream, sse_buffer, sse_utf8_remainder, streamed_bytes),
+                                ));
+                            }
+                            None => return None,
+                        }
+                    }
+                }
+
+                if let Some(line_end) = sse_buffer.find('\n') {
+                    let mut line = sse_buffer.drain(..=line_end).collect::<String>();
+                    if line.ends_with('\n') { line.pop(); }
+                    if line.ends_with('\r') { line.pop(); }
+
+                    if let Some(payload) = line.strip_prefix("data: ") {
+                        if payload == "[DONE]" {
+                            return Some((
+                                Ok::<_, std::io::Error>(Bytes::from("data: [DONE]\n\n")),
+                                (stream, sse_buffer, sse_utf8_remainder, streamed_bytes),
+                            ));
+                        }
+
+                        if let Some(gemini_line) = openai_sse_chunk_to_gemini(payload) {
+                            let output = Bytes::from(format!("data: {gemini_line}\n\n"));
+                            return Some((
+                                Ok::<_, std::io::Error>(output),
+                                (stream, sse_buffer, sse_utf8_remainder, streamed_bytes),
+                            ));
+                        }
+                    }
+                }
+            }
+        },
+    );
+
+    Ok(axum::http::Response::builder()
+        .header("content-type", "text/event-stream")
+        .header("cache-control", "no-cache")
+        .header("connection", "keep-alive")
+        .header("x-accel-buffering", "no")
+        .body(Body::from_stream(transformed_stream))
+        .unwrap())
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  Tests
 // ═══════════════════════════════════════════════════════════════════
 
@@ -939,5 +1127,89 @@ mod tests {
         assert_eq!(gemini["usageMetadata"]["promptTokenCount"], 100);
         assert_eq!(gemini["usageMetadata"]["candidatesTokenCount"], 2048);
         assert_eq!(gemini["usageMetadata"]["totalTokenCount"], 2148);
+    }
+
+    // ─── openai_sse_chunk_to_gemini 测试 ──────────────────────────
+
+    #[test]
+    fn openai_sse_chunk_basic_text() {
+        let line = r#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}"#;
+        let result = openai_sse_chunk_to_gemini(line).unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["candidates"][0]["content"]["parts"][0]["text"], "Hello");
+        assert_eq!(v["candidates"][0]["finishReason"], Value::Null);
+    }
+
+    #[test]
+    fn openai_sse_chunk_delta_accumulation() {
+        let line = r#"{"id":"2","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}"#;
+        let result = openai_sse_chunk_to_gemini(line).unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["candidates"][0]["content"]["parts"][0]["text"], " world");
+    }
+
+    #[test]
+    fn openai_sse_chunk_finish_reason_stop() {
+        let line = r#"{"id":"3","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#;
+        let result = openai_sse_chunk_to_gemini(line).unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["candidates"][0]["finishReason"], "STOP");
+        assert_eq!(v["usageMetadata"]["promptTokenCount"], 10);
+        assert_eq!(v["usageMetadata"]["candidatesTokenCount"], 5);
+        assert_eq!(v["usageMetadata"]["totalTokenCount"], 15);
+    }
+
+    #[test]
+    fn openai_sse_chunk_finish_reason_length() {
+        let line = r#"{"id":"4","choices":[{"index":0,"delta":{},"finish_reason":"length"}]}"#;
+        let result = openai_sse_chunk_to_gemini(line).unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["candidates"][0]["finishReason"], "MAX_TOKENS");
+    }
+
+    #[test]
+    fn openai_sse_chunk_finish_reason_content_filter() {
+        let line = r#"{"id":"5","choices":[{"index":0,"delta":{},"finish_reason":"content_filter"}]}"#;
+        let result = openai_sse_chunk_to_gemini(line).unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["candidates"][0]["finishReason"], "SAFETY");
+    }
+
+    #[test]
+    fn openai_sse_chunk_done_returns_none() {
+        assert!(openai_sse_chunk_to_gemini("[DONE]").is_none());
+    }
+
+    #[test]
+    fn openai_sse_chunk_invalid_json_returns_none() {
+        assert!(openai_sse_chunk_to_gemini("not json").is_none());
+    }
+
+    #[test]
+    fn openai_sse_chunk_model_passthrough() {
+        let line = r#"{"id":"6","model":"gpt-4o","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}"#;
+        let result = openai_sse_chunk_to_gemini(line).unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["model"], "gpt-4o");
+    }
+
+    #[test]
+    fn openai_sse_chunk_no_choices() {
+        let line = r#"{"id":"7"}"#;
+        let result = openai_sse_chunk_to_gemini(line).unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        // 无 choices → content_text = ""，candidates 仍存在
+        assert_eq!(v["candidates"][0]["content"]["parts"][0]["text"], "");
+        assert!(v.get("finishReason").is_none());
+    }
+
+    #[test]
+    fn openai_sse_chunk_usage_maps_correctly() {
+        let line = r#"{"id":"8","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":50,"completion_tokens":30,"total_tokens":80}}"#;
+        let result = openai_sse_chunk_to_gemini(line).unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["usageMetadata"]["promptTokenCount"], 50);
+        assert_eq!(v["usageMetadata"]["candidatesTokenCount"], 30);
+        assert_eq!(v["usageMetadata"]["totalTokenCount"], 80);
     }
 }

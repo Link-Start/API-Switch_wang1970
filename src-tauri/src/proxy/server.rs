@@ -119,8 +119,10 @@ impl ProxyServer {
                     },
                 ),
             )
-            // Gemini native endpoint (non-streaming only for now)
+            // Gemini native endpoint (generateContent + streamGenerateContent)
             .route("/v1beta/models/*rest", post(handlers::handle_gemini_native))
+            // Gemini single model detail
+            .route("/v1beta/models/{model}", get(handlers::handle_gemini_model_detail))
             // Azure native endpoint
             .route(
                 "/openai/deployments/*rest",

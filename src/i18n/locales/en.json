@@ -427,6 +427,7 @@
       "username": "Username",
       "password": "Password",
       "configured": "Configured",
+      "passwordPlaceholder": "Configured (leave blank to keep current)",
       "singlePortDesc": "Use the same port as the proxy for single-port mode, or keep 9099 for a separate admin port.",
       "address": "Address"
     },

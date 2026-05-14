@@ -70,15 +70,16 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifact
-          if [ "${{ matrix.asset }}" = "api-switch.exe" ]; then
-            cp src-tauri/target/${{ matrix.target }}/release/api-switch.exe artifact/
+          binary_dir="src-tauri/target/${{ matrix.target }}/release"
+          # Copy binary
+          if [ -f "$binary_dir/api-switch.exe" ]; then
+            cp "$binary_dir/api-switch.exe" "artifact/${{ matrix.asset }}"
           else
-            cp src-tauri/target/${{ matrix.target }}/release/api-switch artifact/${{ matrix.asset }}
+            cp "$binary_dir/api-switch" "artifact/${{ matrix.asset }}"
           fi
-          # Copy installer/package bundle if present
-          bundle_dir="src-tauri/target/${{ matrix.target }}/release/bundle"
-          if [ -d "$bundle_dir" ]; then
-            cp -r "$bundle_dir"/* artifact/ 2>/dev/null || true
+          # Copy installer bundles if present
+          if [ -d "$binary_dir/bundle" ]; then
+            find "$binary_dir/bundle" -type f \( -name '*.msi' -o -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} artifact/ \; 2>/dev/null || true
           fi
 
       - name: Upload artifact

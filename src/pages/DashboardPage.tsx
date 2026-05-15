@@ -347,7 +347,13 @@ export function DashboardPage() {
                         <Cell key={index} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(value) => formatCompactNumber(Number(value))} />
+                    <Tooltip
+                      formatter={(value: number) =>
+                        distributionMode === "tokens"
+                          ? formatCompactNumber(value)
+                          : value.toLocaleString()
+                      }
+                    />
                     <Legend />
                   </PieChart>
                 </ResponsiveContainer>

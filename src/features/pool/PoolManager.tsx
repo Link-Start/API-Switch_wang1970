@@ -654,7 +654,7 @@ export function PoolManager() {
   // 过滤条件已进入 queryKey 并由后端分页接口处理，这里只消费当前页结果
   const filteredEntries = useMemo(() => displayEntries, [displayEntries]);
   // 全局排序不依赖于分组/渠道筛选；仅在搜索时不可用
-  const canReorder = !debouncedFilter.trim();
+  const canReorder = true; // 允许在搜索过滤状态下拖动排序模型条目
 
   const reorderMutation = useMutation({
     mutationFn: (orderedIds: string[]) => adapter.pool.reorder(orderedIds),

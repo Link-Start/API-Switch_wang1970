@@ -58,10 +58,20 @@ export function LogPage() {
     queryFn: () => api.usage.getLogs(filter),
   });
 
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date(todayStart);
+  todayEnd.setDate(todayEnd.getDate() + 1);
+  const todayFilter = {
+    start_time: Math.floor(todayStart.getTime() / 1000),
+    end_time: Math.floor(todayEnd.getTime() / 1000) - 1,
+  };
+  const { data: todayStats } = useQuery({
+    queryKey: ["usageLogs", "todayStats", todayFilter.start_time, todayFilter.end_time],
+    queryFn: () => api.usage.getDashboardStats(todayFilter),
+  });
+
   const logs = result?.items || [];
-  const totalPrompt = logs.reduce((sum, log) => sum + log.prompt_tokens, 0);
-  const totalCompletion = logs.reduce((sum, log) => sum + log.completion_tokens, 0);
-  const successCount = logs.filter((log) => log.success).length;
 
   if (isLoading) {
     return (
@@ -153,25 +163,25 @@ export function LogPage() {
         <Card>
           <CardContent className="p-4">
             <div className="text-sm text-muted-foreground">{t("log.recentLogs")}</div>
-            <div className="text-2xl font-semibold mt-1">{logs.length}</div>
+            <div className="text-2xl font-semibold mt-1">{todayStats?.total_requests ?? 0}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <div className="text-sm text-muted-foreground">{t("log.promptTokens")}</div>
-            <div className="text-2xl font-semibold mt-1">{totalPrompt}</div>
+            <div className="text-2xl font-semibold mt-1">{todayStats?.total_prompt_tokens ?? 0}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <div className="text-sm text-muted-foreground">{t("log.completionTokens")}</div>
-            <div className="text-2xl font-semibold mt-1">{totalCompletion}</div>
+            <div className="text-2xl font-semibold mt-1">{todayStats?.total_completion_tokens ?? 0}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <div className="text-sm text-muted-foreground">{t("log.successRate")}</div>
-            <div className="text-2xl font-semibold mt-1">{logs.length ? `${((successCount / logs.length) * 100).toFixed(1)}%` : "0%"}</div>
+            <div className="text-2xl font-semibold mt-1">{todayStats && todayStats.total_requests > 0 ? `${(todayStats.success_rate * 100).toFixed(1)}%` : "0%"}</div>
           </CardContent>
         </Card>
       </div>

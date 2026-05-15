@@ -3,7 +3,7 @@
     "title": "API Switch"
   },
   "nav": {
-    "apiPool": "API 管理",
+    "apiPool": "模型管理",
     "channels": "渠道管理",
     "logs": "使用日志",
     "tokens": "令牌管理",
@@ -15,7 +15,7 @@
     "logout": "退出登录"
   },
   "apiPool": {
-    "title": "API 管理",
+    "title": "模型管理",
     "description": "统一管理代理的模型，支持导入与补录（Shift+Click: 全开/全关，Ctrl+Click: 置顶）",
     "empty": "暂无 API 条目，请先在渠道管理中添加渠道并选择模型",
     "addApi": "添加 API",
@@ -89,7 +89,7 @@
     },
     "deleteConfirm": "确定删除 {{name}}？",
     "deleteTitle": "删除确认",
-    "deleteDesc": "确定删除 {{name}}？删除后该模型将从 API 管理中移除。",
+    "deleteDesc": "确定删除 {{name}}？删除后该模型将从模型管理中移除。",
     "keyWarning": "密钥仅显示一次，请妥善保管",
     "testChat": {
       "title": "测试对话",
@@ -265,7 +265,7 @@
     "nonStreamShort": "非流",
     "noError": "无错误信息",
     "totalLogs": "日志总数",
-    "recentLogs": "最近日志",
+    "recentLogs": "今日日志",
     "successRate": "成功率",
     "yes": "是",
     "no": "否",
@@ -312,12 +312,12 @@
       "total": "总计"
     },
     "charts": {
-      "consumption": "Token 消耗分布",
+      "consumption": "消耗分布",
       "callTrend": "调用趋势",
-      "distribution": "调用次数分布",
+      "distribution": "调用分布",
       "ranking": "调用次数排行",
       "userRanking": "用户消耗排行",
-      "userTrend": "用户消耗趋势"
+      "userTrend": "用户消耗"
     },
     "filter": {
       "today": "今日",
@@ -439,10 +439,10 @@
       "themeDark": "深色",
       "themeSystem": "跟随系统",
       "defaultGroup": "默认分组",
-      "defaultGroupDesc": "记住 API 管理页面默认打开的分组，仅用于界面选择",
+      "defaultGroupDesc": "记住模型管理页面默认打开的分组，仅用于界面选择",
 
       "defaultSortMode": "默认排序方式",
-      "defaultSortModeDesc": "API 管理页面的默认模型排序方式",
+      "defaultSortModeDesc": "模型管理页面的默认模型排序方式",
       "showConversationModel": "显示对话模型（实验）",
       "showConversationModelDesc": "流式回答结束时追加实际命中的模型名称",
       "currentVersion": "当前版本"
@@ -473,6 +473,8 @@
     "deleteTitle": "删除确认",
     "deleteDesc": "确定删除 {{name}}？",
     "deleteWarning": "数据删除后将无法恢复，请确定。",
+    "enabled": "已启用",
+    "disabled": "已禁用",
     "tryAgain": "重试"
   },
   "error": {
@@ -517,7 +519,7 @@
     },
     "step3": {
       "title": "启用模型",
-      "desc": "在「API 管理」中开启模型条目，开启后即可参与自动路由"
+      "desc": "在「模型管理」中开启模型条目，开启后即可参与自动路由"
     },
     "step4": {
       "title": "开始使用",

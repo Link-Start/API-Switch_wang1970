@@ -309,6 +309,7 @@ function CardBody({
   groups,
   testingEntryIds,
   testResult,
+  testErrorDetail,
   catalogLogo,
   catalogReleaseDate,
   catalogContext,
@@ -325,6 +326,7 @@ function CardBody({
   groups?: string[];
   testingEntryIds?: Set<string>;
   testResult?: string;
+  testErrorDetail?: string;
   catalogLogo: string;
   catalogReleaseDate?: string;
   catalogContext?: string;
@@ -355,6 +357,7 @@ function CardBody({
             : entry.response_ms ? <span className="text-xs text-green-600 shrink-0">({formatResponseMs(entry.response_ms)})</span>
             : null}
           {cooldownRemaining ? <span className="text-xs text-red-500 shrink-0">{t("apiPool.cooldownInline", { time: cooldownRemaining })}</span> : null}
+          {testErrorDetail ? <span className="text-xs text-yellow-600 shrink-0" title={testErrorDetail}>⚠</span> : null}
         </div>
           <div className="mt-1 flex items-center gap-2 min-w-0">
             <ModelMetaBlock
@@ -397,6 +400,7 @@ function SortablePoolEntryCard(props: {
   groups?: string[];
   testingEntryIds?: Set<string>;
   testResult?: string;
+  testErrorDetail?: string;
   catalogLogo: string;
   catalogReleaseDate?: string;
   catalogContext?: string;
@@ -428,6 +432,7 @@ function PoolEntryCard(props: {
   groups?: string[];
   testingEntryIds?: Set<string>;
   testResult?: string;
+  testErrorDetail?: string;
   catalogLogo: string;
   catalogReleaseDate?: string;
   catalogContext?: string;
@@ -532,6 +537,7 @@ export function PoolManager() {
   const [testEntry, setTestEntry] = useState<ApiEntry | null>(null);
   const [testingEntryIds, setTestingEntryIds] = useState<Set<string>>(new Set());
   const [testResults, setTestResults] = useState<Record<string, string>>({});
+  const [testErrorDetails, setTestErrorDetails] = useState<Record<string, string>>({});
   const [testProgress, setTestProgress] = useState<{ current: number; total: number } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ApiEntry | null>(null);
   const [groupFilter, setGroupFilter] = useState<string>("auto");
@@ -738,6 +744,7 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
     if (!filteredEntries.length || testProgress) return;
     const scopedEntries = filteredEntries;
     const results: Record<string, string> = {};
+    const errorDetails: Record<string, string> = {};
     let completed = 0;
     const total = scopedEntries.length;
     setTestProgress({ current: 0, total });
@@ -761,19 +768,27 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
             results[entry.id] = result.latency_ms.toString();
           } else {
             results[entry.id] = "X";
+            // 保存错误详情供前端展示
+            if (result.error_detail) {
+              errorDetails[entry.id] = result.error_detail;
+            }
             await adapter.pool.toggle(entry.id, false);
           }
-        } catch {
+        } catch (err) {
           results[entry.id] = "X";
+          const errMsg = err instanceof Error ? err.message : String(err);
+          errorDetails[entry.id] = `exception: ${errMsg}`;
         }
         completed++;
         setTestProgress({ current: completed, total });
         setTestResults({ ...results });
+        setTestErrorDetails({ ...errorDetails });
       }
     };
     await Promise.all([...grouped.values()].map(testChannel));
     setTestingEntryIds(new Set());
     setTestResults({});
+    setTestErrorDetails({});
     setTestProgress(null);
     queryClient.invalidateQueries({ queryKey: ["entries"] });
   }, [adapter.pool, filteredEntries, queryClient, testProgress]);
@@ -854,7 +869,7 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
                 <div className="flex flex-col gap-3">
                   {filteredEntries.map((entry) => {
                     const meta = getEntryDisplayMeta(entry, catalogMap);
-                    return <SortablePoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={setDeleteTarget} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
+                    return <SortablePoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={setDeleteTarget} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} testErrorDetail={testErrorDetails[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
                   })}
                   {/* 无限滚动 sentinel */}
                   <div ref={sentinelRef} className="h-4" />
@@ -870,7 +885,7 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
             <div className="flex flex-col gap-3">
               {filteredEntries.map((entry) => {
                 const meta = getEntryDisplayMeta(entry, catalogMap);
-                return <PoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={setDeleteTarget} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
+                return <PoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={setDeleteTarget} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} testErrorDetail={testErrorDetails[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
               })}
               <div ref={sentinelRef} className="h-4" />
               {isFetchingNextPage && (

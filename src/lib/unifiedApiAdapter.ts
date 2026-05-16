@@ -340,13 +340,14 @@ export const apiAdapter: ApiAdapter = {
 
     testLatency: async (id) => {
       if (useTauri()) {
-        const result = await tauriCmd<{ status: string; response_ms: string }>('test_entry_latency', { entryId: id });
+        const result = await tauriCmd<{ status: string; response_ms: string; error_detail?: string }>('test_entry_latency', { entryId: id });
         return {
           entry_id: id,
           latency_ms: result.status === 'ok' && result.response_ms !== 'X' ? parseInt(result.response_ms, 10) : null,
+          error_detail: result.error_detail,
         };
       }
-      return webRequest<{ entry_id: string; latency_ms: number | null }>('POST', `/pool/${id}/test-latency`);
+      return webRequest<{ entry_id: string; latency_ms: number | null; error_detail?: string }>('POST', `/pool/${id}/test-latency`);
     },
 
     backfillCatalogMeta: (items) =>

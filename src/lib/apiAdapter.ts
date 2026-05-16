@@ -28,7 +28,7 @@ export interface ApiAdapter {
     reorder(orderedIds: string[]): Promise<void>;
     create(params: { channelId: string; model: string; displayName?: string; groupName?: string }): Promise<ApiEntry>;
     delete(id: string): Promise<void>;
-    testLatency(id: string): Promise<{ entry_id: string; latency_ms: number | null }>;
+    testLatency(id: string): Promise<{ entry_id: string; latency_ms: number | null; error_detail?: string }>;
     backfillCatalogMeta(items: { entryId: string; catalogProvider: string; catalogModelId: string }[]): Promise<void>;
     getGroups(): Promise<string[]>;
     updateGroup(id: string, groupName: string): Promise<void>;

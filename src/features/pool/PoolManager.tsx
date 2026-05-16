@@ -320,7 +320,7 @@ function CardBody({
 }: {
   entry: ApiEntry;
   onTest: (entry: ApiEntry) => void;
-  onDelete: (entry: ApiEntry) => void;
+  onDelete: (entry: ApiEntry, options?: { shiftKey?: boolean }) => void;
   onToggleIntent: (entry: ApiEntry, enabled: boolean, options: { ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }) => void;
   onGroupChange?: (entry: ApiEntry, group: string) => void;
   groups?: string[];
@@ -378,7 +378,7 @@ function CardBody({
             <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground touch-none" onClick={() => onTest(entry)}>
               <MessageSquare className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-500 touch-none" onClick={() => onDelete(entry)}>
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-500 touch-none" onClick={(e) => { e.stopPropagation(); onDelete(entry, { shiftKey: e.shiftKey }); }}>
               <Trash2 className="h-4 w-4" />
             </Button>
           </div>
@@ -394,7 +394,7 @@ function CardBody({
 function SortablePoolEntryCard(props: {
   entry: ApiEntry;
   onTest: (entry: ApiEntry) => void;
-  onDelete: (entry: ApiEntry) => void;
+  onDelete: (entry: ApiEntry, options?: { shiftKey?: boolean }) => void;
   onToggleIntent: (entry: ApiEntry, enabled: boolean, options: { ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }) => void;
   onGroupChange?: (entry: ApiEntry, group: string) => void;
   groups?: string[];
@@ -426,7 +426,7 @@ function SortablePoolEntryCard(props: {
 function PoolEntryCard(props: {
   entry: ApiEntry;
   onTest: (entry: ApiEntry) => void;
-  onDelete: (entry: ApiEntry) => void;
+  onDelete: (entry: ApiEntry, options?: { shiftKey?: boolean }) => void;
   onToggleIntent: (entry: ApiEntry, enabled: boolean, options: { ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }) => void;
   onGroupChange?: (entry: ApiEntry, group: string) => void;
   groups?: string[];
@@ -539,8 +539,13 @@ export function PoolManager() {
   const [testResults, setTestResults] = useState<Record<string, string>>({});
   const [testErrorDetails, setTestErrorDetails] = useState<Record<string, string>>({});
   const [testProgress, setTestProgress] = useState<{ current: number; total: number } | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<ApiEntry | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<{ entry: ApiEntry; channelMode: boolean } | null>(null);
   const [groupFilter, setGroupFilter] = useState<string>("auto");
+
+  const entriesQueryKey = useMemo(
+    () => ["entries", "paginated", groupFilter, filterChannel, debouncedFilter] as const,
+    [groupFilter, filterChannel, debouncedFilter],
+  );
 
   // 搜索输入 300ms 防抖，避免每次按键都触发后端请求
   useEffect(() => {
@@ -556,7 +561,7 @@ export function PoolManager() {
     isFetchingNextPage,
     isLoading,
   } = useInfiniteQuery({
-    queryKey: ["entries", "paginated", groupFilter, filterChannel, debouncedFilter],
+    queryKey: entriesQueryKey,
     queryFn: ({ pageParam = 1 }) =>
       adapter.pool.listPaginated({
         page: pageParam,
@@ -565,11 +570,10 @@ export function PoolManager() {
         channelId: filterChannel !== "all" ? filterChannel : undefined,
         search: debouncedFilter.trim() || undefined,
       }) as Promise<PaginatedResult<ApiEntry>>,
-    placeholderData: (previousData) => previousData,
     getNextPageParam: (lastPage) =>
       lastPage.page * lastPage.page_size < lastPage.total ? lastPage.page + 1 : undefined,
     initialPageParam: 1,
-    staleTime: 2000,
+    staleTime: 0,
   });
 
   const { data: channels, isLoading: channelsLoading } = useQuery({ queryKey: ["channels", "all"], queryFn: () => adapter.channels.list() as Promise<Channel[]>, staleTime: 2000 });
@@ -614,7 +618,7 @@ export function PoolManager() {
    // This hook is a no-op on web builds (useTauriEvent returns false).
    // Event: "tray-priority-changed" — triggered when user reorders entries via system tray.
    useTauriEvent("tray-priority-changed", () => {
-     queryClient.invalidateQueries({ queryKey: ["entries"] });
+     queryClient.invalidateQueries({ queryKey: entriesQueryKey });
      queryClient.invalidateQueries({ queryKey: ["settings"] });
    });
 
@@ -625,7 +629,7 @@ export function PoolManager() {
      const now = Date.now();
      if (now - lastEntriesEvent.current < 300) return;
      lastEntriesEvent.current = now;
-     queryClient.invalidateQueries({ queryKey: ["entries"] });
+     queryClient.invalidateQueries({ queryKey: entriesQueryKey });
    });
 
    useEvent("channels-changed", () => {
@@ -666,7 +670,7 @@ export function PoolManager() {
     mutationFn: (orderedIds: string[]) => adapter.pool.reorder(orderedIds),
     onSuccess: () => {
       const scrollY = window.scrollY;
-      queryClient.invalidateQueries({ queryKey: ["entries"] });
+      queryClient.invalidateQueries({ queryKey: entriesQueryKey });
       setLocalOrder(null);
       requestAnimationFrame(() => window.scrollTo(0, scrollY));
     },
@@ -675,15 +679,27 @@ export function PoolManager() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => adapter.pool.delete(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["entries"] });
-      setDeleteTarget(null);
+      queryClient.invalidateQueries({ queryKey: entriesQueryKey });
+      setDeleteDialog(null);
+    },
+  });
+
+  const deleteChannelMutation = useMutation({
+    mutationFn: (id: string) => adapter.channels.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: entriesQueryKey });
+      queryClient.invalidateQueries({ queryKey: ["channels"] });
+      setDeleteDialog(null);
+    },
+    onError: (err, id) => {
+      toast.error(`删除渠道失败: ${err instanceof Error ? err.message : String(err)}`, { id: `delete-channel-${id}` });
     },
   });
 
   const updateGroupMutation = useMutation({
     mutationFn: ({ id, groupName }: { id: string; groupName: string }) => adapter.pool.updateGroup(id, groupName),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["entries"] });
+      queryClient.invalidateQueries({ queryKey: entriesQueryKey });
     },
     onError: (err) => {
       toast.error(`${t("apiPool.group.updateFailed")}: ${err}`);
@@ -699,11 +715,9 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
       if (options.shiftKey) {
         const targetEntries = filteredEntries;
         const targetIds = targetEntries.map((e) => e.id);
-        const currentIds = localOrder ? localOrder : displayEntries.map((e) => e.id);
         // Use batch IPC to avoid N concurrent invoke calls in Tauri
         await adapter.pool.batchToggle(targetIds, enabled);
-        setLocalOrder(currentIds);
-        requestAnimationFrame(() => queryClient.invalidateQueries({ queryKey: ["entries"] }));
+        requestAnimationFrame(() => queryClient.invalidateQueries({ queryKey: entriesQueryKey }));
         return;
       }
 
@@ -715,11 +729,9 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
        setLocalOrder(newOrder);
        reorderMutation.mutate(newOrder);
      } else {
-       const currentIds = localOrder ? localOrder : displayEntries.map((e) => e.id);
-       setLocalOrder(currentIds);
-       requestAnimationFrame(() => queryClient.invalidateQueries({ queryKey: ["entries"] }));
+       requestAnimationFrame(() => queryClient.invalidateQueries({ queryKey: entriesQueryKey }));
      }
-   }, [adapter.pool, displayEntries, filteredEntries, localOrder, queryClient, reorderMutation]);
+    }, [adapter.pool, displayEntries, entriesQueryKey, filteredEntries, localOrder, queryClient, reorderMutation]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 
@@ -790,32 +802,9 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
     setTestResults({});
     setTestErrorDetails({});
     setTestProgress(null);
-    queryClient.invalidateQueries({ queryKey: ["entries"] });
-  }, [adapter.pool, filteredEntries, queryClient, testProgress]);
+    await queryClient.invalidateQueries({ queryKey: entriesQueryKey });
+  }, [adapter.pool, entriesQueryKey, filteredEntries, queryClient, testProgress]);
 
-  if (isLoading) {
-    return (
-      <div className="p-6 space-y-4">
-        <div className="h-6 w-48 animate-pulse bg-muted rounded" />
-        <div className="flex gap-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-6 w-16 animate-pulse bg-muted rounded" />
-          ))}
-        </div>
-        <div className="space-y-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-3 p-4 border rounded-md">
-              <div className="h-10 w-10 shrink-0 animate-pulse bg-muted rounded" />
-              <div className="flex-1 space-y-2">
-                <div className="h-4 w-1/3 animate-pulse bg-muted rounded" />
-                <div className="h-3 w-1/2 animate-pulse bg-muted rounded" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="p-6">
@@ -861,52 +850,79 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
       ) : null}
       <Card className="rounded-t-none">
         <CardContent className="p-4 pt-4">
-          {!entries?.length ? (
-            <div className="flex h-48 items-center justify-center text-muted-foreground">{t("apiPool.empty")}</div>
-          ) : canReorder ? (
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-              <SortableContext items={filteredEntries.map((e) => e.id)} strategy={verticalListSortingStrategy}>
-                <div className="flex flex-col gap-3">
-                  {filteredEntries.map((entry) => {
-                    const meta = getEntryDisplayMeta(entry, catalogMap);
-                    return <SortablePoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={setDeleteTarget} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} testErrorDetail={testErrorDetails[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
-                  })}
-                  {/* 无限滚动 sentinel */}
-                  <div ref={sentinelRef} className="h-4" />
-                  {isFetchingNextPage && (
-                    <div className="flex justify-center py-4 text-sm text-muted-foreground">
-                      Loading...
-                    </div>
-                  )}
+          {isLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 p-4 border rounded-md">
+                  <div className="h-10 w-10 shrink-0 animate-pulse bg-muted rounded" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 w-1/3 animate-pulse bg-muted rounded" />
+                    <div className="h-3 w-1/2 animate-pulse bg-muted rounded" />
+                  </div>
                 </div>
-              </SortableContext>
-            </DndContext>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {filteredEntries.map((entry) => {
-                const meta = getEntryDisplayMeta(entry, catalogMap);
-                return <PoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={setDeleteTarget} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} testErrorDetail={testErrorDetails[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
-              })}
-              <div ref={sentinelRef} className="h-4" />
-              {isFetchingNextPage && (
-                <div className="flex justify-center py-4 text-sm text-muted-foreground">
-                  Loading...
-                </div>
-              )}
+              ))}
             </div>
+          ) : (
+            (!entries?.length ? (
+              <div className="flex h-48 items-center justify-center text-muted-foreground">{t("apiPool.empty")}</div>
+            ) : canReorder ? (
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <SortableContext items={filteredEntries.map((e) => e.id)} strategy={verticalListSortingStrategy}>
+                  <div className="flex flex-col gap-3">
+                    {filteredEntries.map((entry) => {
+                      const meta = getEntryDisplayMeta(entry, catalogMap);
+                      return <SortablePoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={(entry, opts) => { setDeleteDialog({ entry, channelMode: !!opts?.shiftKey }); }} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} testErrorDetail={testErrorDetails[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
+                    })}
+                    {/* 无限滚动 sentinel */}
+                    <div ref={sentinelRef} className="h-4" />
+                    {isFetchingNextPage && (
+                      <div className="flex justify-center py-4 text-sm text-muted-foreground">
+                        Loading...
+                      </div>
+                    )}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {filteredEntries.map((entry) => {
+                  const meta = getEntryDisplayMeta(entry, catalogMap);
+                  return <PoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={(entry, opts) => { setDeleteDialog({ entry, channelMode: !!opts?.shiftKey }); }} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} testErrorDetail={testErrorDetails[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
+                })}
+                <div ref={sentinelRef} className="h-4" />
+                {isFetchingNextPage && (
+                  <div className="flex justify-center py-4 text-sm text-muted-foreground">
+                    Loading...
+                  </div>
+                )}
+              </div>
+            ))
           )}
         </CardContent>
       </Card>
       <AddApiDialog open={showAdd} onOpenChange={setShowAdd} channels={channels || []} channelsLoading={channelsLoading} adapter={adapter} />
       <TestChatDialog open={!!testEntry} onOpenChange={(v) => !v && setTestEntry(null)} entry={testEntry} />
-      <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>
+      <Dialog open={!!deleteDialog} onOpenChange={(v) => { if (!v) setDeleteDialog(null); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{t("common.deleteTitle")}</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">{t("common.deleteWarning")}</p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>{t("common.cancel")}</Button>
-            <Button variant="destructive" disabled={deleteMutation.isPending} onClick={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget.id); }}>{t("common.delete")}</Button>
-          </DialogFooter>
+          {deleteDialog?.channelMode ? (
+            <>
+              <DialogHeader><DialogTitle>删除渠道</DialogTitle></DialogHeader>
+              <p className="text-sm text-muted-foreground">确定要删除渠道「{deleteDialog.entry.channel_name || deleteDialog.entry.channel_id}」及其下所有模型吗？此操作不可撤销。</p>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setDeleteDialog(null)}>{t("common.cancel")}</Button>
+                <Button variant="destructive" disabled={deleteChannelMutation.isPending} onClick={() => { if (deleteDialog) deleteChannelMutation.mutate(deleteDialog.entry.channel_id); }}>删除渠道</Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader><DialogTitle>{t("common.deleteTitle")}</DialogTitle></DialogHeader>
+              <p className="text-sm text-muted-foreground">{t("common.deleteWarning")}</p>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setDeleteDialog(null)}>{t("common.cancel")}</Button>
+                <Button variant="destructive" disabled={deleteMutation.isPending} onClick={() => { if (deleteDialog) deleteMutation.mutate(deleteDialog.entry.id); }}>{t("common.delete")}</Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>

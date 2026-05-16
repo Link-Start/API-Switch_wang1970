@@ -1,5 +1,6 @@
 use crate::error::AppError;
 use crate::proxy::protocol::get_adapter;
+use crate::services::log_service::{insert_test_usage_log, TestUsageLogInput};
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -65,23 +66,92 @@ pub async fn test_chat(
         .apply_auth(client.post(&url), &channel.api_key)
         .json(&upstream_body);
 
-    let response = request
-        .send()
-        .await
-        .map_err(|e| AppError::Network(format!("Request failed: {e}")))?;
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(e) => {
+            let latency_ms = start.elapsed().as_millis() as i64;
+            let message = format!("Request failed: {e}");
+            insert_test_usage_log(
+                &db,
+                None,
+                TestUsageLogInput {
+                    entry: &entry,
+                    channel: &channel,
+                    operation: "test_chat",
+                    log_group: "test_chat",
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    latency_ms,
+                    status_code: 502,
+                    success: false,
+                    error_message: Some(&message),
+                    error_kind: Some("network_error"),
+                    response_ms: None,
+                    error_preview: None,
+                },
+            );
+            return Err(AppError::Network(message));
+        }
+    };
 
     if !response.status().is_success() {
+        let latency_ms = start.elapsed().as_millis() as i64;
         let status = response.status();
+        let status_code = status.as_u16() as i32;
         let body = response.text().await.unwrap_or_default();
-        return Err(AppError::Proxy(format!("Upstream error {status}: {body}")));
+        let error_message = format!("Upstream error {status}: {body}");
+        let log_message = format!("upstream_http_{}", status.as_u16());
+        insert_test_usage_log(
+            &db,
+            None,
+            TestUsageLogInput {
+                entry: &entry,
+                channel: &channel,
+                operation: "test_chat",
+                log_group: "test_chat",
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                latency_ms,
+                status_code,
+                success: false,
+                error_message: Some(&log_message),
+                error_kind: Some("http_error"),
+                response_ms: None,
+                error_preview: Some(&body),
+            },
+
+        );
+        return Err(AppError::Proxy(error_message));
     }
 
     let latency_ms = start.elapsed().as_millis() as u64;
 
-    let json_body: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| AppError::Internal(format!("Failed to parse response: {e}")))?;
+    let json_body: serde_json::Value = match response.json().await {
+        Ok(body) => body,
+        Err(e) => {
+            let message = format!("Failed to parse response: {e}");
+            insert_test_usage_log(
+                &db,
+                None,
+                TestUsageLogInput {
+                    entry: &entry,
+                    channel: &channel,
+                    operation: "test_chat",
+                    log_group: "test_chat",
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    latency_ms: latency_ms as i64,
+                    status_code: 502,
+                    success: false,
+                    error_message: Some(&message),
+                    error_kind: Some("parse_error"),
+                    response_ms: None,
+                    error_preview: None,
+                },
+            );
+            return Err(AppError::Internal(message));
+        }
+    };
 
     // Transform response if needed (e.g. Claude → OpenAI format)
     let mut json_body = json_body;
@@ -106,6 +176,26 @@ pub async fn test_chat(
             .unwrap_or(0),
         total_tokens: u.get("total_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
     });
+
+    insert_test_usage_log(
+        &db,
+        None,
+        TestUsageLogInput {
+            entry: &entry,
+            channel: &channel,
+            operation: "test_chat",
+            log_group: "test_chat",
+            prompt_tokens: usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0),
+            completion_tokens: usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0),
+            latency_ms: latency_ms as i64,
+            status_code: 200,
+            success: true,
+            error_message: None,
+            error_kind: None,
+            response_ms: Some(&latency_ms.to_string()),
+            error_preview: None,
+        },
+    );
 
     Ok(TestChatResponse {
         content,

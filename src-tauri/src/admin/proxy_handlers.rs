@@ -72,8 +72,9 @@ pub async fn start(
         port,
         runtime.db.clone(),
         runtime.settings.clone(),
-Some(app_handle.clone()),
+        Some(app_handle.clone()),
         runtime.failure_counts.clone(),
+        runtime.dirty.clone(),
     );
 
     // Build admin router for combined mode (same logic as proxy_cmd::start_proxy)

@@ -158,6 +158,7 @@ pub async fn create(
             notes: payload.notes,
         },
     )?;
+    state.mark_channel_dirty();
     Ok(Json(res))
 }
 
@@ -176,6 +177,7 @@ pub async fn update(
         notes: payload.notes,
     };
     let chan = channel_service::update_channel(&state.db, None, params)?;
+    state.mark_channel_dirty();
     Ok(Json(chan))
 }
 
@@ -184,6 +186,8 @@ pub async fn delete(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
     channel_service::delete_channel(&state.db, None, id)?;
+    state.mark_channel_dirty();
+    state.mark_pool_dirty();
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -230,6 +234,8 @@ pub async fn select_models(
         &payload.model_names,
         &payload.catalog_meta,
     )?;
+    state.mark_channel_dirty();
+    state.mark_pool_dirty();
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -244,6 +250,7 @@ pub async fn update_response_ms(
             response_ms: payload.response_ms,
         },
     )?;
+    state.mark_channel_dirty();
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -285,5 +292,6 @@ pub async fn test_channel(
     } else {
         let _ = state.db.disable_channel(&channel.id);
     }
+    state.mark_channel_dirty();
     Ok(Json(result))
 }

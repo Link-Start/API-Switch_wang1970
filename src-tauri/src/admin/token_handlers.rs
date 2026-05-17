@@ -43,6 +43,7 @@ pub async fn create_token(
     Json(payload): Json<CreateTokenParams>,
 ) -> Result<Json<AccessKey>, AdminError> {
     let key = token_service::create_access_key(&state.db, &payload.name)?;
+    state.mark_token_dirty();
     Ok(Json(key))
 }
 
@@ -51,6 +52,7 @@ pub async fn delete_token(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
     token_service::delete_access_key(&state.db, &id, state.app_handle.as_ref())?;
+    state.mark_token_dirty();
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -60,5 +62,6 @@ pub async fn toggle_token(
     Json(enabled): Json<bool>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
     token_service::toggle_access_key(&state.db, &id, enabled, state.app_handle.as_ref())?;
+    state.mark_token_dirty();
     Ok(Json(serde_json::json!({"ok": true})))
 }

@@ -94,6 +94,7 @@ pub async fn create(
             group_name: payload.group_name,
         },
     )?;
+    state.mark_pool_dirty();
     Ok(Json(entry))
 }
 
@@ -115,6 +116,7 @@ pub async fn toggle(
         &id,
         enabled,
     )?;
+    state.mark_pool_dirty();
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -124,6 +126,7 @@ pub async fn delete(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
     pool_service::delete_entry(&state.db, &id)?;
+    state.mark_pool_dirty();
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -133,6 +136,7 @@ pub async fn reorder(
     Json(payload): Json<ReorderParams>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
     pool_service::reorder_entries(&state.db, &payload.ordered_ids)?;
+    state.mark_pool_dirty();
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -141,7 +145,12 @@ pub async fn test_latency(
     State(state): State<AdminState>,
     Path(id): Path<String>,
 ) -> Result<Json<pool_service::TestLatencyResult>, AdminError> {
-    let result = pool_service::test_entry_latency(&state.db, &id).await?;
+    let result = pool_service::test_entry_latency(
+        &state.db,
+        &id,
+        state.runtime.as_ref().map(|runtime| runtime.dirty.as_ref()),
+    )
+    .await?;
     Ok(Json(result))
 }
 
@@ -163,6 +172,7 @@ pub async fn backfill_catalog_meta(
         .collect();
 
     pool_service::backfill_entry_catalog_meta(&state.db, updates)?;
+    state.mark_pool_dirty();
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -179,5 +189,6 @@ pub async fn update_group(
     Json(group_name): Json<String>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
     pool_service::update_entry_group(&state.db, &id, &group_name)?;
+    state.mark_pool_dirty();
     Ok(Json(serde_json::json!({"ok": true})))
 }

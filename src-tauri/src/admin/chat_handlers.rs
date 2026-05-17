@@ -97,6 +97,7 @@ pub async fn test_chat(
                     error_preview: None,
                 },
             );
+            state.mark_log_dirty();
             return Err(AdminError::Internal(message));
         }
     };
@@ -155,6 +156,7 @@ pub async fn test_chat(
                     error_preview: None,
                 },
             );
+            state.mark_log_dirty();
             return Err(AdminError::Internal(message));
         }
     };
@@ -200,6 +202,7 @@ pub async fn test_chat(
             error_preview: None,
         },
     );
+    state.mark_log_dirty();
 
     Ok(Json(TestChatResponse {
         content,

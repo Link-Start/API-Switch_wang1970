@@ -1,6 +1,7 @@
 mod admin;
 mod commands;
 mod database;
+mod dirty;
 mod embedded_pool;
 mod error;
 mod proxy;
@@ -19,6 +20,7 @@ use std::sync::Arc;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
+use dirty::DirtyFlags;
 
 pub use error::AppError;
 
@@ -45,6 +47,7 @@ pub struct AppState {
     pub translation_relay: Arc<tokio::sync::RwLock<Option<TranslationRelayPayload>>>,
     pub failure_counts: Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
     pub runtime_mode: RuntimeMode,
+    pub dirty: Arc<DirtyFlags>,
 }
 
 pub(crate) const TRAY_ID: &str = "api-switch-tray";
@@ -123,6 +126,7 @@ pub fn run() {
                 tokio::sync::RwLock::new(std::collections::HashMap::new()),
             ),
             runtime_mode,
+            dirty: Arc::new(DirtyFlags::new()),
         };
             app.manage(state);
 
@@ -141,8 +145,9 @@ pub fn run() {
                         port,
                         app_state.db.clone(),
                         app_state.settings.clone(),
-Some(handle.clone()),
+                        Some(handle.clone()),
                         app_state.failure_counts.clone(),
+                        app_state.dirty.clone(),
                     );
                     if let Err(e) = server.start_with_admin(admin_router).await {
                         log::error!("Failed to auto-start proxy: {e}");
@@ -261,6 +266,7 @@ Some(handle.clone()),
         commands::channel::probe_url,
         commands::channel::test_channel,
         commands::channel::select_models,
+        commands::dirty_cmds::take_dirty,
         commands::pool::list_entries,
         commands::pool::list_entries_paginated,
         commands::pool::toggle_entry,
@@ -497,6 +503,7 @@ fn run_headless() {
             translation_relay: Arc::new(RwLock::new(None)),
             failure_counts: Arc::new(RwLock::new(HashMap::new())),
             runtime_mode: RuntimeMode::Standalone,
+            dirty: Arc::new(DirtyFlags::new()),
         };
 
         // 启动转发（app_handle = None）
@@ -526,6 +533,7 @@ fn run_headless() {
                 settings,
                 None,
                 app_state.failure_counts.clone(),
+                app_state.dirty.clone(),
             );
             if let Err(e) = server.start_with_admin(admin_router).await {
                 log::error!("Failed to start proxy: {e}");

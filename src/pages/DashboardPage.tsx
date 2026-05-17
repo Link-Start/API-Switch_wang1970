@@ -348,11 +348,15 @@ export function DashboardPage() {
                       ))}
                     </Pie>
                     <Tooltip
-                      formatter={(value: number) =>
-                        distributionMode === "tokens"
-                          ? formatCompactNumber(value)
-                          : value.toLocaleString()
-                      }
+                      formatter={(value: unknown) => {
+                        const numericValue = typeof value === "number" ? value : Number(value);
+                        if (!Number.isFinite(numericValue)) {
+                          return String(value ?? "");
+                        }
+                        return distributionMode === "tokens"
+                          ? formatCompactNumber(numericValue)
+                          : numericValue.toLocaleString();
+                      }}
                     />
                     <Legend />
                   </PieChart>

@@ -5,6 +5,7 @@ import { useEvent } from "@/lib/events";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { useApiAdapter } from "@/lib/useApiAdapter";
+import { useDirtyPolling } from "../lib/useDirtyPolling";
 import type { UsageLogFilter } from "@/types";
 
 interface UsageLogMeta {
@@ -48,6 +49,8 @@ export function LogPage() {
   const [filter, setFilter] = useState<UsageLogFilter>({ page: 1, page_size: 100 });
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  useDirtyPolling('log');
 
   useEvent("new-usage-log", () => {
     queryClient.invalidateQueries({ queryKey: ["usageLogs"] });

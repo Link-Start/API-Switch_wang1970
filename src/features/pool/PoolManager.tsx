@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useApiAdapter } from "@/lib/useApiAdapter";
+import { useDirtyPolling } from "../../lib/useDirtyPolling";
 import { useTauriEvent } from "@/lib/useTauriEvent";
 import { useEvent } from "@/lib/events";
 import { type ApiEntry, type Channel, type PaginatedResult } from "@/types";
@@ -546,6 +547,12 @@ export function PoolManager() {
     () => ["entries", "paginated", groupFilter, filterChannel, debouncedFilter] as const,
     [groupFilter, filterChannel, debouncedFilter],
   );
+  const dirtyQueryKeys = useMemo(
+    () => [entriesQueryKey, ['channels', 'all'], ['groups']] as const,
+    [entriesQueryKey],
+  );
+
+  useDirtyPolling('pool', dirtyQueryKeys);
 
   // 搜索输入 300ms 防抖，避免每次按键都触发后端请求
   useEffect(() => {

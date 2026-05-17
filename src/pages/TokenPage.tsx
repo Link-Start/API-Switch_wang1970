@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2, Copy, Check } from "lucide-react";
@@ -15,6 +15,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { useApiAdapter } from "@/lib/useApiAdapter";
+import { useDirtyPolling } from "../lib/useDirtyPolling";
 import { toast } from "sonner";
 import type { AccessKey, PaginatedResult } from "@/types";
 
@@ -27,6 +28,9 @@ export function TokenPage() {
   const [createdKey, setCreatedKey] = useState<AccessKey | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AccessKey | null>(null);
+  const dirtyQueryKeys = useMemo(() => [["accessKeys", "paginated"]] as const, []);
+
+  useDirtyPolling('token', dirtyQueryKeys);
 
   const {
     data: keysPages,

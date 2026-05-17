@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn, formatResponseMs } from '@/lib/utils';
 import { getCatalogModel, getCatalogProviderLogo, formatTokenCount } from '@/lib/modelsCatalog';
 import { useApiAdapter } from '../../lib/useApiAdapter';
+import { useDirtyPolling } from '../../lib/useDirtyPolling';
 import { useEvent } from '@/lib/events';
 import { getChannelErrorMessage } from './channelErrors';
 import type { PaginatedResult } from '@/types';
@@ -190,6 +191,10 @@ export const ChannelManager: React.FC = () => {
     queryFn: () => api.pool.list(),
     staleTime: 2000,
   });
+  const dirtyQueryKeys = useMemo(() => [['channels', 'paginated'], ['entries']] as const, []);
+
+  useDirtyPolling('channel', dirtyQueryKeys);
+
   const rawChannels = useMemo(() => channelPages?.pages.flatMap((page) => page.items) ?? [], [channelPages]);
   const channels = useMemo(() => sortChannels(rawChannels), [rawChannels]);
   const entryCountMap = useMemo(() => {

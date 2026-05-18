@@ -327,6 +327,7 @@
       "userTrend": "User Trend"
     },
     "filter": {
+      "all": "All",
       "today": "Today",
       "sevenDays": "7 Days",
       "thirtyDays": "30 Days",

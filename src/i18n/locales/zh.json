@@ -327,6 +327,7 @@
       "userTrend": "用户消耗"
     },
     "filter": {
+      "all": "所有",
       "today": "今日",
       "sevenDays": "7天",
       "thirtyDays": "30天",

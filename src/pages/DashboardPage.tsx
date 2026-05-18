@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { useApiAdapter } from "@/lib/useApiAdapter";
 import type { DashboardFilter } from "@/types";
@@ -107,34 +106,43 @@ function StatCard({ title, value, totalLabel }: { title: string; value: number; 
 export function DashboardPage() {
   const { t } = useTranslation();
   const api = useApiAdapter();
-  const [filter, setFilter] = useState<DashboardFilter>({ granularity: "hour" });
+  const [chartRange, setChartRange] = useState<"all" | "today">("all");
   const [distributionMode, setDistributionMode] = useState<"count" | "tokens">("count");
   const [manualGranularity, setManualGranularity] = useState<"hour" | "day" | null>(null);
+
+  const chartRangeFilter = useMemo<DashboardFilter>(() => {
+    if (chartRange === "today") {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return { start_time: Math.floor(today.getTime() / 1000) };
+    }
+    return {};
+  }, [chartRange]);
 
   // 根据时间跨度自动计算 granularity
   const autoGranularity = useMemo<"hour" | "day">(() => {
     // 没有时间范围 = "查全部数据"，默认 day
-    if (filter.start_time === undefined && filter.end_time === undefined) {
+    if (chartRangeFilter.start_time === undefined && chartRangeFilter.end_time === undefined) {
       return "day";
     }
     const now = Date.now() / 1000;
-    const start = filter.start_time ?? now;
-    const end = filter.end_time ?? now;
+    const start = chartRangeFilter.start_time ?? now;
+    const end = chartRangeFilter.end_time ?? now;
     const spanDays = (end - start) / 86400;
     return spanDays > 7 ? "day" : "hour";
-  }, [filter.start_time, filter.end_time]);
+  }, [chartRangeFilter.start_time, chartRangeFilter.end_time]);
 
   // 用户手动选择优先，否则自动
   const effectiveGranularity = manualGranularity ?? autoGranularity;
 
   const effectiveFilter = useMemo(() => ({
-    ...filter,
+    ...chartRangeFilter,
     granularity: effectiveGranularity,
-  }), [filter, effectiveGranularity]);
+  }), [chartRangeFilter, effectiveGranularity]);
 
   const { data: stats } = useQuery({
-    queryKey: ["dashboardStats", effectiveFilter],
-    queryFn: () => api.usage.getDashboardStats(effectiveFilter),
+    queryKey: ["dashboardStats", "cards"],
+    queryFn: () => api.usage.getDashboardStats({}),
   });
 
   const { data: consumption } = useQuery({
@@ -188,32 +196,24 @@ export function DashboardPage() {
     total_tokens: item.prompt_tokens + item.completion_tokens,
   }));
 
-  const setTimeRange = (range: string) => {
-    const now = Date.now() / 1000;
-    let start: number;
-    switch (range) {
-      case "today": {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        start = Math.floor(today.getTime() / 1000);
-        break;
-      }
-      case "7d":
-        start = now - 7 * 86400;
-        break;
-      case "30d":
-        start = now - 30 * 86400;
-        break;
-      default:
-        start = 0;
-    }
-    setFilter((prev) => ({ ...prev, start_time: start, end_time: undefined }));
-    setManualGranularity(null); // 切换时间范围时重置为自动
+  const updateChartRange = (range: "all" | "today") => {
+    setChartRange(range);
+    setManualGranularity(null);
   };
 
   return (
     <div className="p-6">
-      <h1 className="text-xl font-semibold mb-6">{t("dashboard.title")}</h1>
+      <div className="flex items-center justify-between gap-3 mb-6">
+        <h1 className="text-xl font-semibold">{t("dashboard.title")}</h1>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span>{t("dashboard.filter.all")}</span>
+          <Switch
+            checked={chartRange === "today"}
+            onCheckedChange={(checked) => updateChartRange(checked ? "today" : "all")}
+          />
+          <span>{t("dashboard.filter.today")}</span>
+        </div>
+      </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">

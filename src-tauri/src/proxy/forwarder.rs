@@ -661,6 +661,13 @@ async fn forward_single(
         }
         let (prompt_tokens, completion_tokens) = extract_usage_tokens(&response_body);
 
+        if !nonstream_response_has_valid_output(&response_body) {
+            return Err((
+                "upstream HTTP 200 completed without valid output".to_string(),
+                502,
+            ));
+        }
+
         Ok(ForwardResult {
             response: axum::Json(response_body).into_response(),
             prompt_tokens,
@@ -682,6 +689,29 @@ fn extract_usage_tokens(body: &Value) -> (i64, i64) {
         .and_then(Value::as_i64)
         .unwrap_or(0);
     (prompt_tokens, completion_tokens)
+}
+
+fn nonstream_response_has_valid_output(body: &Value) -> bool {
+    body.get("choices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|choice| {
+            let message = choice.get("message");
+            let has_content = message
+                .and_then(|msg| msg.get("content"))
+                .and_then(Value::as_str)
+                .is_some_and(|content| !content.is_empty());
+            let has_tool_calls = message
+                .and_then(|msg| msg.get("tool_calls"))
+                .and_then(Value::as_array)
+                .is_some_and(|tool_calls| !tool_calls.is_empty());
+            let has_function_call = message
+                .and_then(|msg| msg.get("function_call"))
+                .is_some_and(|function_call| !function_call.is_null());
+
+            has_content || has_tool_calls || has_function_call
+        })
 }
 
 fn request_uses_structured_output(body: &Value) -> bool {
@@ -2066,6 +2096,34 @@ data: [DONE]\n",
         assert!(is_completed_stream_success(200, false, false, false, 5));
         assert!(!is_completed_stream_success(200, true, true, false, 5));
         assert!(!is_completed_stream_success(502, false, true, false, 5));
+    }
+
+    #[test]
+    fn nonstream_response_requires_visible_output() {
+        let empty_content_with_usage = serde_json::json!({
+            "choices": [{"message": {"role": "assistant", "content": ""}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 20}
+        });
+        assert!(!nonstream_response_has_valid_output(&empty_content_with_usage));
+
+        let text = serde_json::json!({
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}]
+        });
+        assert!(nonstream_response_has_valid_output(&text));
+
+        let tool_call = serde_json::json!({
+            "choices": [{"message": {"role": "assistant", "content": null, "tool_calls": [{"id": "call_1"}]}}]
+        });
+        assert!(nonstream_response_has_valid_output(&tool_call));
+    }
+
+    #[test]
+    fn nonstream_response_reasoning_only_is_not_visible_output() {
+        let reasoning_only = serde_json::json!({
+            "choices": [{"message": {"role": "assistant", "content": "", "reasoning_content": "hidden"}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 20}
+        });
+        assert!(!nonstream_response_has_valid_output(&reasoning_only));
     }
 
     #[test]

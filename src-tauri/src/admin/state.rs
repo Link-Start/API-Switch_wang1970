@@ -63,11 +63,13 @@ impl AdminState {
         if let Some(runtime) = &self.runtime {
             runtime.dirty.mark_token();
         }
+        crate::state_version::bump();
     }
 
     pub fn mark_log_dirty(&self) {
         if let Some(runtime) = &self.runtime {
             runtime.dirty.mark_log();
         }
+        crate::state_version::bump();
     }
 }

@@ -129,6 +129,7 @@ pub async fn test_chat(
             },
 
         );
+        state.mark_log_dirty();
         return Err(AdminError::Internal(error_message));
     }
 

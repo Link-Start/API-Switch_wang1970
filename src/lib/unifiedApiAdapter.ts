@@ -6,6 +6,7 @@ import type {
   FetchModelsResult,
   ProbeResult,
   TestChannelResult,
+  TestChannelDirectParams,
   ModelInfo,
   ModelCatalogMetaUpdate,
   SaveChannelWithModelsParams,
@@ -59,6 +60,7 @@ async function tauriCmd<T>(cmd: string, args?: Record<string, unknown>): Promise
 // ------------------------------------------------------------------
 
 let lastSettingsVersion = 0;
+const lastDirtyStateVersions: Partial<Record<'log' | 'pool' | 'channel' | 'token', number>> = {};
 
 interface ChannelOperationError {
   code: string;
@@ -253,10 +255,20 @@ export const apiAdapter: ApiAdapter = {
         ? tauriCmd<void>('update_channel_response_ms', { params: { channelId, responseMs } })
         : webRequest<void>('PUT', `/channels/${channelId}/response-ms`, { channelId, responseMs }),
 
+    saveChannelWithModels: (params) =>
+      useTauri()
+        ? tauriCmd<SaveChannelWithModelsResult>('save_channel_with_models', { params })
+        : webRequest<SaveChannelWithModelsResult>('POST', '/channels/save-with-models', params),
+
     testChannel: (channelId) =>
       useTauri()
         ? tauriCmd<TestChannelResult>('test_channel', { channelId })
         : webRequest<TestChannelResult>('POST', `/channels/${channelId}/test`),
+
+    testChannelDirect: (params: TestChannelDirectParams) =>
+      useTauri()
+        ? tauriCmd<TestChannelResult>('test_channel_direct', { params })
+        : webRequest<TestChannelResult>('POST', '/channels/test-direct', params),
   },
 
   usage: {
@@ -483,13 +495,20 @@ export const apiAdapter: ApiAdapter = {
       : webRequest<TestChatResponse>('POST', '/test-chat', { entry_id: entryId, messages }),
 
   dirty: {
-    /** 杞鑴忔爣璁帮紝妯″潡鍙栧€? 'log' | 'pool' | 'channel' | 'token' */
-    take: (module: 'log' | 'pool' | 'channel' | 'token') => {
+    /** 脏标记轮询，模块取值 'log' | 'pool' | 'channel' | 'token' */
+    take: async (module: 'log' | 'pool' | 'channel' | 'token') => {
       if (useTauri()) {
-        return tauriCmd<boolean>('take_dirty', { module });
+        return tauriCmd<boolean>('take_dirty', { params: { module } });
       }
-      // Web 鐜鏃犺剰鏍囪鏈哄埗锛岄粯璁よ繑鍥?false
-      return Promise.resolve(false);
+      const { version } = await webRequest<{ version: number }>('GET', '/state-version');
+      const lastVersion = lastDirtyStateVersions[module];
+      if (lastVersion === undefined) {
+        lastDirtyStateVersions[module] = version;
+        return false;
+      }
+      if (version === lastVersion) return false;
+      lastDirtyStateVersions[module] = version;
+      return true;
     },
   },
 

@@ -33,13 +33,14 @@ impl ProtocolAdapter for OpenAiAdapter {
     }
 
     fn transform_request(&self, body: &mut Value, actual_model: &str) {
+        // OpenAI-compatible reasoning/THINK extensions are passthrough only: preserve, never synthesize.
         if let Some(obj) = body.as_object_mut() {
             obj.insert("model".to_string(), Value::String(actual_model.to_string()));
         }
     }
 
     fn transform_response(&self, _body: &mut Value) {
-        // Passthrough — already in OpenAI format.
+        // Passthrough preserves non-standard reasoning_content returned by OpenAI-compatible providers.
     }
 
     fn needs_sse_transform(&self) -> bool {
@@ -84,5 +85,57 @@ impl ProtocolAdapter for OpenAiAdapter {
                     .collect()
             })
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn transform_request_preserves_openai_compatible_reasoning_extensions() {
+        let adapter = OpenAiAdapter;
+        let mut body = json!({
+            "model": "auto",
+            "reasoning_effort": "high",
+            "thinking": {"type": "enabled", "budget_tokens": 4096},
+            "messages": [{
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "kept reasoning",
+                "provider_specific": {"thinking": "kept provider thinking"}
+            }]
+        });
+
+        adapter.transform_request(&mut body, "resolved-model");
+
+        assert_eq!(body["model"], "resolved-model");
+        assert_eq!(body["reasoning_effort"], "high");
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["messages"][0]["reasoning_content"], "kept reasoning");
+        assert_eq!(
+            body["messages"][0]["provider_specific"]["thinking"],
+            "kept provider thinking"
+        );
+    }
+
+    #[test]
+    fn transform_response_preserves_openai_compatible_reasoning_extensions() {
+        let adapter = OpenAiAdapter;
+        let mut body = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "visible",
+                    "reasoning_content": "kept reasoning"
+                }
+            }]
+        });
+        let original = body.clone();
+
+        adapter.transform_response(&mut body);
+
+        assert_eq!(body, original);
     }
 }

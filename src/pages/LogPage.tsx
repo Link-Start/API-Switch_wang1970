@@ -1,7 +1,6 @@
 import { useState, Fragment } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { useEvent } from "@/lib/events";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { useApiAdapter } from "@/lib/useApiAdapter";
@@ -45,16 +44,11 @@ function formatAttemptPath(meta: UsageLogMeta | null): string[] {
 export function LogPage() {
   const { t } = useTranslation();
   const api = useApiAdapter();
-  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<UsageLogFilter>({ page: 1, page_size: 100 });
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   useDirtyPolling('log');
-
-  useEvent("new-usage-log", () => {
-    queryClient.invalidateQueries({ queryKey: ["usageLogs"] });
-  });
 
   const { data: result, isLoading } = useQuery({
     queryKey: ["usageLogs", filter],

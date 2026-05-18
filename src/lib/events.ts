@@ -56,6 +56,7 @@ export interface EventManager {
 class DesktopEventManager implements EventManager {
   private subscriptions = new Map<EventName, Set<EventHandler>>();
   private unlistenFns = new Map<EventName, () => void>();
+  private pendingListeners = new Set<EventName>();
 
   isActive(): boolean {
     return isTauriRuntime();
@@ -74,14 +75,24 @@ class DesktopEventManager implements EventManager {
     this.subscriptions.get(eventName)!.add(callback);
 
     // Set up Tauri listener only once per event name
-    if (!this.unlistenFns.has(eventName)) {
+    if (!this.unlistenFns.has(eventName) && !this.pendingListeners.has(eventName)) {
+      this.pendingListeners.add(eventName);
       import("@tauri-apps/api/event")
         .then(({ listen }) =>
           listen(eventName, () => {
             this.subscriptions.get(eventName)?.forEach((cb) => cb());
           })
         )
+        .then((unlisten) => {
+          this.pendingListeners.delete(eventName);
+          if (this.subscriptions.has(eventName)) {
+            this.unlistenFns.set(eventName, unlisten);
+          } else {
+            unlisten();
+          }
+        })
         .catch(() => {
+          this.pendingListeners.delete(eventName);
           // Silently fail when event API is unavailable
         });
     }

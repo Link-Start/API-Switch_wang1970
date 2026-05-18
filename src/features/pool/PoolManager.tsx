@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { ChannelEditorDialog } from "@/features/channels/editor";
 import {
   Dialog,
   DialogContent,
@@ -307,6 +308,7 @@ function CardBody({
   onDelete,
   onToggleIntent,
   onGroupChange,
+  onEditChannel,
   groups,
   testingEntryIds,
   testResult,
@@ -324,6 +326,7 @@ function CardBody({
   onDelete: (entry: ApiEntry, options?: { shiftKey?: boolean }) => void;
   onToggleIntent: (entry: ApiEntry, enabled: boolean, options: { ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }) => void;
   onGroupChange?: (entry: ApiEntry, group: string) => void;
+  onEditChannel?: (entry: ApiEntry) => void;
   groups?: string[];
   testingEntryIds?: Set<string>;
   testResult?: string;
@@ -350,7 +353,13 @@ function CardBody({
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-medium truncate">{entry.model}</span>
           <StatusDot state={getEntryStatus(entry)} />
-          <span className="font-medium truncate">{entry.channel_name || "—"}</span>
+          {onEditChannel && entry.channel_name ? (
+            <Button variant="link" className="h-auto p-0 text-foreground font-medium truncate" onClick={(e) => { e.stopPropagation(); onEditChannel(entry); }}>
+              {entry.channel_name}
+            </Button>
+          ) : (
+            <span className="font-medium truncate">{entry.channel_name || "—"}</span>
+          )}
           {testingEntryIds?.has(entry.id) ? <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
             : testResult === "X" ? <XCircle className="h-3 w-3 text-red-500 shrink-0" />
             : testResult ? <span className="text-xs text-green-600 shrink-0">({formatResponseMs(testResult)})</span>
@@ -398,6 +407,7 @@ function SortablePoolEntryCard(props: {
   onDelete: (entry: ApiEntry, options?: { shiftKey?: boolean }) => void;
   onToggleIntent: (entry: ApiEntry, enabled: boolean, options: { ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }) => void;
   onGroupChange?: (entry: ApiEntry, group: string) => void;
+  onEditChannel?: (entry: ApiEntry) => void;
   groups?: string[];
   testingEntryIds?: Set<string>;
   testResult?: string;
@@ -430,6 +440,7 @@ function PoolEntryCard(props: {
   onDelete: (entry: ApiEntry, options?: { shiftKey?: boolean }) => void;
   onToggleIntent: (entry: ApiEntry, enabled: boolean, options: { ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }) => void;
   onGroupChange?: (entry: ApiEntry, group: string) => void;
+  onEditChannel?: (entry: ApiEntry) => void;
   groups?: string[];
   testingEntryIds?: Set<string>;
   testResult?: string;
@@ -542,6 +553,8 @@ export function PoolManager() {
   const [testProgress, setTestProgress] = useState<{ current: number; total: number } | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<{ entry: ApiEntry; channelMode: boolean } | null>(null);
   const [groupFilter, setGroupFilter] = useState<string>("auto");
+  const [editingChannel, setEditingChannel] = useState<Channel | null>(null);
+  const [channelEditorOpen, setChannelEditorOpen] = useState(false);
 
   const entriesQueryKey = useMemo(
     () => ["entries", "paginated", groupFilter, filterChannel, debouncedFilter] as const,
@@ -713,9 +726,19 @@ export function PoolManager() {
     },
   });
 
-  const handleGroupChange = useCallback((entry: ApiEntry, group: string) => {
-    updateGroupMutation.mutate({ id: entry.id, groupName: group.trim() || "auto" });
-  }, [updateGroupMutation]);
+const handleGroupChange = useCallback((entry: ApiEntry, group: string) => {
+  updateGroupMutation.mutate({ id: entry.id, groupName: group.trim() || "auto" });
+}, [updateGroupMutation]);
+
+  const openChannelEditor = useCallback((entry: ApiEntry) => {
+    const channel = channels?.find((c) => c.id === entry.channel_id);
+    if (!channel) {
+      toast.error(`找不到渠道：${entry.channel_id}`);
+      return;
+    }
+    setEditingChannel(channel);
+    setChannelEditorOpen(true);
+  }, [channels]);
 
 const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean, options: { ctrlKey: boolean; shiftKey: boolean; metaKey: boolean }) => {
       const hotKey = options.ctrlKey || options.metaKey;
@@ -878,7 +901,7 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
                   <div className="flex flex-col gap-3">
                     {filteredEntries.map((entry) => {
                       const meta = getEntryDisplayMeta(entry, catalogMap);
-                      return <SortablePoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={(entry, opts) => { setDeleteDialog({ entry, channelMode: !!opts?.shiftKey }); }} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} testErrorDetail={testErrorDetails[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
+                      return <SortablePoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={(entry, opts) => { setDeleteDialog({ entry, channelMode: !!opts?.shiftKey }); }} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} onEditChannel={openChannelEditor} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} testErrorDetail={testErrorDetails[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
                     })}
                     {/* 无限滚动 sentinel */}
                     <div ref={sentinelRef} className="h-4" />
@@ -894,7 +917,7 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
               <div className="flex flex-col gap-3">
                 {filteredEntries.map((entry) => {
                   const meta = getEntryDisplayMeta(entry, catalogMap);
-                  return <PoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={(entry, opts) => { setDeleteDialog({ entry, channelMode: !!opts?.shiftKey }); }} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} testErrorDetail={testErrorDetails[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
+                  return <PoolEntryCard key={entry.id} entry={entry} onTest={setTestEntry} onDelete={(entry, opts) => { setDeleteDialog({ entry, channelMode: !!opts?.shiftKey }); }} onToggleIntent={handleToggleIntent} onGroupChange={handleGroupChange} onEditChannel={openChannelEditor} groups={groups} testingEntryIds={testingEntryIds} testResult={testResults[entry.id]} testErrorDetail={testErrorDetails[entry.id]} catalogLogo={meta.logo} catalogReleaseDate={meta.releaseDate} catalogContext={meta.context} catalogOutput={meta.output} catalogFeatures={meta.features} modelMetaZh={meta.modelMetaZh} modelMetaEn={meta.modelMetaEn} />;
                 })}
                 <div ref={sentinelRef} className="h-4" />
                 {isFetchingNextPage && (
@@ -932,6 +955,21 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
           )}
         </DialogContent>
       </Dialog>
+      <ChannelEditorDialog
+        open={channelEditorOpen}
+        channel={editingChannel}
+        onOpenChange={(open) => {
+          setChannelEditorOpen(open);
+          if (!open) setEditingChannel(null);
+        }}
+        onSaved={async () => {
+          setChannelEditorOpen(false);
+          setEditingChannel(null);
+          await queryClient.invalidateQueries({ queryKey: entriesQueryKey });
+          await queryClient.invalidateQueries({ queryKey: ["channels", "all"] });
+          await queryClient.invalidateQueries({ queryKey: ["entries"] });
+        }}
+      />
     </div>
   );
 }

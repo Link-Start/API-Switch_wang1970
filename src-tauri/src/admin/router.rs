@@ -1,4 +1,4 @@
-use crate::admin::auth::require_auth;
+﻿use crate::admin::auth::require_auth;
 use crate::admin::channel_handlers;
 use crate::admin::chat_handlers;
 use crate::admin::cors::apply_admin_cors;
@@ -24,12 +24,13 @@ pub fn build_admin_router(state: AdminState) -> Router {
                 .put(handlers::update_settings)
                 .patch(handlers::patch_settings),
         )
-        // Channel API routes – all require auth
+        // Channel API routes 鈥?all require auth
         .route(
             "/admin/channels",
             get(channel_handlers::list).post(channel_handlers::create),
         )
         .route("/admin/channels/paginated", get(channel_handlers::list_paginated))
+        .route("/admin/channels/save-with-models", post(channel_handlers::save_with_models))
         .route(
             "/admin/channels/:id",
             get(channel_handlers::list)
@@ -60,7 +61,7 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/admin/channels/:id/test",
             post(channel_handlers::test_channel),
         )
-        // Pool API routes – all require auth
+        // Pool API routes 鈥?all require auth
         .route(
             "/admin/pool",
             get(pool_handlers::list).post(pool_handlers::create),
@@ -79,7 +80,7 @@ pub fn build_admin_router(state: AdminState) -> Router {
         )
         .route("/admin/pool/groups", get(pool_handlers::get_groups))
         .route("/admin/pool/:id/group", put(pool_handlers::update_group))
-        // Token API routes – all require auth
+        // Token API routes 鈥?all require auth
         .route(
             "/admin/tokens",
             get(token_handlers::list_tokens).post(token_handlers::create_token),
@@ -90,7 +91,7 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/admin/tokens/:id/toggle",
             put(token_handlers::toggle_token),
         )
-        // Usage/Dashboard API routes – all require auth
+        // Usage/Dashboard API routes 鈥?all require auth
         .route("/admin/logs", get(usage_handlers::get_logs))
         .route(
             "/admin/dashboard/stats",
@@ -158,3 +159,4 @@ pub fn build_admin_router(state: AdminState) -> Router {
         .with_state(state)
         .route_layer(middleware::from_fn(apply_admin_cors))
 }
+

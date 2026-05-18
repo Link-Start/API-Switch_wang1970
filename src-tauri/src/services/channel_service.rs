@@ -1,4 +1,4 @@
-use crate::admin::{
+﻿use crate::admin::{
     ERROR_CODE_EMPTY_MODEL_LIST, ERROR_CODE_ENDPOINT_CORRECTION_FAILED,
     ERROR_CODE_ENDPOINT_UNREACHABLE, ERROR_CODE_ENDPOINT_VALIDATION_FAILED,
     ERROR_CODE_FETCH_MODELS_FAILED, ERROR_CODE_HTTP_CLIENT_ERROR, ERROR_CODE_INVALID_CREDENTIALS,
@@ -181,7 +181,7 @@ pub struct FetchModelsResult {
     pub auto_saved: bool,
 }
 
-// Service functions – thin wrappers around existing logic
+// Service functions 鈥?thin wrappers around existing logic
 
 #[derive(Serialize)]
 pub struct TestChannelResult {
@@ -191,6 +191,29 @@ pub struct TestChannelResult {
     pub message: String,
 }
 
+#[derive(Deserialize)]
+pub struct SaveChannelWithModelsParams {
+    pub id: Option<String>,
+    pub name: String,
+    pub api_type: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub notes: Option<String>,
+    pub enabled: Option<bool>,
+    pub selected_models: Vec<String>,
+    pub available_models: Vec<ModelInfo>,
+    pub catalog_meta: Option<Vec<crate::database::dao::api_entry_dao::ModelCatalogMetaInput>>,
+    pub response_ms: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct SaveChannelWithModelsResult {
+    pub channel: Channel,
+    pub models_synced: bool,
+    pub response_ms_updated: bool,
+    pub entries_changed: bool,
+    pub warnings: Vec<String>,
+}
 pub fn update_channel_response_ms(
     db: &Database,
     params: UpdateResponseMsParams,
@@ -411,7 +434,7 @@ pub async fn fetch_models(
                 message,
                 warning: endpoint_corrected.then(|| {
                     format!(
-                        "Endpoint correction suggested: {} {} → {} {}. Review and save manually.",
+                        "Endpoint correction suggested: {} {} 鈫?{} {}. Review and save manually.",
                         channel.api_type,
                         original_base_url,
                         guess.detected_type,
@@ -426,7 +449,7 @@ pub async fn fetch_models(
         Err(error) => {
             let warning = endpoint_corrected.then(|| {
                 format!(
-                    "Endpoint correction suggested: {} {} → {} {}. Models were not saved automatically because fetch failed.",
+                    "Endpoint correction suggested: {} {} 鈫?{} {}. Models were not saved automatically because fetch failed.",
                     channel.api_type,
                     original_base_url,
                     guess.detected_type,
@@ -543,7 +566,7 @@ async fn detect_endpoint_guess(
         DetectionResult::NotFound => {}
     }
 
-    for current_type in ["custom", "openai", "claude", "gemini", "azure"] {
+    for current_type in ["openai", "responses", "anthropic", "gemini", "azure"] {
         let candidate_base_url = if current_type == "custom" {
             &original_url
         } else {
@@ -674,9 +697,9 @@ async fn fetch_models_result_with_fallback(
 fn build_try_types(preferred_type: &str) -> Vec<&'static str> {
     let mut seen = std::collections::HashSet::new();
     let normalized: &'static str = match preferred_type {
-        "openai" => "openai",
+        "openai" | "responses" | "custom" => "openai",
         "gemini" => "gemini",
-        "claude" => "claude",
+        "claude" | "anthropic" => "anthropic",
         "azure" => "azure",
         "custom" => "custom",
         _ => "custom",
@@ -933,7 +956,7 @@ async fn try_chat_probe(
     api_type: &str,
 ) -> Option<ProbeSuccess> {
     let test_model = match api_type {
-        "claude" => "claude-3-5-sonnet-20241022",
+        "claude" | "anthropic" => "claude-3-5-sonnet-20241022",
         "gemini" => "gemini-2.0-flash",
         _ => "gpt-4o-mini",
     };
@@ -984,7 +1007,7 @@ fn known_models_for_type(api_type: &str) -> Vec<ModelInfo> {
             ("o3-mini", "openai"),
             ("o4-mini", "openai"),
         ],
-        "claude" => &[
+        "claude" | "anthropic" => &[
             ("claude-sonnet-4-20250514", "anthropic"),
             ("claude-3-5-sonnet-20241022", "anthropic"),
             ("claude-3-5-haiku-20241022", "anthropic"),
@@ -1033,7 +1056,7 @@ fn dedup_models(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
 }
 
 /// Test a channel by actually chatting with the model.
-/// Sends "请只回复 OK", expects response to contain "OK" (case-insensitive).
+/// Sends "璇峰彧鍥炲 OK", expects response to contain "OK" (case-insensitive).
 /// Records latency and returns success/failure with HTTP status code.
 pub async fn test_channel_chat(
     base_url: &str,
@@ -1062,7 +1085,7 @@ pub async fn test_channel_chat(
     let body = serde_json::json!({
         "model": model,
         "messages": [
-            {"role": "user", "content": "请只回复 OK"}
+            {"role": "user", "content": "璇峰彧鍥炲 OK"}
         ],
         "max_tokens": 10,
         "temperature": 0.0
@@ -1125,4 +1148,75 @@ pub async fn test_channel_chat(
             }
         }
     }
+}
+
+
+pub fn save_channel_with_models(
+    db: &Database,
+    app: Option<&tauri::AppHandle>,
+    params: SaveChannelWithModelsParams,
+) -> Result<SaveChannelWithModelsResult, AppError> {
+    let mut warnings = Vec::new();
+    
+    // 1. Create or Update channel
+    let channel = if let Some(id) = &params.id {
+        db.update_channel(
+            id,
+            Some(&params.name),
+            Some(&params.api_type),
+            Some(&params.base_url),
+            Some(&params.api_key),
+            params.enabled,
+            params.notes.as_deref(),
+        )?;
+        db.get_channel(id)?
+    } else {
+        db.create_channel(
+            &params.name,
+            &params.api_type,
+            &params.base_url,
+            &params.api_key,
+            params.notes.as_deref(),
+        )?
+    };
+
+    // 2. Update response_ms if provided
+    let mut response_ms_updated = false;
+    if let Some(ms) = params.response_ms {
+        if let Err(e) = db.update_channel_response_ms(&channel.id, &ms) {
+            warnings.push(format!("Failed to update response time: {e}"));
+        } else {
+            response_ms_updated = true;
+        }
+    }
+
+    // 3. Sync models
+    let mut models_synced = false;
+    let catalog_meta = params.catalog_meta.unwrap_or_default();
+    if let Err(e) = db.update_channel_models(&channel.id, &params.available_models, &params.selected_models) {
+        warnings.push(format!("Failed to update channel model snapshot: {e}"));
+    } else {
+        // Sync to api_entries
+        if let Err(e) = crate::services::pool_service::sync_entries_for_channel(db, &channel.id, &params.selected_models, &params.available_models, &catalog_meta) {
+            warnings.push(format!("Failed to sync API pool entries: {e}"));
+        } else {
+            models_synced = true;
+        }
+    }
+
+    // 4. Notifications & Dirty flags
+    if let Some(app) = app {
+        let _ = app.emit("channels-changed", ());
+        let _ = app.emit("entries-changed", ());
+        crate::refresh_tray_if_enabled(app);
+    }
+    crate::state_version::bump();
+
+    Ok(SaveChannelWithModelsResult {
+        channel,
+        models_synced,
+        response_ms_updated,
+        entries_changed: true,
+        warnings,
+    })
 }

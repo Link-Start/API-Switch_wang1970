@@ -1,4 +1,4 @@
-use crate::database::dao::PaginatedResult;
+﻿use crate::database::dao::PaginatedResult;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
@@ -137,13 +137,13 @@ impl Database {
         conn.execute(
             "INSERT INTO channels (id, name, api_type, base_url, api_key, available_models, selected_models, enabled, last_fetch_at, notes, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, '[]', '[]', 1, 0, ?6, ?7, ?8)",
-            rusqlite::params![id, name, api_type, base_url, api_key, notes.unwrap_or(""), now, now],
+            rusqlite::params![id, name, match api_type.to_lowercase().as_str() { "custom" => "openai", "claude" => "anthropic", t => t }, base_url, api_key, notes.unwrap_or(""), now, now],
         )?;
 
         Ok(Channel {
             id,
             name: name.to_string(),
-            api_type: api_type.to_string(),
+            api_type: match api_type.to_lowercase().as_str() { "custom" => "openai", "claude" => "anthropic", t => t.to_string() },
             base_url: base_url.to_string(),
             api_key: api_key.to_string(),
             available_models: vec![],
@@ -201,7 +201,7 @@ impl Database {
         };
 
         let name = name.unwrap_or(&current.name);
-        let api_type = api_type.unwrap_or(&current.api_type);
+        let api_type = match api_type.unwrap_or(&current.api_type).to_lowercase().as_str() { "custom" => "openai", "claude" => "anthropic", t => t };
         let base_url = base_url.unwrap_or(&current.base_url);
         let api_key = api_key.unwrap_or(&current.api_key);
         let enabled_val = enabled.unwrap_or(current.enabled) as i32;
@@ -380,3 +380,7 @@ impl Database {
         Ok(())
     }
 }
+
+
+
+

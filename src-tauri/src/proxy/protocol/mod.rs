@@ -1,10 +1,10 @@
-/// Protocol adapter module.
+﻿/// Protocol adapter module.
 ///
 /// Each API type (openai, claude, gemini, azure, custom) has its own adapter file.
 /// A shared [`ProtocolAdapter`] trait defines the interface; [`get_adapter()`] returns
 /// the concrete implementation for a given `api_type` string.
 ///
-/// Callers never match on `api_type` themselves — they go through the trait.
+/// Callers never match on `api_type` themselves 鈥?they go through the trait.
 mod azure;
 mod claude;
 mod common;
@@ -30,7 +30,7 @@ use serde_json::Value;
 
 /// Every API type must implement this trait.
 pub trait ProtocolAdapter {
-    // ── URL building ────────────────────────────────────────────────
+    // 鈹€鈹€ URL building 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     /// Build the full URL for a chat completions request.
     /// `base_url` is the user-provided base URL, `model` is the resolved model name.
     fn build_chat_url(&self, base_url: &str, model: &str) -> String;
@@ -39,7 +39,7 @@ pub trait ProtocolAdapter {
     /// May include query params (e.g. Gemini `?key=...`, Azure `?api-version=...`).
     fn build_models_url(&self, base_url: &str, api_key: &str) -> String;
 
-    // ── Authentication ─────────────────────────────────────────────
+    // 鈹€鈹€ Authentication 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     /// Whether this type authenticates via URL query parameter instead of headers.
     #[allow(dead_code)]
     fn uses_query_auth(&self) -> bool;
@@ -55,16 +55,16 @@ pub trait ProtocolAdapter {
         api_key: &str,
     ) -> reqwest::RequestBuilder;
 
-    // ── Request body ───────────────────────────────────────────────
+    // 鈹€鈹€ Request body 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     /// Transform an OpenAI-format request into this type's upstream format.
     /// `actual_model` is the resolved model name from the API entry.
     fn transform_request(&self, body: &mut Value, actual_model: &str);
 
-    // ── Non-streaming response ─────────────────────────────────────
+    // 鈹€鈹€ Non-streaming response 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     /// Transform an upstream JSON response into OpenAI format (in-place).
     fn transform_response(&self, body: &mut Value);
 
-    // ── Streaming (SSE) ────────────────────────────────────────────
+    // 鈹€鈹€ Streaming (SSE) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     /// Whether the SSE stream needs transformation (false = passthrough original bytes).
     fn needs_sse_transform(&self) -> bool;
 
@@ -76,7 +76,7 @@ pub trait ProtocolAdapter {
     /// Only called when [`needs_sse_transform`] returns `true`.
     fn transform_sse_line(&self, data_line: &str) -> Option<String>;
 
-    // ── Models list parsing ────────────────────────────────────────
+    // 鈹€鈹€ Models list parsing 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     /// Parse a models list response into `[(model_id, owned_by)]`.
     fn parse_models_response(&self, body: &Value) -> Vec<(String, Option<String>)>;
 }
@@ -84,13 +84,12 @@ pub trait ProtocolAdapter {
 /// Return the adapter for a given `api_type` string.
 /// Unknown types fall back to the OpenAI adapter (broad compatibility).
 pub fn get_adapter(api_type: &str) -> Box<dyn ProtocolAdapter + Send + Sync> {
-    match api_type {
+        match api_type {
         "claude" | "anthropic" => Box::new(claude::ClaudeAdapter),
         "gemini" => Box::new(gemini::GeminiAdapter),
         "azure" => Box::new(azure::AzureAdapter),
-        "custom" => Box::new(custom::CustomAdapter),
-        "responses" => Box::new(responses::ResponsesAdapter),
-        _ => Box::new(openai::OpenAiAdapter), // openai + anything else
+        "custom" | "openai" | "responses" => Box::new(openai::OpenAiAdapter),
+        _ => Box::new(openai::OpenAiAdapter), // anything else
     }
 }
 
@@ -99,7 +98,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    // ─── Helper ───────────────────────────────────────────────────────
+    // 鈹€鈹€鈹€ Helper 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     fn parse_json(s: &str) -> serde_json::Value {
         serde_json::from_str(s).expect("valid JSON")
@@ -279,8 +278,8 @@ mod tests {
         a.transform_request(&mut body, "claude-3-opus");
 
         assert_eq!(body["model"], "claude-3-opus");
-        // system 可以是字符串或 content block array（官方文档允许两种形态）
-        // 当前实现用 array（Claude 4.5+ 兼容），验证语义等价即可
+        // system 鍙互鏄瓧绗︿覆鎴?content block array锛堝畼鏂规枃妗ｅ厑璁镐袱绉嶅舰鎬侊級
+        // 褰撳墠瀹炵幇鐢?array锛圕laude 4.5+ 鍏煎锛夛紝楠岃瘉璇箟绛変环鍗冲彲
         let system_text = match &body["system"] {
             Value::String(s) => s.clone(),
             Value::Array(arr) => arr
@@ -288,7 +287,7 @@ mod tests {
                 .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
                 .collect::<Vec<_>>()
                 .join(""),
-            _ => panic!("system 字段既不是 string 也不是 array"),
+            _ => panic!("system 瀛楁鏃笉鏄?string 涔熶笉鏄?array"),
         };
         assert_eq!(system_text, "You are helpful.");
         assert_eq!(body["messages"].as_array().unwrap().len(), 1);
@@ -366,7 +365,7 @@ mod tests {
                 {
                     "role": "tool",
                     "tool_call_id": "call_abc",
-                    "content": "Sunny, 25°C"
+                    "content": "Sunny, 25掳C"
                 }
             ],
             "max_tokens": 1024
@@ -390,7 +389,7 @@ mod tests {
         let tool_result = &msgs[2]["content"].as_array().unwrap()[0];
         assert_eq!(tool_result["type"], "tool_result");
         assert_eq!(tool_result["tool_use_id"], "call_abc");
-        assert_eq!(tool_result["content"], "Sunny, 25°C");
+        assert_eq!(tool_result["content"], "Sunny, 25掳C");
     }
 
     #[test]
@@ -867,7 +866,7 @@ mod tests {
             "messages": [{"role": "user", "content": "hello"}]
         });
         a.transform_request(&mut body, "gpt-4o-deployment");
-        // Azure ignores model in body — we remove it to avoid 400 errors
+        // Azure ignores model in body 鈥?we remove it to avoid 400 errors
         assert!(body.get("model").is_none());
         // messages preserved
         assert_eq!(body["messages"][0]["content"], "hello");
@@ -1137,7 +1136,7 @@ mod tests {
             body["systemInstruction"]["parts"][0]["text"],
             "You are helpful."
         );
-        // Messages → contents
+        // Messages 鈫?contents
         let contents = body["contents"].as_array().unwrap();
         assert_eq!(contents.len(), 1);
         assert_eq!(contents[0]["role"], "user");
@@ -1243,11 +1242,12 @@ mod tests {
 
     #[test]
     fn gemini_native_sse_transform_empty_text_no_chunk() {
-        // Gemini sends empty chunks between content — we still emit them
+        // Gemini sends empty chunks between content 鈥?we still emit them
         let line = r#"{"candidates":[{"content":{"parts":[{"text":""}],"role":"model"}}]}"#;
         let result = gemini::transform_gemini_sse_line(line).unwrap();
         let v: serde_json::Value = parse_json(&result);
-        // Empty text → no content in delta
+        // Empty text 鈫?no content in delta
         assert!(v["choices"][0]["delta"].as_object().unwrap().is_empty());
     }
 }
+

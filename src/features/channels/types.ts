@@ -1,4 +1,4 @@
-export interface Channel {
+﻿export interface Channel {
   id: string;
   name: string;
   api_type: string;
@@ -92,4 +92,27 @@ export interface TestChannelResult {
   latency_ms: number;
   status_code?: number;
   message: string;
+}
+
+
+export interface SaveChannelWithModelsParams {
+  id?: string;
+  name: string;
+  api_type: string;
+  base_url: string;
+  api_key: string;
+  notes?: string;
+  enabled?: boolean;
+  selected_models: string[];
+  available_models: ModelInfo[];
+  catalog_meta?: ModelCatalogMetaUpdate[];
+  response_ms?: string;
+}
+
+export interface SaveChannelWithModelsResult {
+  channel: Channel;
+  models_synced: boolean;
+  response_ms_updated: boolean;
+  entries_changed: boolean;
+  warnings: string[];
 }

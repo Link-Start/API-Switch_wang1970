@@ -1,4 +1,4 @@
-use crate::admin::error::{
+﻿use crate::admin::error::{
     AdminError, ERROR_CODE_BAD_REQUEST, ERROR_CODE_EMPTY_MODEL_LIST,
     ERROR_CODE_ENDPOINT_CORRECTION_FAILED, ERROR_CODE_ENDPOINT_UNREACHABLE,
     ERROR_CODE_INVALID_CREDENTIALS, ERROR_CODE_INVALID_URL, ERROR_CODE_RATE_LIMITED,
@@ -14,7 +14,7 @@ use crate::services::channel_service::{
 use axum::extract::{Json, Path, Query, State};
 use serde::Deserialize;
 
-// Types for request bodies – reuse the same definitions as in the Tauri commands
+// Types for request bodies 鈥?reuse the same definitions as in the Tauri commands
 #[derive(Deserialize)]
 pub struct CreateChannelParams {
     pub name: String,
@@ -293,5 +293,13 @@ pub async fn test_channel(
         let _ = state.db.disable_channel(&channel.id);
     }
     state.mark_channel_dirty();
+    Ok(Json(result))
+}
+
+pub async fn save_with_models(
+    State(state): State<AdminState>,
+    Json(params): Json<channel_service::SaveChannelWithModelsParams>,
+) -> Result<Json<channel_service::SaveChannelWithModelsResult>, AdminError> {
+    let result = channel_service::save_channel_with_models(&state.db, state.app_handle.as_ref(), params)?;
     Ok(Json(result))
 }

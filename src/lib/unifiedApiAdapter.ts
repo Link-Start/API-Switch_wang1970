@@ -1,4 +1,4 @@
-import type { ApiAdapter } from './apiAdapter';
+﻿import type { ApiAdapter } from './apiAdapter';
 import type {
   Channel,
   CreateChannelParams,
@@ -8,6 +8,8 @@ import type {
   TestChannelResult,
   ModelInfo,
   ModelCatalogMetaUpdate,
+  SaveChannelWithModelsParams,
+  SaveChannelWithModelsResult,
 } from '../features/channels/types';
 import type {
   DashboardFilter,
@@ -193,7 +195,7 @@ function useTauri(): boolean {
 }
 
 // ============================================================
-// Unified adapter — single source of truth for every endpoint
+// Unified adapter 鈥?single source of truth for every endpoint
 // ============================================================
 
 export const apiAdapter: ApiAdapter = {
@@ -425,22 +427,22 @@ export const apiAdapter: ApiAdapter = {
       if (useTauri()) {
         await tauriCmd<void>('update_settings', { settings });
       } else {
-        // Web：PUT 前先获取最新版本号；版本冲突时自动重试（最多 3 次）
+        // Web锛歅UT 鍓嶅厛鑾峰彇鏈€鏂扮増鏈彿锛涚増鏈啿绐佹椂鑷姩閲嶈瘯锛堟渶澶?3 娆★級
         for (let attempt = 0; attempt < 3; attempt++) {
           const latest = await webRequest<{ data: AppSettings; _version: number }>('GET', '/settings');
           try {
-            // PUT 返回 RestartResponse { _version, ... }
+            // PUT 杩斿洖 RestartResponse { _version, ... }
             const result = await webRequest<{ _version: number }>('PUT', '/settings', {
               data: settings,
               _version: latest._version,
             });
-            lastSettingsVersion = result._version; // PUT 成功后更新版本号
+            lastSettingsVersion = result._version; // PUT 鎴愬姛鍚庢洿鏂扮増鏈彿
             return;
           } catch (err: unknown) {
             const httpErr = err as ChannelOperationHttpError;
-            // 版本冲突（HTTP 409）：重试获取最新版本
+            // 鐗堟湰鍐茬獊锛圚TTP 409锛夛細閲嶈瘯鑾峰彇鏈€鏂扮増鏈?
             if (httpErr?.status === 409 && attempt < 2) continue;
-            throw err; // 其他错误或重试耗尽则抛出
+            throw err; // 鍏朵粬閿欒鎴栭噸璇曡€楀敖鍒欐姏鍑?
           }
         }
       }
@@ -481,12 +483,12 @@ export const apiAdapter: ApiAdapter = {
       : webRequest<TestChatResponse>('POST', '/test-chat', { entry_id: entryId, messages }),
 
   dirty: {
-    /** 轮询脏标记，模块取值: 'log' | 'pool' | 'channel' | 'token' */
+    /** 杞鑴忔爣璁帮紝妯″潡鍙栧€? 'log' | 'pool' | 'channel' | 'token' */
     take: (module: 'log' | 'pool' | 'channel' | 'token') => {
       if (useTauri()) {
         return tauriCmd<boolean>('take_dirty', { module });
       }
-      // Web 环境无脏标记机制，默认返回 false
+      // Web 鐜鏃犺剰鏍囪鏈哄埗锛岄粯璁よ繑鍥?false
       return Promise.resolve(false);
     },
   },
@@ -525,3 +527,4 @@ export const apiAdapter: ApiAdapter = {
 
 // Type import for translation relay response shape used only in the web path
 import type { TranslationRelayResponse } from '../types';
+

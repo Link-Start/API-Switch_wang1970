@@ -1,4 +1,4 @@
-mod admin;
+﻿mod admin;
 mod backup;
 mod commands;
 mod database;
@@ -63,7 +63,7 @@ pub fn run() {
         mode_source
     );
 
-    // 无桌面环境 → headless 模式（只启动转发+Web，不走 Tauri GUI）
+    // 鏃犳闈㈢幆澧?鈫?headless 妯″紡锛堝彧鍚姩杞彂+Web锛屼笉璧?Tauri GUI锛?
     if should_run_headless(runtime_mode, mode_source) {
         run_headless();
         return;
@@ -77,7 +77,7 @@ pub fn run() {
             let db = Database::open()?;
             db.create_tables()?;
 
-            // 首次运行：自动初始化默认渠道（如无任何渠道且密钥池存在）
+            // 棣栨杩愯锛氳嚜鍔ㄥ垵濮嬪寲榛樿娓犻亾锛堝鏃犱换浣曟笭閬撲笖瀵嗛挜姹犲瓨鍦級
             if db.list_channels().map_or(true, |c| c.is_empty()) {
                 let xor_key: u8 = 0xA5;
                 let decrypted: Vec<u8> = embedded_pool::POOL.iter().map(|&b| b ^ xor_key).collect();
@@ -110,7 +110,7 @@ pub fn run() {
 
             let mut settings_cache = db.get_settings().unwrap_or_default();
             admin::apply_admin_env(&mut settings_cache);
-            // 版本号同步：确保 DB 中 app_version 与实际编译版本一致
+            // 鐗堟湰鍙峰悓姝ワ細纭繚 DB 涓?app_version 涓庡疄闄呯紪璇戠増鏈竴鑷?
             let compiled_version = env!("CARGO_PKG_VERSION");
             if settings_cache.app_version != compiled_version {
                 settings_cache.app_version = compiled_version.to_string();
@@ -239,7 +239,7 @@ pub fn run() {
                     let _ = window.show();
                 }
 
-                // Intercept window close → hide to tray instead of exiting
+                // Intercept window close 鈫?hide to tray instead of exiting
                 let win = window.clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -297,7 +297,7 @@ pub fn run() {
         commands::usage::get_user_ranking,
         commands::usage::get_user_trend,
         commands::config::get_settings,
-        commands::config::update_settings,
+                commands::channel::save_channel_with_models,`n        commands::config::update_settings,
         commands::config::check_update,
         commands::proxy_cmd::start_proxy,
         commands::proxy_cmd::stop_proxy,
@@ -383,7 +383,7 @@ fn tray_debounce_check() -> bool {
     let lock = LAST_TRAY_REFRESH.get_or_init(|| std::sync::Mutex::new(now));
     let Ok(mut last) = lock.lock() else { return false };
     if now.duration_since(*last).as_millis() < TRAY_DEBOUNCE_MS as u128 {
-        return false; // 防抖：500ms 内不重复重建
+        return false; // 闃叉姈锛?00ms 鍐呬笉閲嶅閲嶅缓
     }
     *last = now;
     true
@@ -453,17 +453,17 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
     }
 }
 
-/// 检测是否进入 headless 模式
+/// 妫€娴嬫槸鍚﹁繘鍏?headless 妯″紡
 fn should_run_headless(mode: RuntimeMode, source: ModeSource) -> bool {
     match source {
-        // 用户明确指定了 --headless/--nodisktop 或 API_SWITCH_HEADLESS=1
+        // 鐢ㄦ埛鏄庣‘鎸囧畾浜?--headless/--nodisktop 鎴?API_SWITCH_HEADLESS=1
         ModeSource::Cli | ModeSource::Env => mode == RuntimeMode::Standalone,
-        // 没指定参数，自动检测桌面环境
+        // 娌℃寚瀹氬弬鏁帮紝鑷姩妫€娴嬫闈㈢幆澧?
         ModeSource::Auto => !has_desktop(),
     }
 }
 
-/// 桌面环境检测（仅 Linux 需要检查，Win/Mac 默认有桌面）
+/// 妗岄潰鐜妫€娴嬶紙浠?Linux 闇€瑕佹鏌ワ紝Win/Mac 榛樿鏈夋闈級
 fn has_desktop() -> bool {
     #[cfg(target_os = "linux")]
     {
@@ -475,7 +475,7 @@ fn has_desktop() -> bool {
     }
 }
 
-/// 无头模式入口：只启动转发+Web，不走 Tauri GUI
+/// 鏃犲ご妯″紡鍏ュ彛锛氬彧鍚姩杞彂+Web锛屼笉璧?Tauri GUI
 fn run_headless() {
     use admin::AdminState;
     use tokio::sync::RwLock;
@@ -483,12 +483,12 @@ fn run_headless() {
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
 
     rt.block_on(async {
-        // DB 初始化
+        // DB 鍒濆鍖?
         let db = Database::open().expect("Failed to open database");
         db.create_tables().expect("Failed to create tables");
         let mut settings = db.get_settings().unwrap_or_default();
         admin::apply_admin_env(&mut settings);
-        // 版本号同步
+        // 鐗堟湰鍙峰悓姝?
         let compiled_version = env!("CARGO_PKG_VERSION");
         if settings.app_version != compiled_version {
             settings.app_version = compiled_version.to_string();
@@ -498,7 +498,7 @@ fn run_headless() {
         let settings = Arc::new(RwLock::new(settings));
         let db = Arc::new(db);
 
-        // AppState（不需要 Tauri）
+        // AppState锛堜笉闇€瑕?Tauri锛?
         let app_state = AppState {
             db: db.clone(),
             settings: settings.clone(),
@@ -510,8 +510,8 @@ fn run_headless() {
             dirty: Arc::new(DirtyFlags::new()),
         };
 
-        // 启动转发（app_handle = None）
-        // 无头模式：强制开启 Web Admin，不管配置里是 0 还是 1
+        // 鍚姩杞彂锛坅pp_handle = None锛?
+        // 鏃犲ご妯″紡锛氬己鍒跺紑鍚?Web Admin锛屼笉绠￠厤缃噷鏄?0 杩樻槸 1
         {
             let mut w = settings.write().await;
             w.web_admin_enabled = true;
@@ -548,18 +548,18 @@ fn run_headless() {
         }
 
         let port = settings_snapshot.listen_port;
-        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!("鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹?);
         println!("  API Switch is running");
         println!("  Proxy:      http://127.0.0.1:{}/v1/...", port);
         println!("  Web Admin:  http://127.0.0.1:{}", port);
-        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!("鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹?);
         println!("  Press Ctrl+C to stop");
 
-        // 等待 Ctrl+C
+        // 绛夊緟 Ctrl+C
         tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
         println!("\nShutting down...");
 
-        // 优雅停止代理
+        // 浼橀泤鍋滄浠ｇ悊
         {
             let mut proxy_guard = app_state.proxy.write().await;
             if let Some(server) = proxy_guard.take() {
@@ -568,3 +568,4 @@ fn run_headless() {
         }
     });
 }
+

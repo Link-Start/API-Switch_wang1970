@@ -1,4 +1,4 @@
-use crate::error::AppError;
+﻿use crate::error::AppError;
 use rusqlite::Connection;
 
 pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
@@ -95,6 +95,21 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
     ensure_api_entry_columns(conn)?;
     ensure_usage_log_columns(conn)?;
     ensure_channel_columns(conn)?;
+
+
+    // Migrate api_type values in channels table
+    // custom -> openai, claude -> anthropic
+    conn.execute(
+        "UPDATE channels SET api_type = 'openai' WHERE api_type = 'custom'",
+        [],
+    )
+    .map_err(|e| AppError::Database(e.to_string()))?;
+    conn.execute(
+        "UPDATE channels SET api_type = 'anthropic' WHERE api_type = 'claude'",
+        [],
+    )
+    .map_err(|e| AppError::Database(e.to_string()))?;
+
 
     // Indexes
     conn.execute(
@@ -204,7 +219,7 @@ fn ensure_api_entry_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "api_entries", "release_date", "TEXT DEFAULT ''")?;
     ensure_column(conn, "api_entries", "model_meta_zh", "TEXT DEFAULT ''")?;
     ensure_column(conn, "api_entries", "model_meta_en", "TEXT DEFAULT ''")?;
-    // group_name 分组字段
+    // group_name 鍒嗙粍瀛楁
     ensure_column(
         conn,
         "api_entries",
@@ -262,3 +277,7 @@ fn ensure_column(
 
     Ok(())
 }
+
+
+
+

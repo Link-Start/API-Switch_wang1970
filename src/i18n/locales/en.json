@@ -199,7 +199,14 @@
       "modelSyncFailed": "Channel saved, but model sync failed",
       "refreshingData": "Refreshing data...",
       "closingWindow": "Closing window...",
-      "saveFailed": "Failed to save channel"
+      "saveFailed": "Failed to save channel",
+      "months": "{{count}} months",
+      "testModels": "Test Models",
+      "testingModels": "Testing...",
+      "tooManyModels": "Too many models ({{count}}), testing will take a long time. Please reduce the filter scope.",
+      "createModel": "Create model \"{{name}}\"",
+      "saveBeforeModelTest": "Save the new channel before testing models",
+      "unsavedModelTest": "Not synced to API pool"
     },
     "providers": {
       "custom": "Custom",

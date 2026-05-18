@@ -199,7 +199,14 @@
       "modelSyncFailed": "渠道已保存，但模型同步失败",
       "refreshingData": "正在刷新数据...",
       "closingWindow": "正在关闭窗口...",
-      "saveFailed": "保存渠道失败"
+      "saveFailed": "保存渠道失败",
+      "months": "{{count}}个月",
+      "testModels": "模型测速",
+      "testingModels": "测速中...",
+      "tooManyModels": "模型数量过多（{{count}}个），测速耗时较长，请减少筛选范围",
+      "createModel": "创建模型「{{name}}」",
+      "saveBeforeModelTest": "新增渠道需要先保存后才能进行模型测速",
+      "unsavedModelTest": "未同步到 API 池"
     },
     "providers": {
       "custom": "自定义",

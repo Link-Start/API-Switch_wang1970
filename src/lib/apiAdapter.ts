@@ -1,4 +1,4 @@
-export interface ApiAdapter {
+﻿export interface ApiAdapter {
   channels: {
     list(): Promise<Channel[]>;
     listPaginated(params: { page: number; pageSize: number }): Promise<PaginatedResult<Channel>>;
@@ -10,7 +10,8 @@ export interface ApiAdapter {
     probeUrl(url: string): Promise<ProbeResult>;
     testChannel(channelId: string): Promise<TestChannelResult>;
     selectModels(channelId: string, modelNames: string[], availableModels: ModelInfo[], catalogMeta?: ModelCatalogMetaUpdate[]): Promise<void>;
-    updateResponseMs(channelId: string, responseMs: string): Promise<void>;
+        updateResponseMs(channelId: string, responseMs: string): Promise<void>;
+    saveChannelWithModels(params: SaveChannelWithModelsParams): Promise<SaveChannelWithModelsResult>;
   };
   usage: {
     getLogs(filter: UsageLogFilter): Promise<PaginatedResult<UsageLog>>;
@@ -60,8 +61,8 @@ settings: {
   getStateVersion(): Promise<{ version: number }>;
   dirty: {
     /**
-     * 轮询脏标记，模块取值: 'log' | 'pool' | 'channel' | 'token'
-     * 返回 true 表示对应模块有变动，需要刷新查询
+     * 杞鑴忔爣璁帮紝妯″潡鍙栧€? 'log' | 'pool' | 'channel' | 'token'
+     * 杩斿洖 true 琛ㄧず瀵瑰簲妯″潡鏈夊彉鍔紝闇€瑕佸埛鏂版煡璇?
      */
     take(module: 'log' | 'pool' | 'channel' | 'token'): Promise<boolean>;
   };
@@ -69,5 +70,7 @@ settings: {
 
 
 
-import type { Channel, CreateChannelParams, UpdateChannelParams, FetchModelsResult, ProbeResult, TestChannelResult, ModelInfo, ModelCatalogMetaUpdate } from '../features/channels/types';
+import type { Channel, CreateChannelParams, UpdateChannelParams, FetchModelsResult, ProbeResult, TestChannelResult, ModelInfo, ModelCatalogMetaUpdate, SaveChannelWithModelsParams, SaveChannelWithModelsResult } from '../features/channels/types';
 import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, ProxyStatus, AdminStatus, TestChatResponse, TranslationRelayPayload, TranslationRelayRequest } from '../types';
+
+

@@ -1,4 +1,4 @@
-use crate::database::dao::PaginatedResult;
+﻿use crate::database::dao::PaginatedResult;
 use crate::database::{Channel, ModelInfo};
 use crate::error::AppError;
 use crate::services::channel_service::{self, FetchModelsResult, ProbeResult, TestChannelResult};
@@ -418,7 +418,7 @@ async fn try_chat_probe(
                     crate::services::channel_service::canonical_base_url_for_success(
                         api_type, base_url, &chat_url,
                     );
-                // Server responded → API works, return known models
+                // Server responded 鈫?API works, return known models
                 if let Ok(text) = resp.text().await {
                     if let Some(m) = extract_models_from_json(&text) {
                         return Some(ProbeSuccess {
@@ -500,4 +500,14 @@ fn dedup_models(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
         .filter(|m| !m.id.eq_ignore_ascii_case("auto") && !m.name.eq_ignore_ascii_case("auto"))
         .filter(|m| seen.insert(m.name.clone()))
         .collect()
+}
+
+
+#[tauri::command]
+pub async fn save_channel_with_models(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    params: channel_service::SaveChannelWithModelsParams,
+) -> Result<channel_service::SaveChannelWithModelsResult, AppError> {
+    channel_service::save_channel_with_models(&state.db, Some(&app), params)
 }

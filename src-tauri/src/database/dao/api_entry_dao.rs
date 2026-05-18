@@ -1,4 +1,4 @@
-use crate::database::dao::PaginatedResult;
+﻿use crate::database::dao::PaginatedResult;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use rusqlite::params_from_iter;
@@ -69,21 +69,12 @@ fn default_circuit_state() -> String {
 
 fn owned_by_from_api_type(api_type: Option<String>) -> Option<String> {
     api_type.and_then(|api_type| match api_type.as_str() {
-        "openai" | "anthropic" => Some("openai".to_string()),
-        "claude" => Some("anthropic".to_string()),
+        "openai" | "responses" | "custom" => Some("openai".to_string()),
+        "claude" | "anthropic" => Some("anthropic".to_string()),
         "gemini" => Some("google".to_string()),
         "azure" => Some("openai".to_string()),
-        "custom" => Some("custom".to_string()),
         _ => Some(api_type),
     })
-}
-
-fn empty_to_none(value: String) -> Option<String> {
-    if value.is_empty() {
-        None
-    } else {
-        Some(value)
-    }
 }
 
 fn row_to_entry(row: &rusqlite::Row<'_>, include_channel: bool) -> rusqlite::Result<ApiEntry> {
@@ -642,3 +633,4 @@ impl Database {
         Ok(())
     }
 }
+

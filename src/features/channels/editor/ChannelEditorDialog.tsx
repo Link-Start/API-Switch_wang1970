@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -68,6 +68,7 @@ export const ChannelEditorDialog: React.FC<{
     setAvailableModels([]);
     setSelectedModels([]);
     setModelSearch('');
+    setTimeRange(3);
     setShowApiKey(false);
     setAvailableProtocols([]);
     // 模型区默认隐藏逻辑：仅当现有渠道已有模型时才默认展开，否则收起
@@ -673,3 +674,4 @@ return (
     </Dialog>
   );
 };
+

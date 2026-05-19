@@ -756,13 +756,10 @@ fn request_uses_tool_calling(body: &Value) -> bool {
 fn should_append_model_info(
     state: &ProxyState,
     body: &Value,
-    caller_kind: &super::middleware::CallerKind,
+    _caller_kind: &super::middleware::CallerKind,
 ) -> bool {
     // Responses 协议自带原生 `response.model` 字段，绝不能向 output_text 正文
     // 追加 `model: xxx`，否则会污染客户端的 output_text。P5 修复。
-    if matches!(caller_kind, super::middleware::CallerKind::Responses) {
-        return false;
-    }
 
     let setting_enabled = state
         .settings

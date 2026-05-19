@@ -1,4 +1,4 @@
-﻿/// Protocol adapter module.
+/// Protocol adapter module.
 ///
 /// Each API type (openai, claude, gemini, azure, custom) has its own adapter file.
 /// A shared [`ProtocolAdapter`] trait defines the interface; [`get_adapter()`] returns
@@ -84,11 +84,12 @@ pub trait ProtocolAdapter {
 /// Return the adapter for a given `api_type` string.
 /// Unknown types fall back to the OpenAI adapter (broad compatibility).
 pub fn get_adapter(api_type: &str) -> Box<dyn ProtocolAdapter + Send + Sync> {
-        match api_type {
+    match api_type {
         "claude" | "anthropic" => Box::new(claude::ClaudeAdapter),
         "gemini" => Box::new(gemini::GeminiAdapter),
         "azure" => Box::new(azure::AzureAdapter),
-        "custom" | "openai" | "responses" => Box::new(openai::OpenAiAdapter),
+        "responses" => Box::new(responses::ResponsesAdapter),
+        "custom" | "openai" => Box::new(openai::OpenAiAdapter),
         _ => Box::new(openai::OpenAiAdapter), // anything else
     }
 }
@@ -1250,4 +1251,3 @@ mod tests {
         assert!(v["choices"][0]["delta"].as_object().unwrap().is_empty());
     }
 }
-

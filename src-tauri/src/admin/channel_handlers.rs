@@ -1,4 +1,4 @@
-﻿use crate::admin::error::{
+use crate::admin::error::{
     AdminError, ERROR_CODE_BAD_REQUEST, ERROR_CODE_EMPTY_MODEL_LIST,
     ERROR_CODE_ENDPOINT_CORRECTION_FAILED, ERROR_CODE_ENDPOINT_UNREACHABLE,
     ERROR_CODE_INVALID_CREDENTIALS, ERROR_CODE_INVALID_URL, ERROR_CODE_RATE_LIMITED,
@@ -49,6 +49,14 @@ pub struct FetchModelsDirectParams {
     pub base_url: String,
     pub api_key: String,
     pub verified: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct TestChannelDirectParams {
+    pub api_type: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
 }
 
 #[derive(Deserialize)]
@@ -296,10 +304,27 @@ pub async fn test_channel(
     Ok(Json(result))
 }
 
+pub async fn test_channel_direct(
+    State(_state): State<AdminState>,
+    Json(payload): Json<TestChannelDirectParams>,
+) -> Result<Json<TestChannelResult>, AdminError> {
+    let result = channel_service::test_channel_direct(channel_service::TestChannelDirectParams {
+        api_type: payload.api_type,
+        base_url: payload.base_url,
+        api_key: payload.api_key,
+        model: payload.model,
+    })
+    .await;
+    Ok(Json(result))
+}
+
 pub async fn save_with_models(
     State(state): State<AdminState>,
     Json(params): Json<channel_service::SaveChannelWithModelsParams>,
 ) -> Result<Json<channel_service::SaveChannelWithModelsResult>, AdminError> {
-    let result = channel_service::save_channel_with_models(&state.db, state.app_handle.as_ref(), params)?;
+    let result =
+        channel_service::save_channel_with_models(&state.db, state.app_handle.as_ref(), params)?;
+    state.mark_channel_dirty();
+    state.mark_pool_dirty();
     Ok(Json(result))
 }

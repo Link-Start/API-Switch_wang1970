@@ -94,6 +94,13 @@ export interface TestChannelResult {
   message: string;
 }
 
+export interface TestChannelDirectParams {
+  api_type: string;
+  base_url: string;
+  api_key: string;
+  model: string;
+}
+
 
 export interface SaveChannelWithModelsParams {
   id?: string;

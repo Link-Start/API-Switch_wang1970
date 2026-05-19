@@ -1,4 +1,4 @@
-﻿mod admin;
+mod admin;
 mod backup;
 mod commands;
 mod database;
@@ -12,16 +12,16 @@ mod state_version;
 
 use admin::AdminServer;
 use database::{AppSettings, Database};
+use dirty::DirtyFlags;
 use proxy::ProxyServer;
-use services::{channel_service, pool_service};
 use runtime_mode::{ModeSource, RuntimeMode};
 use serde::{Deserialize, Serialize};
+use services::{channel_service, pool_service};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
-use dirty::DirtyFlags;
 
 pub use error::AppError;
 
@@ -269,6 +269,7 @@ pub fn run() {
         commands::channel::fetch_models_direct,
         commands::channel::probe_url,
         commands::channel::test_channel,
+        commands::channel::test_channel_direct,
         commands::channel::select_models,
         commands::dirty_cmds::take_dirty,
         commands::pool::list_entries,
@@ -297,7 +298,8 @@ pub fn run() {
         commands::usage::get_user_ranking,
         commands::usage::get_user_trend,
         commands::config::get_settings,
-                commands::channel::save_channel_with_models,`n        commands::config::update_settings,
+        commands::channel::save_channel_with_models,
+        commands::config::update_settings,
         commands::config::check_update,
         commands::proxy_cmd::start_proxy,
         commands::proxy_cmd::stop_proxy,
@@ -381,7 +383,9 @@ static LAST_TRAY_REFRESH: OnceLock<std::sync::Mutex<std::time::Instant>> = OnceL
 fn tray_debounce_check() -> bool {
     let now = std::time::Instant::now();
     let lock = LAST_TRAY_REFRESH.get_or_init(|| std::sync::Mutex::new(now));
-    let Ok(mut last) = lock.lock() else { return false };
+    let Ok(mut last) = lock.lock() else {
+        return false;
+    };
     if now.duration_since(*last).as_millis() < TRAY_DEBOUNCE_MS as u128 {
         return false; // 闃叉姈锛?00ms 鍐呬笉閲嶅閲嶅缓
     }
@@ -548,15 +552,17 @@ fn run_headless() {
         }
 
         let port = settings_snapshot.listen_port;
-        println!("鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹?);
+        println!("============================================================");
         println!("  API Switch is running");
         println!("  Proxy:      http://127.0.0.1:{}/v1/...", port);
         println!("  Web Admin:  http://127.0.0.1:{}", port);
-        println!("鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹?);
+        println!("============================================================");
         println!("  Press Ctrl+C to stop");
 
         // 绛夊緟 Ctrl+C
-        tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to listen for ctrl+c");
         println!("\nShutting down...");
 
         // 浼橀泤鍋滄浠ｇ悊
@@ -568,4 +574,3 @@ fn run_headless() {
         }
     });
 }
-

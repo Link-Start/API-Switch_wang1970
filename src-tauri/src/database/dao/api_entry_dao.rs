@@ -1,4 +1,4 @@
-﻿use crate::database::dao::PaginatedResult;
+use crate::database::dao::PaginatedResult;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use rusqlite::params_from_iter;
@@ -65,6 +65,15 @@ pub struct ModelCatalogMetaInput {
 
 fn default_circuit_state() -> String {
     "closed".to_string()
+}
+
+fn empty_to_none(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 fn owned_by_from_api_type(api_type: Option<String>) -> Option<String> {
@@ -166,7 +175,12 @@ impl Database {
         }
         if let Some(term) = search {
             let like = format!("%{}%", term.trim());
-            where_clauses.push(format!("(e.display_name LIKE ?{} OR e.model LIKE ?{} OR c.name LIKE ?{})", params.len() + 1, params.len() + 2, params.len() + 3));
+            where_clauses.push(format!(
+                "(e.display_name LIKE ?{} OR e.model LIKE ?{} OR c.name LIKE ?{})",
+                params.len() + 1,
+                params.len() + 2,
+                params.len() + 3
+            ));
             params.push(Box::new(like.clone()));
             params.push(Box::new(like.clone()));
             params.push(Box::new(like));
@@ -200,7 +214,9 @@ impl Database {
 
         let mut stmt = conn.prepare(&query_sql)?;
         let entries = stmt
-            .query_map(params_from_iter(params.iter()), |row| row_to_entry(row, true))?
+            .query_map(params_from_iter(params.iter()), |row| {
+                row_to_entry(row, true)
+            })?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| AppError::Database(e.to_string()))?;
 
@@ -398,7 +414,7 @@ impl Database {
                 "UPDATE api_entries
                  SET display_name = ?1, provider_logo = ?2, release_date = ?3,
                      model_meta_zh = ?4, model_meta_en = ?5, updated_at = ?6
-                 WHERE id = ?7"
+                 WHERE id = ?7",
             )?;
             for item in items {
                 stmt.execute(rusqlite::params![
@@ -481,7 +497,10 @@ impl Database {
             let meta = catalog_meta.iter().find(|item| item.model == *model);
             if !current_models.contains(model) {
                 let id = uuid::Uuid::new_v4().to_string();
-                let alias = meta.map(|m| m.display_name.as_str()).filter(|s| !s.is_empty()).unwrap_or(model);
+                let alias = meta
+                    .map(|m| m.display_name.as_str())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(model);
                 conn.execute(
                     "INSERT INTO api_entries (
                     id, channel_id, model, display_name, sort_index, enabled,
@@ -503,7 +522,11 @@ impl Database {
                 )?;
                 next_sort += 1;
             } else if let Some(meta) = meta {
-                let alias = if meta.display_name.is_empty() { model.as_str() } else { &meta.display_name };
+                let alias = if meta.display_name.is_empty() {
+                    model.as_str()
+                } else {
+                    &meta.display_name
+                };
                 conn.execute(
                     "UPDATE api_entries
                      SET display_name = ?1, provider_logo = ?2, release_date = ?3,
@@ -633,4 +656,3 @@ impl Database {
         Ok(())
     }
 }
-

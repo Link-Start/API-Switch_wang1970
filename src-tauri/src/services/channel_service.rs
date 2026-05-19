@@ -1,4 +1,4 @@
-﻿use crate::admin::{
+use crate::admin::{
     ERROR_CODE_EMPTY_MODEL_LIST, ERROR_CODE_ENDPOINT_CORRECTION_FAILED,
     ERROR_CODE_ENDPOINT_UNREACHABLE, ERROR_CODE_ENDPOINT_VALIDATION_FAILED,
     ERROR_CODE_FETCH_MODELS_FAILED, ERROR_CODE_HTTP_CLIENT_ERROR, ERROR_CODE_INVALID_CREDENTIALS,
@@ -192,6 +192,14 @@ pub struct TestChannelResult {
 }
 
 #[derive(Deserialize)]
+pub struct TestChannelDirectParams {
+    pub api_type: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
+
+#[derive(Deserialize)]
 pub struct SaveChannelWithModelsParams {
     pub id: Option<String>,
     pub name: String,
@@ -202,7 +210,7 @@ pub struct SaveChannelWithModelsParams {
     pub enabled: Option<bool>,
     pub selected_models: Vec<String>,
     pub available_models: Vec<ModelInfo>,
-    pub catalog_meta: Option<Vec<crate::database::dao::api_entry_dao::ModelCatalogMetaInput>>,
+    pub catalog_meta: Option<Vec<crate::database::ModelCatalogMetaInput>>,
     pub response_ms: Option<String>,
 }
 
@@ -479,58 +487,22 @@ async fn smart_fetch_models(
     api_type: &str,
     base_url: &str,
     api_key: &str,
-    verified: bool,
+    _verified: bool,
 ) -> Result<FetchModelsResult, ChannelOperationError> {
     let base_url = normalize_base_url(base_url);
-
-    let endpoint_guess = if verified {
-        Some(EndpointGuess {
-            detected_type: api_type.to_string(),
-            corrected_base_url: base_url.clone(),
-        })
-    } else {
-        detect_endpoint_guess(api_type, &base_url, api_key).await
-    };
-
-    if !verified && endpoint_guess.is_none() {
-        return Err(ChannelOperationError::endpoint_validation_failed(
-            "Could not validate endpoint. HTTP 200 model list is required.",
-        ));
-    }
-
-    let fetch_seed_type = endpoint_guess
-        .as_ref()
-        .map(|g| g.detected_type.as_str())
-        .unwrap_or(api_type);
-    let fetch_seed_base_url = endpoint_guess
-        .as_ref()
-        .map(|g| g.corrected_base_url.as_str())
-        .unwrap_or(base_url.as_str());
-
+    let normalized_type = normalize_api_type(api_type);
     let (models, actual_type, actual_base_url) =
-        fetch_models_result_with_fallback(fetch_seed_type, fetch_seed_base_url, api_key).await?;
-
-    let corrected_type = endpoint_guess
-        .as_ref()
-        .map(|g| g.detected_type.clone())
-        .unwrap_or_else(|| resolve_detected_type(actual_type, &actual_base_url));
-    let corrected_base_url = endpoint_guess
-        .as_ref()
-        .map(|g| g.corrected_base_url.clone())
-        .unwrap_or_else(|| actual_base_url.clone());
+        fetch_models_result_with_fallback(normalized_type, &base_url, api_key).await?;
     let count = models.len();
 
     Ok(FetchModelsResult {
-        message: format!("Detected: {corrected_type} ({count} models)"),
-        detected_type: corrected_type,
-        corrected_base_url,
+        message: format!("Fetched: {actual_type} ({count} models)"),
+        detected_type: actual_type.to_string(),
+        corrected_base_url: actual_base_url,
         models,
         warning: None,
         error: None,
-        endpoint_corrected: endpoint_guess
-            .as_ref()
-            .map(|g| g.detected_type != api_type || g.corrected_base_url != base_url)
-            .unwrap_or(false),
+        endpoint_corrected: false,
         auto_saved: false,
     })
 }
@@ -604,7 +576,7 @@ async fn detect_type_with_base_url(
     respect_selected_type: bool,
 ) -> DetectionResult {
     let adapter = get_adapter(api_type);
-    let urls = build_models_url_variants(adapter.as_ref(), base_url, api_key);
+    let urls = build_models_url_variants_for_type(api_type, adapter.as_ref(), base_url, api_key);
     for url in &urls {
         match try_models_endpoint(client, adapter.as_ref(), url, api_key).await {
             Ok(models) => {
@@ -647,43 +619,49 @@ async fn fetch_models_result_with_fallback(
             ChannelOperationError::new(ERROR_CODE_HTTP_CLIENT_ERROR, format!("HTTP client: {e}"))
         })?;
 
-    let candidates = build_base_url_candidates(preferred_base_url);
-    let try_types = build_try_types(preferred_type);
+    let current_type = normalize_api_type(preferred_type);
+    let adapter = get_adapter(current_type);
     let mut last_error: Option<ChannelOperationError> = None;
+    let mut merged_models = Vec::new();
 
-    for candidate_base_url in candidates {
-        for current_type in &try_types {
-            let adapter = get_adapter(current_type);
-            let urls = build_models_url_variants(adapter.as_ref(), &candidate_base_url, api_key);
-            for url in &urls {
-                match try_models_endpoint(&client, adapter.as_ref(), url, api_key).await {
-                    Ok(models) if !models.is_empty() => {
-                        let corrected_base_url =
-                            canonical_base_url_for_success(current_type, &candidate_base_url, url);
-                        let models = dedup_models(models);
-                        log::info!("[fetch_models] OK via {url}, type={current_type}, base_url={} ({} models)", corrected_base_url, models.len());
-                        return Ok((models, current_type, corrected_base_url));
-                    }
-                    Ok(_) => {}
-                    Err(err) if err.is_blocking() => {
-                        let details = serde_json::json!({
-                            "api_type": current_type,
-                            "base_url": candidate_base_url,
-                            "models_url": url,
-                        });
-                        return Err(err.to_operation_error().with_details(details));
-                    }
-                    Err(err) => {
-                        last_error =
-                            Some(err.to_operation_error().with_details(serde_json::json!({
-                                "api_type": current_type,
-                                "base_url": candidate_base_url,
-                                "models_url": url,
-                            })));
-                    }
+    for candidate_base_url in build_base_url_candidates_for_type(current_type, preferred_base_url) {
+        for url in build_models_url_variants_for_type(
+            current_type,
+            adapter.as_ref(),
+            &candidate_base_url,
+            api_key,
+        ) {
+            match try_models_endpoint(&client, adapter.as_ref(), &url, api_key).await {
+                Ok(models) if !models.is_empty() => {
+                    merged_models.extend(models);
+                }
+                Ok(_) => {}
+                Err(err) if err.is_blocking() => {
+                    last_error = Some(err.to_operation_error().with_details(serde_json::json!({
+                        "api_type": current_type,
+                        "base_url": candidate_base_url,
+                        "models_url": url,
+                    })));
+                }
+                Err(err) => {
+                    last_error = Some(err.to_operation_error().with_details(serde_json::json!({
+                        "api_type": current_type,
+                        "base_url": candidate_base_url,
+                        "models_url": url,
+                    })));
                 }
             }
         }
+    }
+
+    let models = dedup_models(merged_models);
+    if !models.is_empty() {
+        log::info!(
+            "[fetch_models] OK type={current_type}, base_url={} ({} models)",
+            preferred_base_url,
+            models.len()
+        );
+        return Ok((models, current_type, normalize_base_url(preferred_base_url)));
     }
 
     Err(last_error.unwrap_or_else(|| {
@@ -694,23 +672,15 @@ async fn fetch_models_result_with_fallback(
     }))
 }
 
-fn build_try_types(preferred_type: &str) -> Vec<&'static str> {
-    let mut seen = std::collections::HashSet::new();
-    let normalized: &'static str = match preferred_type {
-        "openai" | "responses" | "custom" => "openai",
-        "gemini" => "gemini",
+fn normalize_api_type(api_type: &str) -> &'static str {
+    match api_type {
+        "custom" | "openai" => "openai",
+        "responses" => "responses",
         "claude" | "anthropic" => "anthropic",
+        "gemini" => "gemini",
         "azure" => "azure",
-        "custom" => "custom",
-        _ => "custom",
-    };
-    let mut v = Vec::new();
-    for t in [normalized, "custom", "openai", "claude", "gemini", "azure"] {
-        if seen.insert(t) {
-            v.push(t);
-        }
+        _ => "openai",
     }
-    v
 }
 
 fn is_authoritative_detection_success(api_type: &str, success_url: &str) -> bool {
@@ -756,6 +726,23 @@ fn build_base_url_candidates(base_url: &str) -> Vec<String> {
     candidates
 }
 
+fn build_base_url_candidates_for_type(api_type: &str, base_url: &str) -> Vec<String> {
+    if api_type == "openai" {
+        return build_base_url_candidates(base_url);
+    }
+
+    let normalized = normalize_base_url(base_url);
+    let mut candidates = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let base_site = extract_base_site(&normalized).unwrap_or_else(|| normalized.clone());
+    for candidate in [normalized, base_site] {
+        if !candidate.is_empty() && seen.insert(candidate.clone()) {
+            candidates.push(candidate);
+        }
+    }
+    candidates
+}
+
 fn extract_base_site(base_url: &str) -> Option<String> {
     let normalized = normalize_base_url(base_url);
     let scheme_end = normalized.find("://")?;
@@ -786,7 +773,7 @@ pub(crate) fn canonical_base_url_for_success(
         }
     }
 
-    if api_type == "claude" {
+    if api_type == "claude" || api_type == "anthropic" {
         if let Some(idx) = success_lower.find("/v1/") {
             let base = &success[..idx];
             return base.trim_end_matches('/').to_string();
@@ -846,25 +833,33 @@ fn resolve_detected_type(detected: &str, base_url: &str) -> String {
     detected.into()
 }
 
-fn build_models_url_variants(
+fn build_models_url_variants_for_type(
+    api_type: &str,
     adapter: &(dyn crate::proxy::protocol::ProtocolAdapter + Send + Sync),
     base_url: &str,
     api_key: &str,
 ) -> Vec<String> {
-    let mut urls = vec![adapter.build_models_url(base_url, api_key)];
+    let mut urls = Vec::new();
     let base = base_url.trim_end_matches('/');
-    for v in &[
-        "/models",
-        "/v1/models",
-        "/api/models",
-        "/api/v1/models",
-        "/v2/models",
-    ] {
-        let u = format!("{base}{v}");
-        if !urls.contains(&u) {
-            urls.push(u);
+    let mut push = |url: String| {
+        if !urls.contains(&url) {
+            urls.push(url);
+        }
+    };
+
+    push(adapter.build_models_url(base_url, api_key));
+    if api_type == "openai" {
+        for suffix in [
+            "/models",
+            "/v1/models",
+            "/api/models",
+            "/api/v1/models",
+            "/v2/models",
+        ] {
+            push(format!("{base}{suffix}"));
         }
     }
+
     urls
 }
 
@@ -1066,7 +1061,7 @@ pub async fn test_channel_chat(
 ) -> TestChannelResult {
     let start = std::time::Instant::now();
     let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(10))
         .build()
     {
         Ok(c) => c,
@@ -1112,30 +1107,11 @@ pub async fn test_channel_chat(
                 };
             }
 
-            match resp.text().await {
-                Ok(text) => {
-                    if text.to_lowercase().contains("ok") {
-                        TestChannelResult {
-                            success: true,
-                            latency_ms: latency,
-                            status_code: Some(status_code),
-                            message: "OK".to_string(),
-                        }
-                    } else {
-                        TestChannelResult {
-                            success: false,
-                            latency_ms: latency,
-                            status_code: Some(status_code),
-                            message: "Response does not contain 'OK'".to_string(),
-                        }
-                    }
-                }
-                Err(e) => TestChannelResult {
-                    success: false,
-                    latency_ms: latency,
-                    status_code: Some(status_code),
-                    message: format!("Read response body error: {}", e),
-                },
+            TestChannelResult {
+                success: true,
+                latency_ms: latency,
+                status_code: Some(status_code),
+                message: "OK".to_string(),
             }
         }
         Err(e) => {
@@ -1150,6 +1126,15 @@ pub async fn test_channel_chat(
     }
 }
 
+pub async fn test_channel_direct(params: TestChannelDirectParams) -> TestChannelResult {
+    test_channel_chat(
+        &params.base_url,
+        &params.api_key,
+        normalize_api_type(&params.api_type),
+        &params.model,
+    )
+    .await
+}
 
 pub fn save_channel_with_models(
     db: &Database,
@@ -1157,7 +1142,7 @@ pub fn save_channel_with_models(
     params: SaveChannelWithModelsParams,
 ) -> Result<SaveChannelWithModelsResult, AppError> {
     let mut warnings = Vec::new();
-    
+
     // 1. Create or Update channel
     let channel = if let Some(id) = &params.id {
         db.update_channel(
@@ -1193,11 +1178,19 @@ pub fn save_channel_with_models(
     // 3. Sync models
     let mut models_synced = false;
     let catalog_meta = params.catalog_meta.unwrap_or_default();
-    if let Err(e) = db.update_channel_models(&channel.id, &params.available_models, &params.selected_models) {
+    if let Err(e) = db.update_channel_models(
+        &channel.id,
+        &params.available_models,
+        &params.selected_models,
+    ) {
         warnings.push(format!("Failed to update channel model snapshot: {e}"));
     } else {
         // Sync to api_entries
-        if let Err(e) = crate::services::pool_service::sync_entries_for_channel(db, &channel.id, &params.selected_models, &params.available_models, &catalog_meta) {
+        if let Err(e) = db.sync_entries_for_channel_with_meta(
+            &channel.id,
+            &params.selected_models,
+            &catalog_meta,
+        ) {
             warnings.push(format!("Failed to sync API pool entries: {e}"));
         } else {
             models_synced = true;
@@ -1220,3 +1213,5 @@ pub fn save_channel_with_models(
         warnings,
     })
 }
+
+

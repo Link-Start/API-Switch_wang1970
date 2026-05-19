@@ -1,4 +1,4 @@
-﻿use crate::admin::auth::require_auth;
+use crate::admin::auth::require_auth;
 use crate::admin::channel_handlers;
 use crate::admin::chat_handlers;
 use crate::admin::cors::apply_admin_cors;
@@ -29,8 +29,14 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/admin/channels",
             get(channel_handlers::list).post(channel_handlers::create),
         )
-        .route("/admin/channels/paginated", get(channel_handlers::list_paginated))
-        .route("/admin/channels/save-with-models", post(channel_handlers::save_with_models))
+        .route(
+            "/admin/channels/paginated",
+            get(channel_handlers::list_paginated),
+        )
+        .route(
+            "/admin/channels/save-with-models",
+            post(channel_handlers::save_with_models),
+        )
         .route(
             "/admin/channels/:id",
             get(channel_handlers::list)
@@ -61,6 +67,10 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/admin/channels/:id/test",
             post(channel_handlers::test_channel),
         )
+        .route(
+            "/admin/channels/test-direct",
+            post(channel_handlers::test_channel_direct),
+        )
         // Pool API routes 鈥?all require auth
         .route(
             "/admin/pool",
@@ -85,7 +95,10 @@ pub fn build_admin_router(state: AdminState) -> Router {
             "/admin/tokens",
             get(token_handlers::list_tokens).post(token_handlers::create_token),
         )
-        .route("/admin/tokens/paginated", get(token_handlers::list_tokens_paginated))
+        .route(
+            "/admin/tokens/paginated",
+            get(token_handlers::list_tokens_paginated),
+        )
         .route("/admin/tokens/:id", delete(token_handlers::delete_token))
         .route(
             "/admin/tokens/:id/toggle",
@@ -159,4 +172,3 @@ pub fn build_admin_router(state: AdminState) -> Router {
         .with_state(state)
         .route_layer(middleware::from_fn(apply_admin_cors))
 }
-

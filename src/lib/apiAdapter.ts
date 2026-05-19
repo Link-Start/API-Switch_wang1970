@@ -9,6 +9,7 @@
     fetchModelsDirect(apiType: string, baseUrl: string, apiKey: string, verified?: boolean): Promise<FetchModelsResult>;
     probeUrl(url: string): Promise<ProbeResult>;
     testChannel(channelId: string): Promise<TestChannelResult>;
+    testChannelDirect(params: TestChannelDirectParams): Promise<TestChannelResult>;
     selectModels(channelId: string, modelNames: string[], availableModels: ModelInfo[], catalogMeta?: ModelCatalogMetaUpdate[]): Promise<void>;
         updateResponseMs(channelId: string, responseMs: string): Promise<void>;
     saveChannelWithModels(params: SaveChannelWithModelsParams): Promise<SaveChannelWithModelsResult>;
@@ -70,7 +71,7 @@ settings: {
 
 
 
-import type { Channel, CreateChannelParams, UpdateChannelParams, FetchModelsResult, ProbeResult, TestChannelResult, ModelInfo, ModelCatalogMetaUpdate, SaveChannelWithModelsParams, SaveChannelWithModelsResult } from '../features/channels/types';
+import type { Channel, CreateChannelParams, UpdateChannelParams, FetchModelsResult, ProbeResult, TestChannelResult, TestChannelDirectParams, ModelInfo, ModelCatalogMetaUpdate, SaveChannelWithModelsParams, SaveChannelWithModelsResult } from '../features/channels/types';
 import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, ProxyStatus, AdminStatus, TestChatResponse, TranslationRelayPayload, TranslationRelayRequest } from '../types';
 
 

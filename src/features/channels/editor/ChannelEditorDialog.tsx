@@ -57,6 +57,8 @@ export const ChannelEditorDialog: React.FC<{
   const [modelTestResults, setModelTestResults] = useState<Record<string, { success: boolean; latency?: number; reason?: string }>>({});
 
   const probeSeqRef = useRef(0);
+  const fetchSeqRef = useRef(0);
+  const testSeqRef = useRef(0);
   const [saving, setSaving] = useState(false);
 
   // 初始化表单数据
@@ -119,8 +121,8 @@ export const ChannelEditorDialog: React.FC<{
   // canSave 必须检查 4 项：name, api_type, base_url, api_key 都有内容
   const canSave = !!(form.name.trim() && form.api_type.trim() && form.base_url.trim() && form.api_key.trim());
   
-  // canFetchModels: Base URL 和 API Key 必须都有值，且不在探测/获取期间
-  const canFetchModels = form.base_url.trim() && form.api_key.trim() && !probingUrl && !fetchingModels && (urlProbe === null || urlProbe.reachable);
+  // canFetchModels: 基础输入满足即可尝试，URL 探测失败不阻塞获取模型
+  const canFetchModels = !!(form.name.trim() && form.api_type.trim() && form.base_url.trim() && form.api_key.trim() && !fetchingModels);
 
   const setValue = <K extends keyof ChannelFormState>(key: K, value: ChannelFormState[K]) => {
     if (key === 'api_type' || key === 'base_url' || key === 'api_key') {
@@ -197,15 +199,27 @@ export const ChannelEditorDialog: React.FC<{
       sourceProtocol,
     })).filter((item) => item.name);
 
-  const mergeModelsByNameAndProtocol = (groups: EditorModelInfo[][]): EditorModelInfo[] => {
+  const mergeModelsByName = (groups: EditorModelInfo[][]): EditorModelInfo[] => {
     const map = new Map<string, EditorModelInfo>();
     for (const group of groups) {
       for (const model of group) {
-        const key = `${model.name.toLowerCase()}::${model.sourceProtocol}`;
+        const key = model.name.toLowerCase();
         if (!map.has(key)) map.set(key, model);
       }
     }
     return Array.from(map.values());
+  };
+
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, message: string): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   };
 
   const fetchModelsByProtocol = async (apiType: string): Promise<{ result: FetchModelsResult; models: EditorModelInfo[] }> => {
@@ -222,81 +236,40 @@ export const ChannelEditorDialog: React.FC<{
 
   // 获取模型列表
   const handleFetchModels = async () => {
-    if (probingUrl) {
-      toast.error(t('channel.editor.probingInProgress', 'URL 正在探测中，请稍后再试'));
-      return;
-    }
-
+    const seq = ++fetchSeqRef.current;
     setShowModels(true);
     setAvailableModels([]);
     setSelectedModels([]);
     setModelTestResults({});
-    setAvailableProtocols([]);
-
-    let probe = urlProbe;
-    if (!probe) {
-      setProbingUrl(true);
-      try {
-        probe = await api.channels.probeUrl(form.base_url.trim()) as UrlProbeResult;
-        setUrlProbe(probe);
-      } catch {
-        probe = { reachable: false, status_code: undefined, latency_ms: 0, detected_type: undefined, message: t('channel.editor.probeFailedGeneric', 'Probe failed') };
-        setUrlProbe(probe);
-      } finally {
-        setProbingUrl(false);
-      }
-    }
-
-    if (!probe.reachable) {
-      toast.error(t('channel.editor.urlUnreachable', { message: probe.message, defaultValue: "URL 不可达：${probe.message}" }));
-      return;
-    }
 
     setFetchingModels(true);
     setModelsValidated(false);
     try {
-      setAvailableProtocols([]);
-      let primary: { result: FetchModelsResult; models: EditorModelInfo[] } | null = null;
-      try {
-        primary = await fetchModelsByProtocol(form.api_type);
-      } catch (err) {
-        const otherTypes = API_TYPES.map((item) => item.value).filter((value) => value !== form.api_type);
-        const fallbackResults = await Promise.allSettled(otherTypes.map((apiType) => fetchModelsByProtocol(apiType)));
-        const fallbackModels = mergeModelsByNameAndProtocol(
-          fallbackResults
-            .filter((item): item is PromiseFulfilledResult<{ result: FetchModelsResult; models: EditorModelInfo[] }> => item.status === 'fulfilled')
-            .map((item) => item.value.models),
-        );
-        if (fallbackModels.length === 0) throw err;
-        setAvailableModels(fallbackModels);
-        setSelectedModels(await autoSelectModels(fallbackModels, channel?.id));
-        setModelsValidated(true);
-        return;
-      }
+      const fetched = await withTimeout(
+        fetchModelsByProtocol(form.api_type),
+        10_000,
+        t('channel.editor.fetchModelsTimeout', '获取模型超时'),
+      );
+      if (fetchSeqRef.current !== seq) return;
 
-      setForm((prev) => ({
-        ...prev,
-        api_type: primary!.result.detected_type,
-        base_url: primary!.result.corrected_base_url || prev.base_url,
-      }));
-      let finalModels = primary!.models;
-      if (finalModels.length === 0) {
-        const otherTypes = API_TYPES.map((item) => item.value).filter((value) => value !== form.api_type);
-        const fallbackResults = await Promise.allSettled(otherTypes.map((apiType) => fetchModelsByProtocol(apiType)));
-        finalModels = mergeModelsByNameAndProtocol(
-          fallbackResults
-            .filter((item): item is PromiseFulfilledResult<{ result: FetchModelsResult; models: EditorModelInfo[] }> => item.status === 'fulfilled')
-            .map((item) => item.value.models),
-        );
-      }
+      const finalModels = mergeModelsByName([fetched.models]);
       setModelsValidated(true);
       setAvailableModels(finalModels);
       const nextSelected = await autoSelectModels(finalModels, channel?.id);
+      if (fetchSeqRef.current !== seq) return;
       setSelectedModels(nextSelected);
+
+      if (finalModels.length === 0) {
+        toast.warning(t('channel.editor.noModelsFetched', '未获取到模型'));
+      }
     } catch (err) {
+      if (fetchSeqRef.current === seq) {
         toast.error(getChannelErrorMessage(err, t('channel.editor.fetchModelsFailed', '获取模型列表失败')));
+      }
     } finally {
-      setFetchingModels(false);
+      if (fetchSeqRef.current === seq) {
+        setFetchingModels(false);
+      }
     }
   };
 
@@ -338,56 +311,51 @@ export const ChannelEditorDialog: React.FC<{
   };
 
   const handleTestModels = async () => {
-    if (testingModels || filteredModels.length === 0) return;
-    if (filteredModels.length > 20) {
-      toast.error(t('channel.editor.tooManyModels', '模型数量过多（{{count}}个），测速耗时较长，请减少筛选范围', { count: filteredModels.length }));
-      return;
-    }
-    if (!channel?.id) {
-      toast.error(t('channel.editor.saveBeforeModelTest', '新增渠道需要先保存后才能进行模型测速'));
+    if (filteredModels.length > 30) {
+      toast.error(t('channel.editor.tooManyModelsToTest', '模型数量过多（{{count}}个），测速耗时较长，请减少筛选范围', { count: filteredModels.length }));
       return;
     }
 
+    const seq = ++testSeqRef.current;
     setTestingModels(true);
     setModelTestResults({});
     const results: Record<string, { success: boolean; latency?: number; reason?: string }> = {};
     try {
-      const entries = await api.pool.list();
-      for (const model of filteredModels) {
-        const entry = entries.find((item) => item.channel_id === channel.id && item.model.toLowerCase() === model.name.toLowerCase());
-        if (!entry) {
-          results[model.name] = { success: false, reason: t('channel.editor.unsavedModelTest', '未同步到 API 池') };
-          setModelTestResults({ ...results });
-          continue;
-        }
-        try {
-          const result = await api.pool.testLatency(entry.id);
-          if (result.latency_ms !== null) {
-            results[model.name] = { success: true, latency: result.latency_ms };
-          } else {
-            results[model.name] = { success: false, reason: result.error_detail };
+      await withTimeout(
+        (async () => {
+          for (const model of filteredModels) {
+            if (testSeqRef.current !== seq) return;
+            try {
+              const result = await api.channels.testChannelDirect({
+                api_type: form.api_type,
+                base_url: form.base_url,
+                api_key: form.api_key,
+                model: model.name,
+              });
+              results[model.name] = result.success
+                ? { success: true, latency: result.latency_ms }
+                : { success: false, reason: result.message };
+            } catch (err) {
+              results[model.name] = { success: false, reason: err instanceof Error ? err.message : String(err) };
+            }
+            if (testSeqRef.current === seq) setModelTestResults({ ...results });
           }
-        } catch (err) {
-          results[model.name] = { success: false, reason: err instanceof Error ? err.message : String(err) };
-        }
-        setModelTestResults({ ...results });
+        })(),
+        10_000,
+        t('channel.editor.testModelsTimeout', '模型测速超时'),
+      );
+    } catch (err) {
+      if (testSeqRef.current === seq) {
+        toast.error(err instanceof Error ? err.message : String(err));
       }
     } finally {
-      setTestingModels(false);
+      if (testSeqRef.current === seq) {
+        setTestingModels(false);
+      }
     }
   };
 
-  const timeFilteredModels = useMemo(() => {
-    const monthsAgo = new Date();
-    monthsAgo.setMonth(monthsAgo.getMonth() - timeRange);
-    const cutoffDate = monthsAgo.toISOString().slice(0, 10);
-    
-    return availableModels.filter((model) => {
-      const catalog = getCatalogModel(model.name);
-      if (!catalog?.release_date) return true;
-      return formatReleaseDate(catalog.release_date) >= cutoffDate;
-    });
-  }, [availableModels, timeRange]);
+
 
   const handleSave = async () => {
     if (saving || fetchingModels) return;
@@ -441,10 +409,9 @@ export const ChannelEditorDialog: React.FC<{
   };
 
   const filteredModels = useMemo(() => {
-    const base = timeFilteredModels;
-    if (!modelSearch) return base;
-    return base.filter((m) => m.name.toLowerCase().includes(modelSearch.toLowerCase()));
-  }, [timeFilteredModels, modelSearch]);
+    if (!modelSearch) return availableModels;
+    return availableModels.filter((m) => m.name.toLowerCase().includes(modelSearch.toLowerCase()));
+  }, [availableModels, modelSearch]);
 
 return (
     <Dialog open={open} onOpenChange={(value) => {
@@ -663,7 +630,7 @@ return (
                 className="w-full gap-1.5" 
                 variant="outline"
                 onClick={handleTestModels} 
-                disabled={testingModels || filteredModels.length === 0 || filteredModels.length > 20}
+                disabled={testingModels || filteredModels.length === 0}
               >
                 <Zap className={cn('h-4 w-4', testingModels && 'animate-pulse')} />
                 {testingModels 

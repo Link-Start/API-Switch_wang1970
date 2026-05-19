@@ -1,4 +1,4 @@
-﻿use crate::database::dao::PaginatedResult;
+use crate::database::dao::PaginatedResult;
 use crate::database::{Channel, ModelInfo};
 use crate::error::AppError;
 use crate::services::channel_service::{self, FetchModelsResult, ProbeResult, TestChannelResult};
@@ -204,10 +204,9 @@ pub async fn test_channel(
     .await;
 
     if result.success && result.status_code == Some(200) {
-        let _ =
-            state
-                .db
-                .update_channel_response_ms(&channel_id, &result.latency_ms.to_string());
+        let _ = state
+            .db
+            .update_channel_response_ms(&channel_id, &result.latency_ms.to_string());
         let _ = channel_service::update_channel(
             &state.db,
             Some(&app),
@@ -229,6 +228,13 @@ pub async fn test_channel(
 
     state.dirty.mark_channel();
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn test_channel_direct(
+    params: channel_service::TestChannelDirectParams,
+) -> Result<TestChannelResult, AppError> {
+    Ok(channel_service::test_channel_direct(params).await)
 }
 
 #[tauri::command]
@@ -502,12 +508,14 @@ fn dedup_models(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
         .collect()
 }
 
-
 #[tauri::command]
 pub async fn save_channel_with_models(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     params: channel_service::SaveChannelWithModelsParams,
 ) -> Result<channel_service::SaveChannelWithModelsResult, AppError> {
-    channel_service::save_channel_with_models(&state.db, Some(&app), params)
+    let result = channel_service::save_channel_with_models(&state.db, Some(&app), params)?;
+    state.dirty.mark_channel();
+    state.dirty.mark_pool();
+    Ok(result)
 }

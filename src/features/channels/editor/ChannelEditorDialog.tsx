@@ -641,6 +641,10 @@ return (
                 ) : null}
               </div>
 
+              <div className="text-right text-[11px] leading-none text-muted-foreground">
+                {selectedModels.length}/{availableModels.length}
+              </div>
+
               {/* 模型测速按钮 - fill 宽度 */}
               <Button 
                 className="w-full gap-1.5" 

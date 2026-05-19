@@ -462,12 +462,12 @@ return (
 
         <div className={cn(
           "flex-1 min-h-0 overflow-auto",
-          showModels && "flex gap-4"
+          showModels && "grid grid-cols-2 gap-3"
         )}>
           {/* 渠道信息区 */}
           <div className={cn(
             "space-y-4 pb-4",
-            showModels && "w-1/2 flex-shrink-0 border-r pr-3"
+            showModels && "min-w-0 border-r pr-3"
           )}>
 
             <div className="space-y-2">
@@ -547,7 +547,8 @@ return (
                 id="channel-notes"
                 value={form.notes}
                 onChange={(event) => setValue('notes', event.target.value)}
-                className="flex min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                rows={2}
+                className="flex min-h-14 w-full resize-y rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
 
@@ -564,7 +565,7 @@ return (
 
           {/* 模型信息区 - 仅在展开时显示 */}
           {showModels && (
-            <div className="w-1/2 flex-shrink-0 space-y-3 pl-3 pt-4">
+            <div className="min-w-0 space-y-3 pl-3 pr-4 pt-4">
               {/* 时间范围选择：3个月/6个月/12个月 */}
               <div className="flex gap-2">
                 {([3, 6, 12] as const).map((months) => (
@@ -595,14 +596,14 @@ return (
 
               {/* 模型列表 - 虚拟滚动 */}
               <div
-                className="h-64 overflow-y-auto rounded-md border border-border bg-background"
+                className="h-64 overflow-y-auto rounded-md border border-border bg-background pr-2"
                 onScroll={(event) => setModelListScrollTop(event.currentTarget.scrollTop)}
               >
                 {listPaddingTop > 0 && <div style={{ height: listPaddingTop }} />}
                 {visibleModels.map((model) => {
                   const testResult = modelTestResults[model.name];
                   return (
-                    <label key={model.id || model.name} htmlFor={`model-${model.id || model.name}`} className="flex cursor-pointer items-center gap-2 border-b border-border py-2 pl-3 pr-5 text-sm last:border-b-0 hover:bg-accent">
+                    <label key={model.id || model.name} htmlFor={`model-${model.id || model.name}`} className="flex cursor-pointer items-center gap-2 border-b border-border py-2 pl-3 pr-8 text-sm last:border-b-0 hover:bg-accent">
                       <Checkbox id={`model-${model.id || model.name}`} checked={selectedModels.includes(model.name)} onCheckedChange={() => toggleModel(model.name)} />
                       <span className={cn(
                         "truncate",

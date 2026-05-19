@@ -435,7 +435,7 @@ export const ChannelEditorDialog: React.FC<{
   }, [availableModels, modelSearch]);
 
   const rowHeight = 37;
-  const listHeight = 256;
+  const listHeight = 296;
   const [modelListScrollTop, setModelListScrollTop] = useState(0);
   const visibleStart = Math.max(0, Math.floor(modelListScrollTop / rowHeight) - 4);
   const visibleCount = Math.ceil(listHeight / rowHeight) + 8;
@@ -596,7 +596,7 @@ return (
 
               {/* 模型列表 - 虚拟滚动 */}
               <div
-                className="h-64 overflow-y-auto rounded-md border border-border bg-background pr-2"
+                className="h-[296px] overflow-y-auto rounded-md border border-border bg-background pr-2"
                 onScroll={(event) => setModelListScrollTop(event.currentTarget.scrollTop)}
               >
                 {listPaddingTop > 0 && <div style={{ height: listPaddingTop }} />}
@@ -679,6 +679,7 @@ return (
     </Dialog>
   );
 };
+
 
 
 

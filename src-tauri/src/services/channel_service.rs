@@ -782,7 +782,7 @@ fn normalize_api_type(api_type: &str) -> &'static str {
 
 fn is_authoritative_detection_success(api_type: &str, success_url: &str) -> bool {
     match api_type {
-        "gemini" => success_url.contains("/v1beta/openai/"),
+        "gemini" => success_url.contains("/v1beta/openai/") || success_url.contains("/v1beta/models"),
         "azure" => success_url.contains("/openai/deployments"),
         _ => true,
     }
@@ -886,7 +886,7 @@ pub(crate) fn canonical_base_url_for_success(
 
     if api_type == "openai" {
         if let Some(idx) = success_lower.find("/v1/") {
-            let base = &success[..idx];
+            let base = &success[..idx + 3];  // include "/v1"
             return base.trim_end_matches('/').to_string();
         }
     }
@@ -958,7 +958,7 @@ fn build_models_url_variants_for_type(
     }
 
     if api_type == "gemini" {
-        push(format!("{base}/v1beta/models?key={api_key}"));
+        push(format!("{base}/v1beta/models"));
     }
 
     urls

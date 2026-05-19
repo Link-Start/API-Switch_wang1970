@@ -435,7 +435,7 @@ impl Database {
     pub fn disable_entries_for_channel(&self, channel_id: &str) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         conn.execute(
-            "UPDATE api_entries SET enabled = 0 WHERE channel_id = ?1 AND enabled = 1",
+            "DELETE FROM api_entries WHERE channel_id = ?1",
             [channel_id],
         )?;
         Ok(())

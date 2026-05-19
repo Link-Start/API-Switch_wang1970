@@ -355,7 +355,7 @@ impl Database {
         Ok(())
     }
 
-    /// Disable a channel by ID (sets enabled=0 and cascades to api_entries).
+    /// Disable a channel by ID (sets enabled=0 and deletes api_entries).
     pub fn disable_channel(&self, channel_id: &str) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         let now = chrono::Utc::now().timestamp();
@@ -364,8 +364,8 @@ impl Database {
             rusqlite::params![now, channel_id],
         )?;
         conn.execute(
-            "UPDATE api_entries SET enabled = 0, updated_at = ?1 WHERE channel_id = ?2",
-            rusqlite::params![now, channel_id],
+            "DELETE FROM api_entries WHERE channel_id = ?1",
+            [channel_id],
         )?;
         log::warn!("Channel disabled by keyword match: {channel_id}");
         Ok(())

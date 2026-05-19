@@ -50,6 +50,8 @@ export const ChannelEditorDialog: React.FC<{
   const [probingUrl, setProbingUrl] = useState(false);
   const [availableProtocols, setAvailableProtocols] = useState<string[]>([]);
   const [showModels, setShowModels] = useState(false);
+  // 时间范围选择：3个月/6个月/12个月
+  const [timeRange, setTimeRange] = useState<3 | 6 | 12>(3);
   // 模型测速状态
   const [testingModels, setTestingModels] = useState(false);
   const [modelTestResults, setModelTestResults] = useState<Record<string, { success: boolean; latency?: number; reason?: string }>>({});
@@ -149,8 +151,12 @@ export const ChannelEditorDialog: React.FC<{
     setModelsValidated(false);
   };
 
-  // 自动选择模型：仅恢复已有 API 池关联模型和当前临时创建模型
+  // 自动选择模型：所选时间范围内发布的模型 + 已存在模型 + 当前临时创建模型
   const autoSelectModels = useCallback(async (models: EditorModelInfo[], channelId?: string): Promise<string[]> => {
+    const rangeStart = new Date();
+    rangeStart.setMonth(rangeStart.getMonth() - timeRange);
+    const rangeStartStr = rangeStart.toISOString().slice(0, 10);
+
     let existingModels = new Set<string>();
     if (channelId) {
       try {
@@ -162,14 +168,22 @@ export const ChannelEditorDialog: React.FC<{
     }
 
     const selected = new Set<string>();
+
     for (const model of models) {
-      if (model.temporary || existingModels.has(model.name.toLowerCase())) {
+      const catalog = getCatalogModel(model.name);
+      if (model.temporary || (catalog?.release_date && formatReleaseDate(catalog.release_date) >= rangeStartStr)) {
+        selected.add(model.name);
+      }
+    }
+
+    for (const model of models) {
+      if (existingModels.has(model.name.toLowerCase())) {
         selected.add(model.name);
       }
     }
 
     return Array.from(selected);
-  }, [api]);
+  }, [api, timeRange]);
 
   useEffect(() => {
     if (!showModels || availableModels.length === 0) return;
@@ -550,6 +564,21 @@ return (
           {/* 模型信息区 - 仅在展开时显示 */}
           {showModels && (
             <div className="w-1/2 flex-shrink-0 space-y-3 pl-3 pt-4">
+              {/* 时间范围选择：3个月/6个月/12个月 */}
+              <div className="flex gap-2">
+                {([3, 6, 12] as const).map((months) => (
+                  <Button
+                    key={months}
+                    size="sm"
+                    variant={timeRange === months ? "default" : "outline"}
+                    onClick={() => setTimeRange(months)}
+                    className="flex-1"
+                  >
+                    {t('channel.editor.months', { count: months, defaultValue: `${months}个月` })}
+                  </Button>
+                ))}
+              </div>
+
               {/* 搜索和操作按钮 */}
               <div className="flex flex-wrap gap-2 items-center">
                 <Input 
@@ -610,25 +639,6 @@ return (
                   </div>
                 ) : null}
               </div>
-
-              {/* 已选模型标签 */}
-              {selectedModels.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedModels.slice(0, 20).map((model) => (
-                    <span key={model} className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-xs">
-                      {model}
-                      <button type="button" className="hover:text-destructive" onClick={() => toggleModel(model)}>
-                        &times;
-                      </button>
-                    </span>
-                  ))}
-                  {selectedModels.length > 20 && (
-                    <span className="rounded-full bg-secondary px-2 py-0.5 text-xs text-muted-foreground">
-                      +{selectedModels.length - 20}
-                    </span>
-                  )}
-                </div>
-              )}
 
               {/* 模型测速按钮 - fill 宽度 */}
               <Button 

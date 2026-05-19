@@ -527,11 +527,26 @@ pub async fn forward_with_retry(
                     None,
                 );
 
-                // Step 2: disable unrecoverable status codes, otherwise cool down briefly.
+                // Step 2: disable unrecoverable status codes or error messages
+                // matching disable keywords; otherwise cool down briefly.
                 // Connection failures report status=0 and must remain recoverable.
-                if status > 0
-                    && should_disable_entry_for_status(&settings.circuit_disable_codes, status)
-                {
+                let disable_by_status = status > 0
+                    && should_disable_entry_for_status(&settings.circuit_disable_codes, status);
+let effective_keywords = if settings.disable_keywords.trim().is_empty() {
+        // 默认关键词，用于没有自定义关键词的情况
+        "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized\ninsufficient_quota\nquota_exceeded_error\ntoken plan limit exhausted\nUpstream rate limit exceeded\ninvalid api key\nUnauthorized - Invalid token"
+    } else {
+        &settings.disable_keywords
+    };
+    let disable_by_keyword = status > 0 && should_disable_entry_for_message(effective_keywords, &e);
+
+                if disable_by_keyword {
+                    log::warn!(
+                        "Freezing channel {} for 6h because entry {} matched upstream error keyword, status={}: {}",
+                        entry.channel_id, entry.id, status, e
+                    );
+                    freeze_channel_entries(state, entry).await;
+                } else if disable_by_status {
                     disable_entry(state, entry).await;
                 } else {
                     cool_down_entry(state, entry).await;
@@ -1533,6 +1548,20 @@ fn should_disable_entry_for_status(disable_codes: &str, status: u16) -> bool {
         .any(|rule| status_matches_rule(rule, status))
 }
 
+/// Check if the upstream error message contains any disable keyword.
+/// Keywords are separated by newlines and matched case-insensitively.
+fn should_disable_entry_for_message(disable_keywords: &str, message: &str) -> bool {
+    if disable_keywords.is_empty() || message.is_empty() {
+        return false;
+    }
+    let lower_msg = message.to_lowercase();
+    disable_keywords
+        .split('\n')
+        .map(|k| k.trim())
+        .filter(|k| !k.is_empty())
+        .any(|keyword| lower_msg.contains(&keyword.to_lowercase()))
+}
+
 async fn disable_entry(state: &ProxyState, entry: &ApiEntry) {
     let recovery_secs = state.settings.read().await.circuit_recovery_secs.max(1);
     let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs;
@@ -1548,7 +1577,44 @@ async fn disable_entry(state: &ProxyState, entry: &ApiEntry) {
     breakers.remove(&entry.id);
 }
 
+async fn freeze_channel_entries(state: &ProxyState, entry: &ApiEntry) {
+    // 限定词通常代表账号、额度、密钥或上游通道级故障；只冷冻同渠道 6 小时，不永久禁用用户开关。
+    let cooldown_until = chrono::Utc::now().timestamp() + 21600;
+    match state
+        .db
+        .freeze_entries_for_channel(&entry.channel_id, cooldown_until)
+    {
+        Ok(entry_ids) => {
+            state.dirty.mark_pool();
+            if let Some(h) = &state.app_handle { let _ = h.emit("entries-changed", ()); }
+            crate::state_version::bump();
+            refresh_tray(&state.app_handle);
+
+            let mut counts = state.failure_counts.write().await;
+            let mut breakers = state.circuit_breakers.write().await;
+            for entry_id in &entry_ids {
+                counts.remove(entry_id);
+                breakers.remove(entry_id);
+            }
+
+            log::warn!(
+                "Channel {} frozen for 6h after keyword match. Frozen entries: {}.",
+                entry.channel_id,
+                entry_ids.len()
+            );
+        }
+        Err(err) => {
+            log::error!(
+                "Failed to freeze channel {} after keyword match: {}",
+                entry.channel_id,
+                err
+            );
+        }
+    }
+}
+
 async fn record_circuit_success(state: &ProxyState, entry_id: &str) {
+
     let _ = state.db.set_entry_cooldown(entry_id, None);
     state.dirty.mark_pool();
     if let Some(h) = &state.app_handle { let _ = h.emit("entries-changed", ()); }

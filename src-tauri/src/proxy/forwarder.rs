@@ -422,7 +422,6 @@ impl Drop for StreamLogGuard {
                     let cooldown_until =
                         chrono::Utc::now().timestamp() + empty_stream_cooldown_secs;
                     let _ = db.set_entry_cooldown(&entry.id, Some(cooldown_until));
-                    crate::state_version::bump("pool");
                     if let Some(h) = &app_handle {
                         let _ = h.emit("entries-changed", ());
                     }
@@ -1546,7 +1545,6 @@ async fn disable_entry(state: &ProxyState, entry: &ApiEntry) {
 
     let _ = state.db.toggle_entry(&entry.id, false);
     let _ = state.db.set_entry_cooldown(&entry.id, Some(cooldown_until));
-    crate::state_version::bump("pool");
     if let Some(h) = &state.app_handle { let _ = h.emit("entries-changed", ()); }
     crate::state_version::bump("pool");
     refresh_tray(&state.app_handle);
@@ -1563,7 +1561,6 @@ async fn freeze_channel_entries(state: &ProxyState, entry: &ApiEntry) {
         .freeze_entries_for_channel(&entry.channel_id, cooldown_until)
     {
         Ok(entry_ids) => {
-            crate::state_version::bump("pool");
             if let Some(h) = &state.app_handle { let _ = h.emit("entries-changed", ()); }
             crate::state_version::bump("pool");
             refresh_tray(&state.app_handle);
@@ -1594,7 +1591,6 @@ async fn freeze_channel_entries(state: &ProxyState, entry: &ApiEntry) {
 async fn record_circuit_success(state: &ProxyState, entry_id: &str) {
 
     let _ = state.db.set_entry_cooldown(entry_id, None);
-    crate::state_version::bump("pool");
     if let Some(h) = &state.app_handle { let _ = h.emit("entries-changed", ()); }
     crate::state_version::bump("pool");
     refresh_tray(&state.app_handle);
@@ -1629,7 +1625,6 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
         let six_hours_later = chrono::Utc::now().timestamp() + 21600;
         let _ = state.db.set_entry_cooldown(&entry.id, Some(six_hours_later));
         let _ = state.db.toggle_entry(&entry.id, false);
-        crate::state_version::bump("pool");
         if let Some(h) = &state.app_handle { let _ = h.emit("entries-changed", ()); }
         crate::state_version::bump("pool");
         refresh_tray(&state.app_handle);
@@ -1647,7 +1642,6 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
 
     let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs as i64;
     let _ = state.db.set_entry_cooldown(&entry.id, Some(cooldown_until));
-    crate::state_version::bump("pool");
     if let Some(h) = &state.app_handle { let _ = h.emit("entries-changed", ()); }
     crate::state_version::bump("pool");
     refresh_tray(&state.app_handle);
@@ -1723,13 +1717,9 @@ fn spawn_cool_down_entry(
             let six_hours_later = chrono::Utc::now().timestamp() + 21600;
             let _ = db.set_entry_cooldown(&entry_id, Some(six_hours_later));
             let _ = db.toggle_entry(&entry_id, false);
-            crate::state_version::bump("pool");
             if let Some(h) = &app_handle { let _ = h.emit("entries-changed", ()); }
             crate::state_version::bump("pool");
             refresh_tray(&app_handle);
-
-            let mut breakers = circuit_breakers.write().await;
-            breakers.remove(&entry_id);
 
             log::warn!(
                 "Entry {} disabled after {} consecutive failures. Long cooldown: 6h.",
@@ -1741,7 +1731,6 @@ fn spawn_cool_down_entry(
 
         let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs as i64;
         let _ = db.set_entry_cooldown(&entry_id, Some(cooldown_until));
-        crate::state_version::bump("pool");
         if let Some(h) = &app_handle { let _ = h.emit("entries-changed", ()); }
         crate::state_version::bump("pool");
         refresh_tray(&app_handle);
@@ -1823,7 +1812,6 @@ fn log_usage(
     }
 
     if let Some(h) = app_handle { let _ = h.emit("new-usage-log", ()); }
-    crate::state_version::bump("pool");
 }
 
 #[cfg(test)]

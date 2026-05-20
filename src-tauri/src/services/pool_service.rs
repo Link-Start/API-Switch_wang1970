@@ -222,7 +222,6 @@ pub async fn test_entry_latency(
                 },
             );
             crate::state_version::bump("pool");
-            crate::state_version::bump("log");
             return Err(AppError::Network(message));
         }
     };
@@ -259,7 +258,6 @@ pub async fn test_entry_latency(
                 },
             );
             crate::state_version::bump("pool");
-            crate::state_version::bump("log");
             return Ok(TestLatencyResult {
                 status: "failed:network_error".to_string(),
                 response_ms: "X".to_string(),
@@ -302,7 +300,6 @@ pub async fn test_entry_latency(
             },
         );
         crate::state_version::bump("pool");
-        crate::state_version::bump("log");
         return Ok(TestLatencyResult {
             status: "failed:http_error".to_string(),
             response_ms: "X".to_string(),
@@ -337,7 +334,6 @@ pub async fn test_entry_latency(
                 },
             );
             crate::state_version::bump("pool");
-            crate::state_version::bump("log");
             return Ok(TestLatencyResult {
                 status: "failed:response_error".to_string(),
                 response_ms: "X".to_string(),
@@ -369,7 +365,6 @@ pub async fn test_entry_latency(
             },
         );
         crate::state_version::bump("pool");
-        crate::state_version::bump("log");
 
         return Ok(TestLatencyResult {
             status: "failed:empty_response".to_string(),
@@ -408,7 +403,6 @@ pub async fn test_entry_latency(
         },
     );
     crate::state_version::bump("pool");
-    crate::state_version::bump("log");
 
     Ok(TestLatencyResult {
         status: "ok".to_string(),

@@ -244,6 +244,8 @@ pub async fn select_models(
         &payload.model_names,
         &payload.catalog_meta,
     )?;
+    crate::state_version::bump("channel");
+    crate::state_version::bump("pool");
     state.mark_channel_dirty();
     state.mark_pool_dirty();
     Ok(Json(serde_json::json!({"ok": true})))
@@ -301,6 +303,7 @@ pub async fn test_channel(
         );
     } else {
         let _ = state.db.disable_channel(&channel.id);
+        crate::state_version::bump("channel");
     }
     state.mark_channel_dirty();
     Ok(Json(result))

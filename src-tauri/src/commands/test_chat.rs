@@ -31,7 +31,6 @@ pub struct TestChatMessage {
 
 fn refresh_entries(app: &tauri::AppHandle) {
     let _ = app.emit("entries-changed", ());
-    crate::state_version::bump("log");
     refresh_tray_if_enabled(app);
 }
 
@@ -125,7 +124,6 @@ pub async fn test_chat(
                     error_preview: None,
                 },
             );
-            crate::state_version::bump("log");
             mark_entry_unavailable(&db, &app, &entry.id)?;
             return Err(AppError::Network(message));
         }
@@ -157,7 +155,6 @@ pub async fn test_chat(
                 error_preview: Some(&body),
             },
         );
-        crate::state_version::bump("log");
         mark_entry_unavailable(&db, &app, &entry.id)?;
         return Err(AppError::Proxy(error_message));
     }
@@ -187,7 +184,6 @@ pub async fn test_chat(
                     error_preview: None,
                 },
             );
-            crate::state_version::bump("log");
             mark_entry_unavailable(&db, &app, &entry.id)?;
             return Err(AppError::Internal(message));
         }
@@ -228,7 +224,6 @@ pub async fn test_chat(
                 error_preview: None,
             },
         );
-        crate::state_version::bump("log");
         mark_entry_unavailable(&db, &app, &entry.id)?;
         return Err(AppError::Internal(message.to_string()));
     }
@@ -263,7 +258,6 @@ pub async fn test_chat(
             error_preview: None,
         },
     );
-    crate::state_version::bump("log");
 
     mark_entry_available(&db, &app, &entry.id, &response_ms)?;
 

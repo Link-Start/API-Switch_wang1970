@@ -42,7 +42,6 @@ impl AdminState {
         if let Some(handle) = &self.app_handle {
             let _ = tauri::Emitter::emit(handle, "channels-changed", ());
         }
-        crate::state_version::bump("channel");
     }
 
     pub fn mark_pool_dirty(&self) {
@@ -50,14 +49,13 @@ impl AdminState {
             let _ = tauri::Emitter::emit(handle, "entries-changed", ());
             crate::refresh_tray_if_enabled(handle);
         }
-        crate::state_version::bump("pool");
     }
 
     pub fn mark_token_dirty(&self) {
-        crate::state_version::bump("token");
+        // Token bumps are managed by token_service
     }
 
     pub fn mark_log_dirty(&self) {
-        crate::state_version::bump("log");
+        // Log bumps are managed by log_service
     }
 }

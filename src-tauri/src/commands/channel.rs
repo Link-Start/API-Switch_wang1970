@@ -89,6 +89,16 @@ pub(crate) struct UpdateResponseMsParams {
 }
 
 #[tauri::command]
+pub fn update_channel(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    params: crate::services::channel_service::UpdateChannelParams,
+) -> Result<Channel, AppError> {
+    let channel = channel_service::update_channel(&state.db, Some(&app), params)?;
+    Ok(channel)
+}
+
+#[tauri::command]
 pub fn update_channel_response_ms(
     state: State<'_, AppState>,
     params: UpdateResponseMsParams,
@@ -100,7 +110,6 @@ pub fn update_channel_response_ms(
             response_ms: params.response_ms,
         },
     )?;
-    crate::state_version::bump("channel");
     Ok(())
 }
 
@@ -135,30 +144,6 @@ pub async fn create_channel(
         },
     )?;
     let _ = app.emit("channels-changed", ());
-    crate::state_version::bump("channel");
-    Ok(channel)
-}
-
-#[tauri::command]
-pub async fn update_channel(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    params: UpdateChannelParams,
-) -> Result<Channel, AppError> {
-    let channel = channel_service::update_channel(
-        &state.db,
-        Some(&app),
-        channel_service::UpdateChannelParams {
-            id: params.id,
-            name: params.name,
-            api_type: params.api_type,
-            base_url: params.base_url,
-            api_key: params.api_key,
-            enabled: params.enabled,
-            notes: params.notes,
-        },
-    )?;
-    crate::state_version::bump("channel");
     Ok(channel)
 }
 
@@ -169,8 +154,6 @@ pub async fn delete_channel(
     id: String,
 ) -> Result<(), AppError> {
     channel_service::delete_channel(&state.db, Some(&app), id)?;
-    crate::state_version::bump("channel");
-    crate::state_version::bump("pool");
     Ok(())
 }
 
@@ -225,10 +208,10 @@ pub async fn test_channel(
         );
     } else {
         let _ = state.db.disable_channel(&channel_id);
+        crate::state_version::bump("channel");
         let _ = app.emit("channels-changed", ());
     }
 
-    crate::state_version::bump("channel");
     Ok(result)
 }
 
@@ -516,7 +499,5 @@ pub async fn save_channel_with_models(
     params: channel_service::SaveChannelWithModelsParams,
 ) -> Result<channel_service::SaveChannelWithModelsResult, AppError> {
     let result = channel_service::save_channel_with_models(&state.db, Some(&app), params)?;
-    crate::state_version::bump("channel");
-    crate::state_version::bump("pool");
     Ok(result)
 }

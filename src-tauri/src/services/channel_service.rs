@@ -230,7 +230,9 @@ pub fn update_channel_response_ms(
     db: &Database,
     params: UpdateResponseMsParams,
 ) -> Result<(), AppError> {
-    db.update_channel_response_ms(&params.channel_id, &params.response_ms)
+    db.update_channel_response_ms(&params.channel_id, &params.response_ms)?;
+    crate::state_version::bump("channel");
+    Ok(())
 }
 
 pub fn list_channels(db: &Database) -> Result<Vec<Channel>, AppError> {
@@ -246,13 +248,15 @@ pub fn list_channels_paginated(
 }
 
 pub fn create_channel(db: &Database, params: CreateChannelParams) -> Result<Channel, AppError> {
-    db.create_channel(
+    let channel = db.create_channel(
         &params.name,
         &params.api_type,
         &params.base_url,
         &params.api_key,
         params.notes.as_deref(),
-    )
+    )?;
+    crate::state_version::bump("channel");
+    Ok(channel)
 }
 
 pub fn update_channel(
@@ -291,6 +295,7 @@ pub fn delete_channel(
         crate::refresh_tray_if_enabled(app);
     }
     crate::state_version::bump("channel");
+    crate::state_version::bump("pool");
     Ok(())
 }
 
@@ -1305,6 +1310,7 @@ pub fn save_channel_with_models(
         crate::refresh_tray_if_enabled(app);
     }
     crate::state_version::bump("channel");
+    crate::state_version::bump("pool");
 
     Ok(SaveChannelWithModelsResult {
         channel,

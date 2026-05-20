@@ -46,8 +46,4 @@ pub struct StatVersionsResponse {
     pub token: u64,
 }
 
-/// 单模块的版本号响应结构体（用于 Tauri command）
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct StatVersionResponse {
-    pub version: u64,
-}
+

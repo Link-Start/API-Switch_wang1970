@@ -60,7 +60,7 @@ settings: {
   };
   getVersion(): Promise<{ version: string }>;
   getAdminStatus(): Promise<AdminStatus>;
-  getStateVersion(): Promise<{ version: number }>;
+  getStateVersion(): Promise<{ log: number; pool: number; channel: number; token: number }>;
   dirty: {
     /**
      * 杞鑴忔爣璁帮紝妯″潡鍙栧€? 'log' | 'pool' | 'channel' | 'token'

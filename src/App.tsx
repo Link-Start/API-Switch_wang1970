@@ -51,15 +51,20 @@ function MainApp({ onLogout }: { onLogout?: () => void }) {
   // 状态版本检测：组件挂载时检测一次，不轮询
   // 数据看板等页面不再 2 秒自动刷新，进去有一次数据即可
   const queryClient = useQueryClient();
-  const lastVersion = useRef<number | null>(null);
+  const lastVersion = useRef<Record<string, number> | null>(null);
   useQuery({
     queryKey: ["state-version"],
     queryFn: async () => {
       const res = await api.getStateVersion();
-      if (lastVersion.current !== null && res.version !== lastVersion.current) {
-        queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'state-version' });
+      if (lastVersion.current !== null) {
+        const changed = Object.keys(res).some(
+          (k) => res[k as keyof typeof res] !== lastVersion.current![k]
+        );
+        if (changed) {
+          queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] !== 'state-version' });
+        }
       }
-      lastVersion.current = res.version;
+      lastVersion.current = res;
       return res;
     },
   });

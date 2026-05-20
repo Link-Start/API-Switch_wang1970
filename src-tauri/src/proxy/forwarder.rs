@@ -354,6 +354,8 @@ struct StreamLogGuard {
     prior_attempts: Vec<AttemptInfo>,
     upstream_url: String,
     response_headers: reqwest::header::HeaderMap,
+    /// 空流检测冷却时长（秒），取自 settings.circuit_recovery_secs
+    empty_stream_cooldown_secs: i64,
 }
 
 impl Drop for StreamLogGuard {
@@ -400,6 +402,7 @@ impl Drop for StreamLogGuard {
             let requested_model = self.requested_model.clone();
             let status_code = self.status_code;
             let dirty = self.dirty.clone();
+            let empty_stream_cooldown_secs = self.empty_stream_cooldown_secs;
             tokio::spawn(async move {
                 log_usage(
                     &dirty,
@@ -419,6 +422,32 @@ impl Drop for StreamLogGuard {
                     Some(attempt_path.as_str()),
                     Some(StreamEndReason::Dropped),
                 );
+
+                // 空流检测：上游返回 200 但 SSE 流中无实际输出数据。
+                // 此类流被丢弃后，如果仅标记 success=true 不触发冷却，
+                // 坏通道会持续留在路由池中反复被选中，导致下游反复中断。
+                // 此处设置 DB cooldown 让路由跳过该 entry，但不递增
+                // failure_counts，防止触发 6h 自动禁用。
+                if status_code == 200
+                    && byte_total < 512
+                    && chunk_total < 5
+                    && prompt_tokens == 0
+                    && completion_tokens == 0
+                {
+                    let cooldown_until =
+                        chrono::Utc::now().timestamp() + empty_stream_cooldown_secs;
+                    let _ = db.set_entry_cooldown(&entry.id, Some(cooldown_until));
+                    dirty.mark_pool();
+                    if let Some(h) = &app_handle {
+                        let _ = h.emit("entries-changed", ());
+                    }
+                    crate::state_version::bump();
+                    log::warn!(
+                        "Entry {} cooled down for {}s after empty stream drop.",
+                        entry.id,
+                        empty_stream_cooldown_secs
+                    );
+                }
             });
         }
     }
@@ -846,6 +875,13 @@ fn build_streaming_response(
     let success_failure_counts = state.failure_counts.clone();
     let dirty_flags = state.dirty.clone();
 
+    // 读取 settings 中的冷却时长，用于空流检测冷却
+    let empty_stream_cooldown_secs: i64 = state
+        .settings
+        .try_read()
+        .map(|s| s.circuit_recovery_secs.max(1))
+        .unwrap_or(300);
+
     // Guard captured by the move closure → lives as long as the stream body
     let guard = StreamLogGuard {
         logged: logged.clone(),
@@ -865,6 +901,7 @@ fn build_streaming_response(
         prior_attempts: prior_attempts.clone(),
         upstream_url: upstream_url.clone(),
         response_headers: response_headers.clone(),
+        empty_stream_cooldown_secs,
     };
 
     let body_stream =

@@ -178,6 +178,16 @@ export function SettingsEditor({
             />
             <p className="text-xs text-muted-foreground">{t("settings.circuit.disableDesc")}</p>
           </div>
+          <div className="space-y-2">
+            <Label>{t("settings.circuit.disableKeywords")}</Label>
+            <textarea
+              className="flex min-h-[120px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              value={s.disable_keywords}
+              onChange={(event) => onChange("disable_keywords", event.target.value)}
+              placeholder={t("settings.circuit.disableKeywords")}
+            />
+            <p className="text-xs text-muted-foreground">{t("settings.circuit.disableKeywordsDesc")}</p>
+          </div>
         </CardContent>
       </Card>
 

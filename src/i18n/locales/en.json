@@ -423,8 +423,8 @@
       "disableDesc": "Immediately return error without retry or circuit-break. Supports single codes or ranges (inclusive), comma-separated",
       "retryCodes": "Auto-Retry Status Codes",
       "retryDesc": "Failover to next provider on these status codes. Supports single codes or ranges (inclusive), comma-separated; 504 and 524 are never retried regardless",
-      "disableKeywords": "Auto-Disable Keywords",
-      "disableKeywordsDesc": "Automatically disable the current API entry when upstream error contains any keyword (case-insensitive), one per line"
+      "disableKeywords": "Channel Freeze Keywords",
+      "disableKeywordsDesc": "When an upstream error contains any keyword (case-insensitive), all models under the same channel are temporarily frozen for 6 hours. Only cooldown time is written; entries are not permanently disabled. One keyword per line"
     },
     "tray": {
       "title": "System Tray",

@@ -441,6 +441,31 @@ impl Database {
         Ok(())
     }
 
+    /// 冷冻同一渠道下的所有模型条目；只写 cooldown_until，不修改用户启用开关。
+    pub fn freeze_entries_for_channel(
+        &self,
+        channel_id: &str,
+        cooldown_until: i64,
+    ) -> Result<Vec<String>, AppError> {
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn.transaction()?;
+        let ids = {
+            let mut stmt = tx.prepare("SELECT id FROM api_entries WHERE channel_id = ?1")?;
+            let rows = stmt.query_map([channel_id], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+
+        let now = chrono::Utc::now().timestamp();
+        tx.execute(
+            "UPDATE api_entries
+             SET cooldown_until = ?1, updated_at = ?2
+             WHERE channel_id = ?3",
+            rusqlite::params![cooldown_until, now, channel_id],
+        )?;
+        tx.commit()?;
+        Ok(ids)
+    }
+
     pub fn find_entry_by_channel_and_model(
         &self,
         channel_id: &str,

@@ -42,7 +42,7 @@ impl Default for AppSettings {
             circuit_recovery_secs: 300,
             circuit_disable_codes: "401,403,410".to_string(),
             circuit_retry_codes: "100-199,300-399,401-407,409-499,500-503,505-523,525-599".to_string(),
-            disable_keywords: "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized".to_string(),
+            disable_keywords: "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized\ninsufficient_quota\nquota_exceeded_error\ntoken plan limit exhausted\nUpstream rate limit exceeded\ninvalid api key\nUnauthorized - Invalid token".to_string(),
             autostart: false,
             start_minimized: false,
             show_guide: true,

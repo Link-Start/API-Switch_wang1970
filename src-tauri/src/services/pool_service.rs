@@ -2,10 +2,47 @@ use crate::database::dao::PaginatedResult;
 use crate::database::{ApiEntry, Database, EntryCatalogMetaInput};
 use crate::error::AppError;
 use crate::proxy::protocol::get_adapter;
-use crate::services::log_service::{extract_usage_tokens, insert_test_usage_log, TestUsageLogInput};
+use crate::services::log_service::{
+    extract_usage_tokens, insert_test_usage_log, TestUsageLogInput,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Instant;
+
+fn parse_latency_ms(value: &str) -> Option<f64> {
+    let value = value.trim().to_ascii_lowercase();
+    if value.is_empty() || value == "x" {
+        return None;
+    }
+    if let Some(ms) = value.strip_suffix("ms") {
+        return ms.parse::<f64>().ok();
+    }
+    if let Some(seconds) = value.strip_suffix('s') {
+        return seconds.parse::<f64>().ok().map(|s| s * 1000.0);
+    }
+    value.parse::<f64>().ok()
+}
+
+fn latency_score(value: Option<f64>) -> f64 {
+    let Some(ms) = value else {
+        return 0.0;
+    };
+    if ms <= 0.0 {
+        return 0.0;
+    }
+    (100.0 * (1.0 - (ms / 1000.0) / 20.0)).clamp(0.0, 100.0)
+}
+
+fn calculate_entry_score(
+    model_score: f64,
+    channel_response_ms: &str,
+    entry_response_ms: &str,
+) -> f64 {
+    let model_score = model_score.clamp(0.0, 100.0);
+    let channel_score = latency_score(parse_latency_ms(channel_response_ms));
+    let entry_score = latency_score(parse_latency_ms(entry_response_ms));
+    (model_score * 0.6 + channel_score * 0.2 + entry_score * 0.2).clamp(0.0, 100.0)
+}
 
 #[derive(Deserialize)]
 pub struct CreateEntryParams {
@@ -38,6 +75,7 @@ pub struct CatalogMetaUpdate {
 pub struct TestLatencyResult {
     pub status: String,
     pub response_ms: String,
+    pub score: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_detail: Option<String>,
 }
@@ -172,6 +210,7 @@ fn truncate_for_log(value: &str, max_chars: usize) -> String {
 pub async fn test_entry_latency(
     db: &Database,
     entry_id: &str,
+    model_score: f64,
 ) -> Result<TestLatencyResult, AppError> {
     let entries = db.get_entries_for_routing_all()?;
     let entry = entries
@@ -181,6 +220,11 @@ pub async fn test_entry_latency(
         .clone();
 
     let channel = db.get_channel(&entry.channel_id)?;
+    let update_score = |response_ms: &str| -> f64 {
+        let score = calculate_entry_score(model_score, &channel.response_ms, response_ms);
+        let _ = db.update_entry_score(entry_id, score);
+        score
+    };
 
     let adapter = get_adapter(&channel.api_type);
     let url = adapter.build_chat_url(&channel.base_url, &entry.model);
@@ -201,6 +245,10 @@ pub async fn test_entry_latency(
         Err(e) => {
             let message = format!("HTTP client: {e}");
             let _ = db.update_entry_response_ms(entry_id, "X");
+            let _ = db.update_entry_score(
+                entry_id,
+                calculate_entry_score(model_score, &channel.response_ms, "X"),
+            );
             let _ = db.toggle_entry(entry_id, false);
             insert_test_usage_log(
                 db,
@@ -261,6 +309,7 @@ pub async fn test_entry_latency(
             return Ok(TestLatencyResult {
                 status: "failed:network_error".to_string(),
                 response_ms: "X".to_string(),
+                score: update_score("X"),
                 error_detail: Some(message),
             });
         }
@@ -303,10 +352,10 @@ pub async fn test_entry_latency(
         return Ok(TestLatencyResult {
             status: "failed:http_error".to_string(),
             response_ms: "X".to_string(),
+            score: update_score("X"),
             error_detail: Some(error_detail),
         });
     }
-
 
     let body = match response.text().await {
         Ok(body) => body,
@@ -337,6 +386,7 @@ pub async fn test_entry_latency(
             return Ok(TestLatencyResult {
                 status: "failed:response_error".to_string(),
                 response_ms: "X".to_string(),
+                score: update_score("X"),
                 error_detail: Some(message),
             });
         }
@@ -369,6 +419,7 @@ pub async fn test_entry_latency(
         return Ok(TestLatencyResult {
             status: "failed:empty_response".to_string(),
             response_ms: "X".to_string(),
+            score: update_score("X"),
             error_detail: Some("empty_response".to_string()),
         });
     }
@@ -380,6 +431,7 @@ pub async fn test_entry_latency(
         .unwrap_or((0, 0));
     let response_ms = latency_ms.to_string();
     db.update_entry_response_ms(entry_id, &response_ms)?;
+    let score = update_score(&response_ms);
     // 启用 entry 并清理冷却，确保后续自动路由能命中
     db.toggle_entry(entry_id, true)?;
     let _ = db.set_entry_cooldown(entry_id, None);
@@ -407,6 +459,7 @@ pub async fn test_entry_latency(
     Ok(TestLatencyResult {
         status: "ok".to_string(),
         response_ms,
+        score,
         error_detail: None,
     })
 }
@@ -426,7 +479,11 @@ pub fn get_all_groups(db: &Database) -> Result<Vec<String>, AppError> {
 }
 
 /// Update the group_name for a specific entry.
-pub fn update_entry_display_name(db: &Database, id: &str, display_name: &str) -> Result<(), AppError> {
+pub fn update_entry_display_name(
+    db: &Database,
+    id: &str,
+    display_name: &str,
+) -> Result<(), AppError> {
     db.update_entry_display_name(id, display_name)?;
     crate::state_version::bump("pool");
     Ok(())

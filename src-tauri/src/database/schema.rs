@@ -1,4 +1,4 @@
-﻿use crate::error::AppError;
+use crate::error::AppError;
 use rusqlite::Connection;
 
 pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
@@ -37,6 +37,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
             release_date TEXT DEFAULT '',
             model_meta_zh TEXT DEFAULT '',
             model_meta_en TEXT DEFAULT '',
+            score REAL DEFAULT 0,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
@@ -96,7 +97,6 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
     ensure_usage_log_columns(conn)?;
     ensure_channel_columns(conn)?;
 
-
     // Migrate api_type values in channels table
     // custom -> openai, claude -> anthropic
     conn.execute(
@@ -109,7 +109,6 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
         [],
     )
     .map_err(|e| AppError::Database(e.to_string()))?;
-
 
     // Indexes
     conn.execute(
@@ -220,6 +219,7 @@ fn ensure_api_entry_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "api_entries", "release_date", "TEXT DEFAULT ''")?;
     ensure_column(conn, "api_entries", "model_meta_zh", "TEXT DEFAULT ''")?;
     ensure_column(conn, "api_entries", "model_meta_en", "TEXT DEFAULT ''")?;
+    ensure_column(conn, "api_entries", "score", "REAL DEFAULT 0")?;
     // group_name 鍒嗙粍瀛楁
     ensure_column(
         conn,
@@ -278,7 +278,3 @@ fn ensure_column(
 
     Ok(())
 }
-
-
-
-

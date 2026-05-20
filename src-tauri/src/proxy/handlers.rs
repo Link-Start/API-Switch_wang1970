@@ -49,11 +49,17 @@ async fn load_sorted_entries(
     Ok(entries)
 }
 
-fn dedup_models_by_name(mut entries: Vec<crate::database::ApiEntry>) -> Vec<crate::database::ApiEntry> {
+fn dedup_models_by_name(
+    mut entries: Vec<crate::database::ApiEntry>,
+) -> Vec<crate::database::ApiEntry> {
     // 按分组+模型名校验去重，确保相同模型在不同分组下分别保留
     let mut seen = HashSet::new();
     entries.retain(|entry| {
-        let group = entry.group_name.as_deref().unwrap_or("").to_ascii_lowercase();
+        let group = entry
+            .group_name
+            .as_deref()
+            .unwrap_or("")
+            .to_ascii_lowercase();
         let key = format!("{}::{}", group, entry.model.to_ascii_lowercase());
         seen.insert(key)
     });
@@ -142,7 +148,10 @@ fn entry_created_at_rfc3339(entry: &crate::database::ApiEntry) -> String {
 }
 
 fn entry_owned_by(entry: &crate::database::ApiEntry, default_owned_by: &str) -> String {
-    entry.owned_by.clone().unwrap_or_else(|| default_owned_by.to_string())
+    entry
+        .owned_by
+        .clone()
+        .unwrap_or_else(|| default_owned_by.to_string())
 }
 
 fn claude_display_name(entry: &crate::database::ApiEntry) -> String {
@@ -486,7 +495,9 @@ pub async fn handle_gemini_native(
 
     match action {
         "generateContent" => handle_gemini_generate_content(State(state), model, request).await,
-        "streamGenerateContent" => handle_gemini_stream_generate_content(State(state), model, request).await,
+        "streamGenerateContent" => {
+            handle_gemini_stream_generate_content(State(state), model, request).await
+        }
         _ => Err(ProxyError::Internal(format!(
             "Unsupported Gemini action: {action}"
         ))),
@@ -635,7 +646,10 @@ pub async fn handle_gemini_model_detail(
     let entries = state.db.get_entries_for_routing()?;
     let model_lower = model.to_ascii_lowercase();
 
-    if let Some(entry) = entries.iter().find(|e| e.model.to_ascii_lowercase() == model_lower) {
+    if let Some(entry) = entries
+        .iter()
+        .find(|e| e.model.to_ascii_lowercase() == model_lower)
+    {
         return Ok(Json(gemini_single_model_item(entry)));
     }
 
@@ -735,7 +749,12 @@ mod tests {
     use super::*;
     use crate::database::ApiEntry;
 
-    fn sample_entry(id: &str, model: &str, display_name: &str, group_name: Option<&str>) -> ApiEntry {
+    fn sample_entry(
+        id: &str,
+        model: &str,
+        display_name: &str,
+        group_name: Option<&str>,
+    ) -> ApiEntry {
         ApiEntry {
             id: id.to_string(),
             channel_id: format!("channel-{id}"),
@@ -756,6 +775,7 @@ mod tests {
             model_meta_zh: Some("上下文 32k".to_string()),
             model_meta_en: Some("Context 32k".to_string()),
             group_name: group_name.map(str::to_string),
+            score: 0.0,
         }
     }
 
@@ -785,7 +805,10 @@ mod tests {
         let value = gemini_model_item(&entry);
         assert_eq!(value["name"], "models/gemini-2.0-flash");
         assert_eq!(value["displayName"], "Gemini Flash");
-        assert_eq!(value["supportedGenerationMethods"], json!(["generateContent", "streamGenerateContent"]));
+        assert_eq!(
+            value["supportedGenerationMethods"],
+            json!(["generateContent", "streamGenerateContent"])
+        );
     }
 
     #[test]
@@ -808,7 +831,6 @@ mod tests {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProxyError {
-
     #[error("No available provider for model: {0}")]
     NoAvailableProvider(String),
 

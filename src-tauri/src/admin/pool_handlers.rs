@@ -43,6 +43,12 @@ pub struct ReorderParams {
     pub ordered_ids: Vec<String>,
 }
 
+#[derive(Deserialize)]
+pub struct TestLatencyParams {
+    #[serde(default)]
+    pub model_score: f64,
+}
+
 // ---------- Handlers -------------------------------------------------------
 
 /// GET /admin/pool - List all API entries
@@ -144,12 +150,12 @@ pub async fn reorder(
 pub async fn test_latency(
     State(state): State<AdminState>,
     Path(id): Path<String>,
+    payload: Option<Json<TestLatencyParams>>,
 ) -> Result<Json<pool_service::TestLatencyResult>, AdminError> {
-    let result = pool_service::test_entry_latency(
-        &state.db,
-        &id,
-    )
-    .await?;
+    let model_score = payload
+        .map(|Json(params)| params.model_score)
+        .unwrap_or(0.0);
+    let result = pool_service::test_entry_latency(&state.db, &id, model_score).await?;
     Ok(Json(result))
 }
 
@@ -181,14 +187,16 @@ pub async fn get_groups(State(state): State<AdminState>) -> Result<Json<Vec<Stri
     Ok(Json(groups))
 }
 
-
 /// PUT /admin/pool/:id/display-name - Update the display_name (alias) for an entry
 pub async fn update_display_name(
     State(state): State<AdminState>,
     Path(id): Path<String>,
     Json(payload): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
-    let display_name = payload.get("display_name").and_then(|v| v.as_str()).unwrap_or("");
+    let display_name = payload
+        .get("display_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     pool_service::update_entry_display_name(&state.db, &id, display_name)?;
     state.mark_pool_dirty();
     Ok(Json(serde_json::json!({"ok": true})))

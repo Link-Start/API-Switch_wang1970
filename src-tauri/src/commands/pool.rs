@@ -10,6 +10,7 @@ use tauri::{Emitter, State};
 pub struct TestResult {
     pub status: String,
     pub response_ms: String,
+    pub score: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_detail: Option<String>,
 }
@@ -171,14 +172,16 @@ pub async fn test_entry_latency(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     entry_id: String,
+    model_score: f64,
 ) -> Result<TestResult, AppError> {
     let db = state.db.clone();
-    let result = pool_service::test_entry_latency(&db, &entry_id).await?;
+    let result = pool_service::test_entry_latency(&db, &entry_id, model_score).await?;
     let _ = app.emit("entries-changed", ());
     crate::refresh_tray_if_enabled(&app);
     Ok(TestResult {
         status: result.status,
         response_ms: result.response_ms,
+        score: result.score,
         error_detail: result.error_detail,
     })
 }

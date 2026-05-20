@@ -89,6 +89,7 @@ export interface ApiEntry {
   owned_by?: string;
   // Response time from speed test (milliseconds string, or "X")
   response_ms?: string | null;
+  score: number;
   provider_logo?: string | null;
   release_date?: string | null;
   model_meta_zh?: string | null;

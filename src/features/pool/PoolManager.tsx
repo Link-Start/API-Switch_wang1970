@@ -81,6 +81,78 @@ function parseReleaseDateForSort(entry: ApiEntry): number | null {
   return null;
 }
 
+
+function monthsSinceRelease(value?: string | null): number | null {
+  const normalized = formatReleaseDate(value || "");
+  if (!normalized) return null;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return null;
+  const now = new Date();
+  let months = (now.getFullYear() - date.getFullYear()) * 12 + (now.getMonth() - date.getMonth());
+  if (now.getDate() < date.getDate()) months -= 1;
+  return Math.max(0, months);
+}
+
+function releaseRawScore(value?: string | null): number {
+  const months = monthsSinceRelease(value);
+  if (months === null) return 40;
+  if (months <= 1) return 100;
+  if (months >= 12) return 0;
+  return Math.max(0, Math.min(100, 100 * (12 - months) / 11));
+}
+
+function tierRawScore(entry: ApiEntry): number {
+  const text = `${entry.model} ${entry.display_name || ""}`.toLowerCase();
+  if (/\b(deprecated|legacy|retired)\b/.test(text)) return 10;
+  if (/\b(nano|tiny)\b/.test(text)) return 25;
+  if (/\b(mini|lite|small)\b/.test(text)) return 35;
+  if (/\b(distill|distilled|int4|awq|gptq)\b/.test(text)) return 35;
+  if (/\b(fp8)\b/.test(text)) return 50;
+  if (/\b(calibration|eval|benchmark|test)\b/.test(text)) return 55;
+  if (/\b(flash|fast|highspeed)\b/.test(text)) return 50;
+  if (/\b(turbo)\b/.test(text)) return 62;
+  if (/\b(max|ultra|opus)\b/.test(text)) return 95;
+  if (/\b(pro|advanced|thinking|reasoning|reasoner)\b/.test(text)) return 88;
+  if (/\b(codex|coder|coding|code|kat-dev)\b/.test(text)) return 82;
+  if (/\b(plus|large)\b/.test(text)) return 78;
+  const size = text.match(/\b(\d+(?:\.\d+)?)(b|t)\b/);
+  if (size) {
+    const value = Number(size[1]) * (size[2] === "t" ? 1000 : 1);
+    if (value >= 200) return 80;
+    if (value >= 70) return 75;
+  }
+  return 70;
+}
+
+function parseContextFromMeta(value?: string | null): number {
+  const match = (value || "").match(/Context:\s*([0-9]+(?:\.[0-9]+)?)\s*([KkMm])?/);
+  if (!match) return 0;
+  const amount = Number(match[1]);
+  const unit = (match[2] || "").toLowerCase();
+  if (unit === "m") return amount * 1_000_000;
+  if (unit === "k") return amount * 1_000;
+  return amount;
+}
+
+function descriptionRawScore(entry: ApiEntry): number {
+  const text = `${entry.model} ${entry.display_name || ""} ${entry.model_meta_en || ""} ${entry.model_meta_zh || ""}`.toLowerCase();
+  let score = 0;
+  if (/\b(reasoning|thinking|reasoner)\b/.test(text) && !/non[-_ ]reasoning/.test(text)) score += 35;
+  if (/\b(tool calling|tool_call|function calling|tool use)\b/.test(text)) score += 25;
+  if (/\b(struct output|structured output|json schema|json mode)\b/.test(text)) score += 15;
+  if (parseContextFromMeta(entry.model_meta_en) >= 128000) score += 15;
+  if (/\b(vision|image|multimodal|audio|video|vl)\b/.test(text)) score += 10;
+  return Math.min(100, score);
+}
+
+function getModelScoreCacheKey(entry: ApiEntry): string {
+  return entry.model.trim().toLowerCase();
+}
+
+function calculateModelRawScore(entry: ApiEntry): number {
+  return releaseRawScore(entry.release_date) * 0.4 + tierRawScore(entry) * 0.4 + descriptionRawScore(entry) * 0.2;
+}
+
 type CatalogDisplayMeta = {
   logo: string;
   releaseDate: string;
@@ -794,6 +866,14 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
     if (!scopedEntries.length) return;
     const results: Record<string, string> = {};
     const errorDetails: Record<string, string> = {};
+    const modelScoreCache = new Map<string, number>();
+    const scoreById: Record<string, number> = Object.fromEntries(scopedEntries.map((entry) => [entry.id, entry.score || 0]));
+    const refreshScoreOrder = () => {
+      const orderedIds = [...scopedEntries]
+        .sort((a, b) => (scoreById[b.id] || 0) - (scoreById[a.id] || 0))
+        .map((entry) => entry.id);
+      setLocalOrder(orderedIds);
+    };
     let completed = 0;
     const total = scopedEntries.length;
     setTestProgress({ current: 0, total });
@@ -812,7 +892,14 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
           return next;
         });
         try {
-          const result = await adapter.pool.testLatency(entry.id);
+          const cacheKey = getModelScoreCacheKey(entry);
+          let modelScore = modelScoreCache.get(cacheKey);
+          if (modelScore === undefined) {
+            modelScore = calculateModelRawScore(entry);
+            modelScoreCache.set(cacheKey, modelScore);
+          }
+          const result = await adapter.pool.testLatency(entry.id, modelScore);
+          scoreById[entry.id] = result.score;
           if (result.latency_ms !== null) {
             results[entry.id] = result.latency_ms.toString();
           } else {
@@ -832,9 +919,15 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
         setTestProgress({ current: completed, total });
         setTestResults({ ...results });
         setTestErrorDetails({ ...errorDetails });
+        refreshScoreOrder();
       }
     };
     await Promise.all([...grouped.values()].map(testChannel));
+    const orderedIds = [...scopedEntries]
+      .sort((a, b) => (scoreById[b.id] || 0) - (scoreById[a.id] || 0))
+      .map((entry) => entry.id);
+    setLocalOrder(orderedIds);
+    await adapter.pool.reorder(orderedIds);
     setTestingEntryIds(new Set());
     setTestResults({});
     setTestErrorDetails({});
@@ -1019,3 +1112,4 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
     </div>
   );
 }
+

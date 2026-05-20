@@ -40,6 +40,8 @@ pub struct ApiEntry {
     // Group name for entry grouping
     #[serde(default)]
     pub group_name: Option<String>,
+    #[serde(default)]
+    pub score: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -94,6 +96,7 @@ fn row_to_entry(row: &rusqlite::Row<'_>, include_channel: bool) -> rusqlite::Res
     let model_meta_zh: String = row.get(14).unwrap_or_default();
     let model_meta_en: String = row.get(15).unwrap_or_default();
     let group_name: String = row.get(16).unwrap_or_default();
+    let score: f64 = row.get(17).unwrap_or(0.0);
     let channel_api_type = if include_channel {
         row.get(10).ok()
     } else {
@@ -125,13 +128,14 @@ fn row_to_entry(row: &rusqlite::Row<'_>, include_channel: bool) -> rusqlite::Res
         model_meta_zh: empty_to_none(model_meta_zh),
         model_meta_en: empty_to_none(model_meta_en),
         group_name: empty_to_none(group_name),
+        score,
     })
 }
 
 const ENTRY_SELECT_WITH_CHANNEL: &str =
     "SELECT e.id, e.channel_id, e.model, e.display_name, e.sort_index, e.enabled,
         e.cooldown_until, e.created_at, e.updated_at, c.name, c.api_type,
-        e.response_ms, e.provider_logo, e.release_date, e.model_meta_zh, e.model_meta_en, e.group_name
+        e.response_ms, e.provider_logo, e.release_date, e.model_meta_zh, e.model_meta_en, e.group_name, e.score
         FROM api_entries e
         LEFT JOIN channels c ON e.channel_id = c.id";
 
@@ -284,6 +288,7 @@ impl Database {
             model_meta_zh: empty_to_none(model_meta_zh.to_string()),
             model_meta_en: empty_to_none(model_meta_en.to_string()),
             group_name: empty_to_none(group_name.to_string()),
+            score: 0.0,
         })
     }
 
@@ -402,6 +407,16 @@ impl Database {
         Ok(())
     }
 
+    pub fn update_entry_score(&self, id: &str, score: f64) -> Result<(), AppError> {
+        let conn = lock_conn!(self.conn);
+        conn.execute(
+            "UPDATE api_entries SET score = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![score, chrono::Utc::now().timestamp(), id],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(())
+    }
+
     pub fn backfill_entry_catalog_meta(
         &self,
         items: &[EntryCatalogMetaInput],
@@ -474,7 +489,7 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let sql = format!(
             "SELECT id, channel_id, model, display_name, sort_index, enabled, cooldown_until, created_at, updated_at,
-                    '' as channel_name, '' as api_type, response_ms, provider_logo, release_date, model_meta_zh, model_meta_en, group_name
+                    '' as channel_name, '' as api_type, response_ms, provider_logo, release_date, model_meta_zh, model_meta_en, group_name, score
              FROM api_entries WHERE channel_id = ?1 AND model = ?2"
         );
         let mut stmt = conn.prepare(&sql)?;

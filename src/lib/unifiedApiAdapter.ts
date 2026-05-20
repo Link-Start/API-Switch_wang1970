@@ -355,16 +355,17 @@ export const apiAdapter: ApiAdapter = {
         useTauri()
           ? tauriCmd<void>("update_entry_display_name", { id, displayName: display_name })
           : webRequest<void>("PUT", `/pool/${id}/display-name`, { display_name }),
-    testLatency: async (id) => {
+    testLatency: async (id, modelScore = 0) => {
       if (useTauri()) {
-        const result = await tauriCmd<{ status: string; response_ms: string; error_detail?: string }>('test_entry_latency', { entryId: id });
+        const result = await tauriCmd<{ status: string; response_ms: string; score: number; error_detail?: string }>('test_entry_latency', { entryId: id, modelScore });
         return {
           entry_id: id,
           latency_ms: result.status === 'ok' && result.response_ms !== 'X' ? parseInt(result.response_ms, 10) : null,
+          score: result.score,
           error_detail: result.error_detail,
         };
       }
-      return webRequest<{ entry_id: string; latency_ms: number | null; error_detail?: string }>('POST', `/pool/${id}/test-latency`);
+      return webRequest<{ entry_id: string; latency_ms: number | null; score: number; error_detail?: string }>('POST', `/pool/${id}/test-latency`, { model_score: modelScore });
     },
 
     backfillCatalogMeta: (items) =>

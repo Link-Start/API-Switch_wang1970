@@ -99,10 +99,11 @@ export async function backfillEntryCatalogMeta(items: EntryCatalogMetaUpdate[]):
 export interface TestLatencyResult {
   status: string;
   response_ms: string;
+  score: number;
 }
 
-export async function testEntryLatency(entryId: string): Promise<TestLatencyResult> {
-  return invoke("test_entry_latency", { entryId });
+export async function testEntryLatency(entryId: string, modelScore = 0): Promise<TestLatencyResult> {
+  return invoke("test_entry_latency", { entryId, modelScore });
 }
 
 export async function updateEntryResponseMs(entryId: string, responseMs: string): Promise<void> {

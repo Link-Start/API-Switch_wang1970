@@ -218,6 +218,7 @@ mod tests {
             model_meta_zh: None,
             model_meta_en: None,
             group_name: None,
+            score: 0.0,
         }
     }
 

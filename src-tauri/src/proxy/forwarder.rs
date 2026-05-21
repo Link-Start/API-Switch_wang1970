@@ -1302,7 +1302,11 @@ fn normalize_reasoning_fields(value: &mut Value) {
         .get("reasoning_content")
         .cloned()
         .or_else(|| obj.get("reasoning_text").cloned())
-        .or_else(|| obj.get("reasoning_details").cloned());
+        .or_else(|| {
+            obj.get("reasoning_details")
+                .and_then(Value::as_str)
+                .map(|reasoning| Value::String(reasoning.to_string()))
+        });
 
     if let Some(reasoning) = canonical {
         if !obj.contains_key("reasoning_content") {
@@ -1330,7 +1334,7 @@ fn normalize_reasoning_in_sse_chunk(chunk: &Bytes) -> Option<Bytes> {
 
     for line in text.split_inclusive('\n') {
         let check = line.trim_end();
-        if let Some(payload) = check.strip_prefix("data: ") {
+        if let Some(payload) = sse_data_payload_for_reasoning(check) {
             if let Ok(mut val) = serde_json::from_str::<Value>(payload) {
                 let before = val.clone();
                 if let Some(choices) = val.get_mut("choices").and_then(|c| c.as_array_mut()) {
@@ -1359,6 +1363,10 @@ fn normalize_reasoning_in_sse_chunk(chunk: &Bytes) -> Option<Bytes> {
     }
 
     changed.then_some(Bytes::from(output))
+}
+
+fn sse_data_payload_for_reasoning(line: &str) -> Option<&str> {
+    line.strip_prefix("data:").map(str::trim_start)
 }
 
 fn stream_chunk_has_model_info_delta(value: &Value, model: &str) -> bool {
@@ -1477,7 +1485,14 @@ fn transform_sse_chunk(
             }
 
             if let Some(transformed) = adapter.transform_sse_line(payload) {
-                if let Ok(value) = serde_json::from_str::<Value>(&transformed) {
+                if let Ok(mut value) = serde_json::from_str::<Value>(&transformed) {
+                    if let Some(choices) = value.get_mut("choices").and_then(Value::as_array_mut) {
+                        for choice in choices {
+                            if let Some(delta) = choice.get_mut("delta") {
+                                normalize_reasoning_fields(delta);
+                            }
+                        }
+                    }
                     if stream_chunk_has_text_delta(&value) {
                         has_text_delta.store(true, Ordering::Relaxed);
                     }
@@ -1489,8 +1504,12 @@ fn transform_sse_chunk(
                             done_state.upstream_model_info_seen = true;
                         }
                     }
+                    if let Ok(normalized) = serde_json::to_string(&value) {
+                        output.push(format!("data: {normalized}\n\n").into_bytes());
+                    }
+                } else {
+                    output.push(format!("data: {transformed}\n\n").into_bytes());
                 }
-                output.push(format!("data: {transformed}\n\n").into_bytes());
             }
         }
     }
@@ -2220,6 +2239,73 @@ data: [DONE]\n");
         );
 
         let output = normalize_reasoning_in_sse_chunk(&chunk).expect("modified chunk");
+        let output = String::from_utf8(output.to_vec()).expect("valid utf8");
+
+        assert!(output.contains("\"reasoning_details\":\"hidden\""));
+        assert!(output.contains("\"reasoning_content\":\"hidden\""));
+        assert!(output.contains("\"reasoning_text\":\"hidden\""));
+    }
+
+    #[test]
+    fn normalize_reasoning_fields_keeps_structured_details_separate() {
+        let mut details = serde_json::json!({
+            "role": "assistant",
+            "reasoning_details": [{"type": "summary", "text": "hidden"}]
+        });
+
+        normalize_reasoning_fields(&mut details);
+
+        assert!(details.get("reasoning_content").is_none());
+        assert!(details.get("reasoning_text").is_none());
+        assert!(details.get("reasoning_details").is_some());
+    }
+
+    #[test]
+    fn normalize_reasoning_in_sse_chunk_supports_data_without_space_and_crlf() {
+        let chunk = Bytes::from_static(
+            b"data:{\"choices\":[{\"delta\":{\"reasoning_content\":\"hidden\"}}]}\r\n\r\n"
+        );
+
+        let output = normalize_reasoning_in_sse_chunk(&chunk).expect("modified chunk");
+        let output = String::from_utf8(output.to_vec()).expect("valid utf8");
+
+        assert!(output.contains("data: {"));
+        assert!(output.contains("\"reasoning_text\":\"hidden\""));
+        assert!(output.contains("\r\n"));
+    }
+
+    #[test]
+    fn normalize_reasoning_in_sse_chunk_passes_non_utf8_through() {
+        let chunk = Bytes::from_static(b"data: \xff\xfe\n");
+        assert!(normalize_reasoning_in_sse_chunk(&chunk).is_none());
+    }
+
+    #[test]
+    fn transform_sse_chunk_normalizes_reasoning_after_adapter_transform() {
+        let adapter = get_adapter("responses");
+        let chunk = Bytes::from_static(
+            b"data: {\"choices\":[{\"delta\":{\"reasoning_details\":\"hidden\"}}]}\n"
+        );
+        let mut buffer = String::new();
+        let mut remainder = Vec::new();
+        let prompt_tokens = Arc::new(AtomicI64::new(0));
+        let completion_tokens = Arc::new(AtomicI64::new(0));
+        let has_text_delta = Arc::new(AtomicBool::new(false));
+        let has_tool_calls = Arc::new(AtomicBool::new(false));
+        let mut done_state = SseDoneState::default();
+
+        let output = transform_sse_chunk(
+            &chunk,
+            &mut buffer,
+            &mut remainder,
+            &adapter,
+            &prompt_tokens,
+            &completion_tokens,
+            &has_text_delta,
+            &has_tool_calls,
+            None,
+            &mut done_state)
+        .expect("transformed output");
         let output = String::from_utf8(output.to_vec()).expect("valid utf8");
 
         assert!(output.contains("\"reasoning_details\":\"hidden\""));

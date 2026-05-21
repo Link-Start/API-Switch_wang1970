@@ -1,4 +1,4 @@
-﻿//! OpenAI Responses API 上游适配器（Beta）
+//! OpenAI Responses API 上游适配器（Beta）
 //!
 //! 作为 channel.api_type = "responses" 时的 adapter，把 chat.completions
 //! 中间格式翻译成 Responses API 请求发给上游，再把 Responses API 响应
@@ -9,10 +9,10 @@
 //!
 //! 公理：这边进来什么，那边出去一样。已知字段按文档翻译，未知字段穿透。
 
+use super::{join_url, ProtocolAdapter};
 use axum::body::Body;
 use bytes::Bytes;
 use futures::StreamExt;
-use super::{join_url, ProtocolAdapter};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -40,7 +40,12 @@ fn chat_sse_text_delta(delta: &str) -> String {
 }
 
 /// 把 Responses `response.output_item.added` (function_call) 转为 Chat SSE 工具调用开始。
-fn chat_sse_tool_call_begin(output_index: u64, call_id: &str, name: &str, arguments: &str) -> String {
+fn chat_sse_tool_call_begin(
+    output_index: u64,
+    call_id: &str,
+    name: &str,
+    arguments: &str,
+) -> String {
     serde_json::to_string(&json!({
         "choices": [{"index": 0, "delta": {
             "tool_calls": [{
@@ -125,7 +130,125 @@ pub fn responses_message_output_item(item_id: &str, text: &str, status: &str) ->
     })
 }
 
-pub fn responses_output_item_added_event(response_id: &str, output_index: u32, item: Value) -> Value {
+fn extract_reasoning_from_chat_value(value: &Value) -> Option<&str> {
+    value
+        .get("reasoning_text")
+        .or_else(|| value.get("reasoning_content"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            value
+                .get("provider_specific")
+                .and_then(|p| p.get("thinking"))
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+        })
+}
+
+fn extract_reasoning_from_responses_item(item: &Value) -> Option<&str> {
+    item.get("content")
+        .and_then(Value::as_array)
+        .and_then(|parts| {
+            parts.iter().find_map(|part| {
+                let typ = part.get("type").and_then(Value::as_str).unwrap_or("");
+                if typ == "reasoning_text" || typ == "text" {
+                    part.get("text")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                } else {
+                    None
+                }
+            })
+        })
+        .or_else(|| {
+            item.get("summary")
+                .and_then(Value::as_array)
+                .and_then(|parts| {
+                    parts.iter().find_map(|part| {
+                        part.get("text")
+                            .and_then(Value::as_str)
+                            .filter(|s| !s.is_empty())
+                    })
+                })
+        })
+        .or_else(|| {
+            item.get("encrypted_content")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+        })
+}
+
+fn responses_reasoning_output_item(item_id: &str, text: &str, status: &str) -> Value {
+    json!({
+        "type": "reasoning",
+        "id": item_id,
+        "status": status,
+        "summary": [{ "type": "summary_text", "text": text }],
+        "content": [{ "type": "reasoning_text", "text": text }]
+    })
+}
+
+fn responses_reasoning_summary_part_added_event(
+    response_id: &str,
+    item_id: &str,
+    output_index: u32,
+) -> Value {
+    json!({
+        "type": "response.reasoning_summary_part.added",
+        "response_id": response_id,
+        "item_id": item_id,
+        "output_index": output_index,
+        "summary_index": 0
+    })
+}
+
+fn responses_reasoning_summary_text_delta_event(
+    response_id: &str,
+    item_id: &str,
+    output_index: u32,
+    delta: &str,
+) -> Value {
+    json!({
+        "type": "response.reasoning_summary_text.delta",
+        "response_id": response_id,
+        "item_id": item_id,
+        "output_index": output_index,
+        "summary_index": 0,
+        "delta": delta
+    })
+}
+
+fn responses_reasoning_text_delta_event(
+    response_id: &str,
+    item_id: &str,
+    output_index: u32,
+    delta: &str,
+) -> Value {
+    json!({
+        "type": "response.reasoning_text.delta",
+        "response_id": response_id,
+        "item_id": item_id,
+        "output_index": output_index,
+        "content_index": 0,
+        "delta": delta
+    })
+}
+
+fn chat_sse_reasoning_delta(delta: &str) -> String {
+    serde_json::to_string(&json!({
+        "choices": [{"index": 0, "delta": {
+            "reasoning_text": delta,
+            "reasoning_content": delta
+        }}]
+    }))
+    .unwrap_or_default()
+}
+
+pub fn responses_output_item_added_event(
+    response_id: &str,
+    output_index: u32,
+    item: Value,
+) -> Value {
     json!({
         "type": "response.output_item.added",
         "response_id": response_id,
@@ -134,7 +257,11 @@ pub fn responses_output_item_added_event(response_id: &str, output_index: u32, i
     })
 }
 
-pub fn responses_output_item_done_event(response_id: &str, output_index: u32, item: Value) -> Value {
+pub fn responses_output_item_done_event(
+    response_id: &str,
+    output_index: u32,
+    item: Value,
+) -> Value {
     json!({
         "type": "response.output_item.done",
         "response_id": response_id,
@@ -246,7 +373,12 @@ pub fn responses_completed_response(
     })
 }
 
-pub fn responses_failed_response(response_id: &str, created_at: i64, message: &str, error_type: &str) -> Value {
+pub fn responses_failed_response(
+    response_id: &str,
+    created_at: i64,
+    message: &str,
+    error_type: &str,
+) -> Value {
     json!({
         "id": response_id,
         "object": "response",
@@ -291,10 +423,14 @@ All results must come from actual execution or verifiable information. Do not fa
 }
 
 fn inject_responses_tool_degradation_prompt(messages: &mut Vec<Value>, prompt: String) {
-    if let Some(first_system) = messages.iter_mut().find(|message| {
-        message.get("role").and_then(|role| role.as_str()) == Some("system")
-    }) {
-        if let Some(content) = first_system.get("content").and_then(|content| content.as_str()) {
+    if let Some(first_system) = messages
+        .iter_mut()
+        .find(|message| message.get("role").and_then(|role| role.as_str()) == Some("system"))
+    {
+        if let Some(content) = first_system
+            .get("content")
+            .and_then(|content| content.as_str())
+        {
             first_system["content"] = json!(format!("{}\n\n{}", content, prompt));
             return;
         }
@@ -393,7 +529,12 @@ pub fn responses_to_openai_chat_request(req_body: &Value) -> (Value, bool, Strin
     (chat_body, is_stream, model)
 }
 
-pub fn build_responses_base_response(req_body: &Value, response_id: &str, created_at: i64, model: &str) -> Value {
+pub fn build_responses_base_response(
+    req_body: &Value,
+    response_id: &str,
+    created_at: i64,
+    model: &str,
+) -> Value {
     json!({
         "id": response_id,
         "object": "response",
@@ -438,30 +579,72 @@ pub fn wrap_openai_response_as_responses(
         .unwrap_or_else(|| json!({}));
 
     let content = msg.get("content").and_then(|v| v.as_str()).unwrap_or("");
+    let reasoning = extract_reasoning_from_chat_value(&msg);
     let tool_calls = msg.get("tool_calls").and_then(|v| v.as_array());
     let mut frames: Vec<Bytes> = Vec::new();
     let mut output_items: Vec<Value> = Vec::new();
+    let mut next_output_index: u32 = 0;
+
+    if let Some(reasoning) = reasoning {
+        let reasoning_item_id = format!("rsn_{item_id}");
+        let reasoning_item =
+            responses_reasoning_output_item(&reasoning_item_id, reasoning, "completed");
+        frames.push(responses_sse_line(&responses_output_item_added_event(
+            response_id,
+            next_output_index,
+            responses_reasoning_output_item(&reasoning_item_id, "", "in_progress"),
+        )));
+        frames.push(responses_sse_line(
+            &responses_reasoning_summary_part_added_event(
+                response_id,
+                &reasoning_item_id,
+                next_output_index,
+            ),
+        ));
+        frames.push(responses_sse_line(
+            &responses_reasoning_summary_text_delta_event(
+                response_id,
+                &reasoning_item_id,
+                next_output_index,
+                reasoning,
+            ),
+        ));
+        frames.push(responses_sse_line(&responses_reasoning_text_delta_event(
+            response_id,
+            &reasoning_item_id,
+            next_output_index,
+            reasoning,
+        )));
+        frames.push(responses_sse_line(&responses_output_item_done_event(
+            response_id,
+            next_output_index,
+            reasoning_item.clone(),
+        )));
+        output_items.push(reasoning_item);
+        next_output_index += 1;
+    }
 
     if !content.is_empty() {
         frames.push(responses_sse_line(&responses_output_text_delta_event(
             response_id,
             item_id,
-            0,
+            next_output_index,
             0,
             content,
         )));
         let completed_message = responses_message_output_item(item_id, content, "completed");
         frames.push(responses_sse_line(&responses_output_item_done_event(
             response_id,
-            0,
+            next_output_index,
             completed_message.clone(),
         )));
         output_items.push(completed_message);
+        next_output_index += 1;
     }
 
     if let Some(tc_array) = tool_calls {
         for (idx, tc) in tc_array.iter().enumerate() {
-            let output_index = if content.is_empty() { idx as u32 } else { (idx + 1) as u32 };
+            let output_index = next_output_index + idx as u32;
 
             if !is_function_tool_call(tc) {
                 let item = passthrough_output_item(tc, Some("completed"));
@@ -516,12 +699,8 @@ pub fn wrap_openai_response_as_responses(
                 output_index,
                 &tc_args,
             )));
-            let completed_item = responses_function_call_output_item(
-                tc_id,
-                tc_name,
-                &tc_args,
-                "completed",
-            );
+            let completed_item =
+                responses_function_call_output_item(tc_id, tc_name, &tc_args, "completed");
             frames.push(responses_sse_line(&responses_output_item_done_event(
                 response_id,
                 output_index,
@@ -540,7 +719,10 @@ pub fn wrap_openai_response_as_responses(
 
     let incomplete_details = responses_incomplete_details(finish_reason);
     let final_status = responses_final_status(finish_reason);
-    let upstream_model = obj.get("model").and_then(|m| m.as_str()).unwrap_or(model_fallback);
+    let upstream_model = obj
+        .get("model")
+        .and_then(|m| m.as_str())
+        .unwrap_or(model_fallback);
     let usage = obj.get("usage").cloned().unwrap_or_else(|| json!({}));
     let usage_obj = responses_usage_object(&usage);
 
@@ -552,7 +734,11 @@ pub fn wrap_openai_response_as_responses(
         req_body,
         upstream_model,
         output_items,
-        if content.is_empty() { None } else { Some(content) },
+        if content.is_empty() {
+            None
+        } else {
+            Some(content)
+        },
         usage_obj,
     );
 
@@ -590,11 +776,16 @@ pub fn build_responses_sse_http_response(
 
     axum::http::Response::builder()
         .status(axum::http::StatusCode::OK)
-        .header(axum::http::header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
+        .header(
+            axum::http::header::CONTENT_TYPE,
+            "text/event-stream; charset=utf-8",
+        )
         .header(axum::http::header::CACHE_CONTROL, "no-cache")
         .header(axum::http::header::CONNECTION, "close")
         .body(Body::from_stream(stream))
-        .map_err(|e| crate::error::AppError::Internal(format!("Failed to build Responses SSE response: {e}")))
+        .map_err(|e| {
+            crate::error::AppError::Internal(format!("Failed to build Responses SSE response: {e}"))
+        })
 }
 
 pub fn transform_openai_sse_to_responses_stream(
@@ -626,6 +817,10 @@ pub fn transform_openai_sse_to_responses_stream(
         let mut buffer = String::new();
         let mut utf8_remainder: Vec<u8> = Vec::new();
         let mut full_content = String::new();
+        let mut reasoning_content = String::new();
+        let mut reasoning_added = false;
+        let mut reasoning_done = false;
+        let reasoning_item_id = format!("rsn_{item_id}");
         let mut usage = json!({});
         let mut finish_reason: Option<String> = None;
         let mut upstream_model: Option<String> = None;
@@ -656,7 +851,9 @@ pub fn transform_openai_sse_to_responses_stream(
 
             let bytes = match chunk_result {
                 Ok(b) => {
-                    idle_timeout.as_mut().reset(tokio::time::Instant::now() + STREAM_IDLE_TIMEOUT);
+                    idle_timeout
+                        .as_mut()
+                        .reset(tokio::time::Instant::now() + STREAM_IDLE_TIMEOUT);
                     b
                 }
                 Err(_) => break,
@@ -685,10 +882,24 @@ pub fn transform_openai_sse_to_responses_stream(
 
                 if let Some(data) = crate::proxy::sse::sse_data_payload(line) {
                     if data == "[DONE]" {
-                        if !full_content.is_empty() {
+                        if reasoning_added && !reasoning_done {
                             send!(responses_sse_line(&responses_output_item_done_event(
                                 &response_id,
                                 0,
+                                responses_reasoning_output_item(
+                                    &reasoning_item_id,
+                                    &reasoning_content,
+                                    "completed"
+                                ),
+                            )));
+                            reasoning_done = true;
+                        }
+
+                        if !full_content.is_empty() {
+                            let content_index = if reasoning_added { 1 } else { 0 };
+                            send!(responses_sse_line(&responses_output_item_done_event(
+                                &response_id,
+                                content_index,
                                 responses_message_output_item(&item_id, &full_content, "completed"),
                             )));
                         }
@@ -724,12 +935,24 @@ pub fn transform_openai_sse_to_responses_stream(
                         }
 
                         let final_status = responses_final_status(finish_reason.as_deref());
-                        let incomplete_details = responses_incomplete_details(finish_reason.as_deref());
+                        let incomplete_details =
+                            responses_incomplete_details(finish_reason.as_deref());
                         let resolved_model = upstream_model.as_deref().unwrap_or(&model);
 
                         let mut final_items: Vec<Value> = Vec::new();
+                        if !reasoning_content.is_empty() {
+                            final_items.push(responses_reasoning_output_item(
+                                &reasoning_item_id,
+                                &reasoning_content,
+                                final_status,
+                            ));
+                        }
                         if !full_content.is_empty() {
-                            final_items.push(responses_message_output_item(&item_id, &full_content, final_status));
+                            final_items.push(responses_message_output_item(
+                                &item_id,
+                                &full_content,
+                                final_status,
+                            ));
                         }
                         for &idx in &sorted_indices {
                             let entry = &tool_accum[&idx];
@@ -753,7 +976,11 @@ pub fn transform_openai_sse_to_responses_stream(
                             &req_body,
                             resolved_model,
                             final_items,
-                            if full_content.is_empty() { None } else { Some(full_content.as_str()) },
+                            if full_content.is_empty() {
+                                None
+                            } else {
+                                Some(full_content.as_str())
+                            },
                             responses_usage_object(&usage),
                         );
                         send!(responses_sse_line(&json!({
@@ -796,25 +1023,22 @@ pub fn transform_openai_sse_to_responses_stream(
                             .and_then(|t| t.as_array())
                         {
                             for tc_delta in tool_calls_delta {
-                                let tc_idx = tc_delta
-                                    .get("index")
-                                    .and_then(|v| v.as_u64())
-                                    .unwrap_or(0) as usize;
-                                let tc_id_new = tc_delta
-                                    .get("id")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("");
+                                let tc_idx =
+                                    tc_delta.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
+                                        as usize;
+                                let tc_id_new =
+                                    tc_delta.get("id").and_then(|v| v.as_str()).unwrap_or("");
                                 let tc_fn = tc_delta
                                     .get("function")
                                     .cloned()
                                     .unwrap_or_else(|| json!({}));
-                                let tc_name_delta = tc_fn
-                                    .get("name")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("");
-                                let is_function_delta = tc_delta.get("type").and_then(|v| v.as_str())
-                                    == Some("function")
-                                    || (tc_delta.get("type").is_none() && tc_delta.get("function").is_some());
+                                let tc_name_delta =
+                                    tc_fn.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                                let is_function_delta =
+                                    tc_delta.get("type").and_then(|v| v.as_str())
+                                        == Some("function")
+                                        || (tc_delta.get("type").is_none()
+                                            && tc_delta.get("function").is_some());
                                 let tc_args_delta = match tc_fn.get("arguments") {
                                     Some(Value::String(s)) => s.clone(),
                                     Some(Value::Object(_)) | Some(Value::Array(_)) => {
@@ -824,30 +1048,33 @@ pub fn transform_openai_sse_to_responses_stream(
                                     _ => String::new(),
                                 };
 
-                                let entry = tool_accum.entry(tc_idx).or_insert_with(|| ToolCallEntry {
-                                    id: String::new(),
-                                    name: String::new(),
-                                    arguments: String::new(),
-                                    passthrough_item: None,
-                                    added_emitted: false,
-                                    assigned_index: 0,
-                                });
+                                let entry =
+                                    tool_accum.entry(tc_idx).or_insert_with(|| ToolCallEntry {
+                                        id: String::new(),
+                                        name: String::new(),
+                                        arguments: String::new(),
+                                        passthrough_item: None,
+                                        added_emitted: false,
+                                        assigned_index: 0,
+                                    });
 
                                 if !is_function_delta || entry.passthrough_item.is_some() {
-                                    let item = entry
-                                        .passthrough_item
-                                        .get_or_insert_with(|| passthrough_output_item(tc_delta, None));
+                                    let item = entry.passthrough_item.get_or_insert_with(|| {
+                                        passthrough_output_item(tc_delta, None)
+                                    });
                                     merge_tool_delta(item, tc_delta);
                                     if !tc_id_new.is_empty() {
                                         entry.id = tc_id_new.to_string();
                                     }
                                     if !entry.added_emitted {
                                         entry.assigned_index = (tc_idx + 1) as u32;
-                                        send!(responses_sse_line(&responses_output_item_added_event(
-                                            &response_id,
-                                            entry.assigned_index,
-                                            passthrough_output_item(item, Some("in_progress")),
-                                        )));
+                                        send!(responses_sse_line(
+                                            &responses_output_item_added_event(
+                                                &response_id,
+                                                entry.assigned_index,
+                                                passthrough_output_item(item, Some("in_progress")),
+                                            )
+                                        ));
                                         entry.added_emitted = true;
                                     }
                                     continue;
@@ -921,6 +1148,49 @@ pub fn transform_openai_sse_to_responses_stream(
                             }
                         }
 
+                        if let Some(delta) = chunk_obj
+                            .get("choices")
+                            .and_then(|c| c.as_array())
+                            .and_then(|a| a.first())
+                            .and_then(|c| c.get("delta"))
+                            .and_then(extract_reasoning_from_chat_value)
+                        {
+                            if !reasoning_added {
+                                send!(responses_sse_line(&responses_output_item_added_event(
+                                    &response_id,
+                                    0,
+                                    responses_reasoning_output_item(
+                                        &reasoning_item_id,
+                                        "",
+                                        "in_progress"
+                                    ),
+                                )));
+                                send!(responses_sse_line(
+                                    &responses_reasoning_summary_part_added_event(
+                                        &response_id,
+                                        &reasoning_item_id,
+                                        0,
+                                    )
+                                ));
+                                reasoning_added = true;
+                            }
+                            reasoning_content.push_str(delta);
+                            send!(responses_sse_line(
+                                &responses_reasoning_summary_text_delta_event(
+                                    &response_id,
+                                    &reasoning_item_id,
+                                    0,
+                                    delta,
+                                )
+                            ));
+                            send!(responses_sse_line(&responses_reasoning_text_delta_event(
+                                &response_id,
+                                &reasoning_item_id,
+                                0,
+                                delta,
+                            )));
+                        }
+
                         if let Some(content) = chunk_obj
                             .get("choices")
                             .and_then(|c| c.as_array())
@@ -930,10 +1200,23 @@ pub fn transform_openai_sse_to_responses_stream(
                             .and_then(|c| c.as_str())
                         {
                             if !content.is_empty() {
+                                if reasoning_added && !reasoning_done {
+                                    send!(responses_sse_line(&responses_output_item_done_event(
+                                        &response_id,
+                                        0,
+                                        responses_reasoning_output_item(
+                                            &reasoning_item_id,
+                                            &reasoning_content,
+                                            "completed"
+                                        ),
+                                    )));
+                                    reasoning_done = true;
+                                }
+                                let content_index = if reasoning_added { 1 } else { 0 };
                                 if full_content.is_empty() {
                                     send!(responses_sse_line(&responses_output_item_added_event(
                                         &response_id,
-                                        0,
+                                        content_index,
                                         json!({
                                             "type": "message",
                                             "role": "assistant",
@@ -947,7 +1230,7 @@ pub fn transform_openai_sse_to_responses_stream(
                                 send!(responses_sse_line(&responses_output_text_delta_event(
                                     &response_id,
                                     &item_id,
-                                    0,
+                                    content_index,
                                     0,
                                     content,
                                 )));
@@ -967,11 +1250,18 @@ pub fn transform_openai_sse_to_responses_stream(
 
     axum::http::Response::builder()
         .status(axum::http::StatusCode::OK)
-        .header(axum::http::header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
+        .header(
+            axum::http::header::CONTENT_TYPE,
+            "text/event-stream; charset=utf-8",
+        )
         .header(axum::http::header::CACHE_CONTROL, "no-cache")
         .header(axum::http::header::CONNECTION, "close")
         .body(Body::from_stream(stream))
-        .map_err(|e| crate::error::AppError::Internal(format!("Failed to build Responses stream response: {e}")))
+        .map_err(|e| {
+            crate::error::AppError::Internal(format!(
+                "Failed to build Responses stream response: {e}"
+            ))
+        })
 }
 
 /// 未知字段穿透开关。
@@ -1089,6 +1379,15 @@ impl ProtocolAdapter for ResponsesAdapter {
                 Some(chat_sse_text_delta(delta))
             }
 
+            // ── Reasoning 增量 ───────────────────────────────────────
+            "response.reasoning_text.delta" | "response.reasoning_summary_text.delta" => {
+                let delta = value.get("delta").and_then(|v| v.as_str()).unwrap_or("");
+                if delta.is_empty() {
+                    return None;
+                }
+                Some(chat_sse_reasoning_delta(delta))
+            }
+
             // ── 工具调用开始（output_item.added + function_call） ────
             "response.output_item.added" => {
                 let item = value.get("item")?;
@@ -1097,7 +1396,10 @@ impl ProtocolAdapter for ResponsesAdapter {
                     // 非 function 的 output item 没有 Chat SSE 对应事件
                     return None;
                 }
-                let output_index = value.get("output_index").and_then(|v| v.as_u64()).unwrap_or(0);
+                let output_index = value
+                    .get("output_index")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 let call_id = item
                     .get("id")
                     .or_else(|| item.get("call_id"))
@@ -1105,7 +1407,22 @@ impl ProtocolAdapter for ResponsesAdapter {
                     .unwrap_or("");
                 let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let arguments = item.get("arguments").and_then(|v| v.as_str()).unwrap_or("");
-                Some(chat_sse_tool_call_begin(output_index, call_id, name, arguments))
+                Some(chat_sse_tool_call_begin(
+                    output_index,
+                    call_id,
+                    name,
+                    arguments,
+                ))
+            }
+
+            // ── Reasoning item 完成（MIMO Responses 把 reasoning 放在 encrypted_content） ──
+            "response.output_item.done" => {
+                let item = value.get("item")?;
+                if item.get("type").and_then(Value::as_str) == Some("reasoning") {
+                    return extract_reasoning_from_responses_item(item)
+                        .map(chat_sse_reasoning_delta);
+                }
+                None
             }
 
             // ── 工具参数增量 ──────────────────────────────────────────
@@ -1114,7 +1431,10 @@ impl ProtocolAdapter for ResponsesAdapter {
                 if delta.is_empty() {
                     return None;
                 }
-                let output_index = value.get("output_index").and_then(|v| v.as_u64()).unwrap_or(0);
+                let output_index = value
+                    .get("output_index")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 Some(chat_sse_tool_call_args(output_index, delta))
             }
 
@@ -1140,15 +1460,22 @@ impl ProtocolAdapter for ResponsesAdapter {
                     .and_then(Value::as_i64)
                     .unwrap_or(0);
 
-                Some(chat_sse_completed(finish_reason, input_tokens, output_tokens))
+                Some(chat_sse_completed(
+                    finish_reason,
+                    input_tokens,
+                    output_tokens,
+                ))
             }
 
             // ── 无 Chat SSE 对应的事件 ────────────────────────────────
             //
             // 按公理二（往返无损）和 ENABLE_UNKNOWN_FIELD_PASSTHROUGH 模式：
             // 没有 Chat 对应的事件也原样透传，不丢失上游信息。
-            "response.created" | "response.output_item.done" | "response.incomplete" | "response.failed"
-                | _ => Some(data_line.to_string()),
+            "response.created"
+            | "response.output_item.done"
+            | "response.incomplete"
+            | "response.failed"
+            | _ => Some(data_line.to_string()),
         }
     }
 
@@ -1512,6 +1839,7 @@ fn transform_response_from_responses(body: &mut Value) {
     // 取出 output 数组
     let output = obj.remove("output");
     let mut content_text = String::new();
+    let mut reasoning_text = String::new();
     let mut tool_calls: Vec<Value> = Vec::new();
 
     if let Some(Value::Array(items)) = output {
@@ -1555,10 +1883,12 @@ fn transform_response_from_responses(body: &mut Value) {
                         }
                     }));
                 }
-                _ => {
-                    // 其他 item 类型（reasoning、refusal 等）保留到 provider_specific
-                    // 或穿透。此处先简化处理，保留在最终 provider_specific 里。
+                "reasoning" => {
+                    if let Some(reasoning) = extract_reasoning_from_responses_item(&item) {
+                        reasoning_text.push_str(reasoning);
+                    }
                 }
+                _ => {}
             }
         }
     }
@@ -1567,6 +1897,10 @@ fn transform_response_from_responses(body: &mut Value) {
     let mut message = serde_json::Map::new();
     message.insert("role".to_string(), json!("assistant"));
     message.insert("content".to_string(), json!(content_text));
+    if !reasoning_text.is_empty() {
+        message.insert("reasoning_text".to_string(), json!(reasoning_text));
+        message.insert("reasoning_content".to_string(), json!(reasoning_text));
+    }
     if !tool_calls.is_empty() {
         message.insert("tool_calls".to_string(), json!(tool_calls));
     }

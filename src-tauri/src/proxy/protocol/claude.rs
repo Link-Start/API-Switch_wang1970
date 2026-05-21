@@ -1,7 +1,7 @@
+use super::{join_url, ProtocolAdapter};
 use axum::body::Body;
 use bytes::Bytes;
 use futures::StreamExt;
-use super::{join_url, ProtocolAdapter};
 /// Anthropic (Claude) protocol adapter.
 ///
 /// Converts between OpenAI format (external) and Anthropic native format (upstream).
@@ -292,6 +292,21 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
     }
 
     *body = anthropic;
+}
+
+fn extract_chat_reasoning(value: &Value) -> Option<&str> {
+    value
+        .get("reasoning_text")
+        .or_else(|| value.get("reasoning_content"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            value
+                .get("provider_specific")
+                .and_then(|p| p.get("thinking"))
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+        })
 }
 
 fn extract_text_content(content: &Value) -> String {
@@ -669,9 +684,20 @@ fn transform_response_from_anthropic(body: &mut Value) {
 
     // Include thinking content if present
     if !thinking_parts.is_empty() {
+        let thinking = thinking_parts.join("");
         response_body["provider_specific"] = json!({
-            "thinking": thinking_parts.join("")
+            "thinking": thinking
         });
+        if let Some(message) = response_body
+            .get_mut("choices")
+            .and_then(Value::as_array_mut)
+            .and_then(|choices| choices.first_mut())
+            .and_then(|choice| choice.get_mut("message"))
+            .and_then(Value::as_object_mut)
+        {
+            message.insert("reasoning_text".to_string(), json!(thinking));
+            message.insert("reasoning_content".to_string(), json!(thinking));
+        }
     }
 
     *body = response_body;
@@ -810,7 +836,11 @@ fn transform_anthropic_sse_line(data_line: &str) -> Option<String> {
                                     "model": "claude",
                                     "choices": [{
                                         "index": index,
-                                        "delta": {"provider_specific": {"thinking": thinking}},
+                                        "delta": {
+                                            "provider_specific": {"thinking": thinking},
+                                            "reasoning_text": thinking,
+                                            "reasoning_content": thinking
+                                        },
                                         "finish_reason": null
                                     }]
                                 }))
@@ -892,7 +922,11 @@ fn transform_anthropic_sse_line(data_line: &str) -> Option<String> {
                             "model": "claude",
                             "choices": [{
                                 "index": index,
-                                "delta": {"provider_specific": {"thinking": thinking}},
+                                "delta": {
+                                            "provider_specific": {"thinking": thinking},
+                                            "reasoning_text": thinking,
+                                            "reasoning_content": thinking
+                                        },
                                 "finish_reason": null
                             }]
                         }))
@@ -1138,9 +1172,17 @@ pub fn openai_to_claude_response(openai: &Value) -> Value {
     let tool_calls = message
         .and_then(|m| m.get("tool_calls"))
         .and_then(|tc| tc.as_array());
+    let reasoning = message.and_then(extract_chat_reasoning);
 
     // Build content array
     let mut content = Vec::new();
+
+    if let Some(reasoning) = reasoning {
+        content.push(json!({
+            "type": "thinking",
+            "thinking": reasoning
+        }));
+    }
 
     if !content_str.is_empty() {
         content.push(json!({
@@ -1300,6 +1342,7 @@ pub struct ClaudeSSETransformer {
     model: String,
     started: bool,
     text_block_open: bool,
+    thinking_block_open: bool,
     content_block_index: i64,
     in_tool_use: bool,
     tool_use_count: i64,
@@ -1320,6 +1363,7 @@ impl ClaudeSSETransformer {
             model,
             started: false,
             text_block_open: false,
+            thinking_block_open: false,
             content_block_index: 0,
             in_tool_use: false,
             tool_use_count: 0,
@@ -1411,6 +1455,45 @@ impl ClaudeSSETransformer {
         let delta = choice.get("delta").cloned().unwrap_or(json!({}));
         let finish_reason = choice.get("finish_reason").and_then(|fr| fr.as_str());
 
+        if let Some(reasoning) = extract_chat_reasoning(&delta) {
+            if !self.thinking_block_open {
+                if self.text_block_open {
+                    self.text_block_open = false;
+                    events.push(
+                        serde_json::to_string(&json!({
+                            "type": "content_block_stop",
+                            "index": self.content_block_index
+                        }))
+                        .unwrap_or_default(),
+                    );
+                    self.content_block_index += 1;
+                }
+                self.thinking_block_open = true;
+                events.push(
+                    serde_json::to_string(&json!({
+                        "type": "content_block_start",
+                        "index": self.content_block_index,
+                        "content_block": {
+                            "type": "thinking",
+                            "thinking": ""
+                        }
+                    }))
+                    .unwrap_or_default(),
+                );
+            }
+            events.push(
+                serde_json::to_string(&json!({
+                    "type": "content_block_delta",
+                    "index": self.content_block_index,
+                    "delta": {
+                        "type": "thinking_delta",
+                        "thinking": reasoning
+                    }
+                }))
+                .unwrap_or_default(),
+            );
+        }
+
         // Handle text content delta (THE FIX: reuse same text block)
         if let Some(content_val) = delta.get("content") {
             if let Value::String(text) = content_val {
@@ -1448,9 +1531,19 @@ impl ClaudeSSETransformer {
 
         // Handle tool call deltas
         if let Some(tool_calls) = delta.get("tool_calls").and_then(|tc| tc.as_array()) {
-            // Close any open text block before tool_use blocks
+            // Close any open text/thinking block before tool_use blocks
             if self.text_block_open {
                 self.text_block_open = false;
+                events.push(
+                    serde_json::to_string(&json!({
+                        "type": "content_block_stop",
+                        "index": self.content_block_index
+                    }))
+                    .unwrap_or_default(),
+                );
+                self.content_block_index += 1;
+            } else if self.thinking_block_open {
+                self.thinking_block_open = false;
                 events.push(
                     serde_json::to_string(&json!({
                         "type": "content_block_stop",
@@ -1531,6 +1624,16 @@ impl ClaudeSSETransformer {
             // Close any open content blocks
             if self.text_block_open {
                 self.text_block_open = false;
+                events.push(
+                    serde_json::to_string(&json!({
+                        "type": "content_block_stop",
+                        "index": self.content_block_index
+                    }))
+                    .unwrap_or_default(),
+                );
+                self.content_block_index += 1;
+            } else if self.thinking_block_open {
+                self.thinking_block_open = false;
                 events.push(
                     serde_json::to_string(&json!({
                         "type": "content_block_stop",
@@ -1760,7 +1863,9 @@ pub fn transform_openai_sse_to_claude_stream(
         .header("connection", "keep-alive")
         .header("x-accel-buffering", "no")
         .body(Body::from_stream(transformed_stream))
-        .map_err(|e| crate::error::AppError::Internal(format!("Failed to build Claude SSE response: {e}")))
+        .map_err(|e| {
+            crate::error::AppError::Internal(format!("Failed to build Claude SSE response: {e}"))
+        })
 }
 
 /// Extract text from Claude content (string or array of text blocks).

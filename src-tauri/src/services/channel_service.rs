@@ -9,6 +9,7 @@ use crate::database::dao::PaginatedResult;
 use crate::database::{Channel, Database, ModelInfo};
 use crate::error::AppError;
 use crate::proxy::protocol::get_adapter;
+use crate::services::api_key_utils::primary_api_key;
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
@@ -329,6 +330,7 @@ pub async fn probe_url(
     let start = std::time::Instant::now();
     if let (Some(api_type), Some(api_key)) = (api_type.as_deref(), api_key.as_deref()) {
         if !api_key.trim().is_empty() {
+            let api_key = primary_api_key(api_key);
             let (primary_guess, all_available) = detect_endpoint_and_collect(api_type, url, api_key).await;
             if let Some(guess) = primary_guess {
                 return Ok(ProbeResult {
@@ -435,7 +437,7 @@ pub async fn fetch_models_direct(
             auto_saved: false,
         });
     }
-    smart_fetch_models(&api_type, &base_url, &api_key, verified.unwrap_or(false))
+    smart_fetch_models(&api_type, &base_url, primary_api_key(&api_key), verified.unwrap_or(false))
         .await
         .map_err(|e| AppError::Network(e.message))
 }
@@ -447,7 +449,12 @@ pub async fn fetch_models(
     let channel = db.get_channel(&channel_id)?;
     let original_base_url = normalize_base_url(&channel.base_url);
     let endpoint_guess =
-        detect_endpoint_guess(&channel.api_type, &channel.base_url, &channel.api_key).await;
+        detect_endpoint_guess(
+            &channel.api_type,
+            &channel.base_url,
+            primary_api_key(&channel.api_key),
+        )
+        .await;
     let Some(guess) = endpoint_guess else {
         return Ok(FetchModelsResult {
             detected_type: channel.api_type,
@@ -471,7 +478,7 @@ pub async fn fetch_models(
     let result = match fetch_models_result_with_fallback(
         &guess.detected_type,
         &guess.corrected_base_url,
-        &channel.api_key,
+        primary_api_key(&channel.api_key),
     )
     .await
     {
@@ -1235,7 +1242,7 @@ pub async fn test_channel_chat(
 pub async fn test_channel_direct(params: TestChannelDirectParams) -> TestChannelResult {
     test_channel_chat(
         &params.base_url,
-        &params.api_key,
+        primary_api_key(&params.api_key),
         normalize_api_type(&params.api_type),
         &params.model,
     )

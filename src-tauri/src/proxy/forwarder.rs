@@ -5,6 +5,7 @@ use super::protocol::get_adapter;
 use super::server::ProxyState;
 use crate::database::{AccessKey, ApiEntry, AppSettings, Database};
 use crate::refresh_tray_if_enabled;
+use crate::services::api_key_utils::primary_api_key;
 use axum::body::Body;
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
@@ -622,7 +623,7 @@ async fn forward_single(
     }
 
     let mut request = adapter
-        .apply_auth(state.http_client.post(&url), &channel.api_key)
+        .apply_auth(state.http_client.post(&url), primary_api_key(&channel.api_key))
         .json(&upstream_body);
 
     if is_stream {

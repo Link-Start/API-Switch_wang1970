@@ -89,6 +89,9 @@ export const ChannelEditorDialog: React.FC<{
     }
    }, [channel, open]);
 
+  const apiKeys = useMemo(() => form.api_key.split('\n').map((key) => key.trim()).filter(Boolean), [form.api_key]);
+  const primaryApiKey = apiKeys[0] ?? '';
+
   // URL 检测
   useEffect(() => {
     const seq = ++probeSeqRef.current;
@@ -101,7 +104,7 @@ export const ChannelEditorDialog: React.FC<{
     setProbingUrl(true);
     const timer = setTimeout(async () => {
       try {
-        const result = await api.channels.probeUrl(form.base_url.trim(), form.api_type, form.api_key.trim());
+        const result = await api.channels.probeUrl(form.base_url.trim(), form.api_type, primaryApiKey);
         if (probeSeqRef.current === seq) {
           setUrlProbe(result as UrlProbeResult);
           if (result.reachable) {
@@ -131,13 +134,13 @@ export const ChannelEditorDialog: React.FC<{
       }
     }, 800);
     return () => clearTimeout(timer);
-  }, [api, form.api_key, form.api_type, form.base_url, t]);
+  }, [api, form.api_type, form.base_url, primaryApiKey, t]);
 
   // canSave 必须检查 4 项：name, api_type, base_url, api_key 都有内容
-  const canSave = !!(form.name.trim() && form.api_type.trim() && form.base_url.trim() && form.api_key.trim());
+  const canSave = !!(form.name.trim() && form.api_type.trim() && form.base_url.trim() && primaryApiKey);
   
   // canFetchModels: 基础输入满足即可尝试，URL 探测失败不阻塞获取模型
-  const canFetchModels = !!(form.name.trim() && form.api_type.trim() && form.base_url.trim() && form.api_key.trim() && !fetchingModels);
+  const canFetchModels = !!(form.name.trim() && form.api_type.trim() && form.base_url.trim() && primaryApiKey && !fetchingModels);
 
   const setValue = <K extends keyof ChannelFormState>(key: K, value: ChannelFormState[K]) => {
     if (key === 'api_type' || key === 'base_url' || key === 'api_key') {
@@ -247,7 +250,7 @@ export const ChannelEditorDialog: React.FC<{
   };
 
   const fetchModelsByProtocol = async (apiType: string): Promise<{ result: FetchModelsResult; models: EditorModelInfo[] }> => {
-    const result = await api.channels.fetchModelsDirect(apiType, form.base_url, form.api_key, false);
+    const result = await api.channels.fetchModelsDirect(apiType, form.base_url, primaryApiKey, false);
     if (result.models.length > 0) {
       setAvailableProtocols(prev => Array.from(new Set([...prev, apiType])));
     }
@@ -353,7 +356,7 @@ export const ChannelEditorDialog: React.FC<{
               const result = await api.channels.testChannelDirect({
                 api_type: form.api_type,
                 base_url: form.base_url,
-                api_key: form.api_key,
+                api_key: primaryApiKey,
                 model: model.name,
               });
               results[model.name] = result.success
@@ -389,7 +392,7 @@ export const ChannelEditorDialog: React.FC<{
     }
     setSaving(true);
     try {
-      const keys = form.id ? [form.api_key.trim()] : form.api_key.split('\n').map(k => k.trim()).filter(k => k.length > 0);
+      const keys = form.id ? [primaryApiKey] : apiKeys;
       const successNames: string[] = [];
       const failedNames: string[] = [];
 
@@ -533,18 +536,15 @@ return (
             <div className="space-y-2">
               <Label htmlFor="channel-apikey">{t('channel.editor.apiKey')}</Label>
               <div className="relative">
-                {channel ? (
-                  <Input id="channel-apikey" type={showApiKey ? 'text' : 'password'} value={form.api_key} onChange={(event) => setValue('api_key', event.target.value)} className="pr-10" />
-                ) : (
-                  <textarea
-                    id="channel-apikey"
-                    rows={1}
-                    value={form.api_key}
-                    onChange={(event) => setValue('api_key', event.target.value)}
-                    className="flex min-h-9 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                    style={{ WebkitTextSecurity: showApiKey ? 'none' : 'disc' } as React.CSSProperties}
-                  />
-                )}
+                <textarea
+                  id="channel-apikey"
+                  rows={channel ? 2 : 4}
+                  value={form.api_key}
+                  onChange={(event) => setValue('api_key', event.target.value)}
+                  placeholder={channel ? undefined : t('channel.editor.multiKeyPlaceholder', '每行一个 API Key；获取模型使用第一行，保存时按行批量创建')}
+                  className="flex min-h-9 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ WebkitTextSecurity: showApiKey ? 'none' : 'disc' } as React.CSSProperties}
+                />
                 <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-9 px-3 hover:bg-transparent" onClick={() => setShowApiKey(!showApiKey)}>
                   {showApiKey ? t('channel.editor.hidePassword') : t('channel.editor.showPassword')}
                 </Button>

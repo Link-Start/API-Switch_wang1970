@@ -2,6 +2,7 @@ use crate::database::dao::PaginatedResult;
 use crate::database::{ApiEntry, Database, EntryCatalogMetaInput};
 use crate::error::AppError;
 use crate::proxy::protocol::get_adapter;
+use crate::services::api_key_utils::primary_api_key;
 use crate::services::log_service::{
     extract_usage_tokens, insert_test_usage_log, TestUsageLogInput,
 };
@@ -275,7 +276,7 @@ pub async fn test_entry_latency(
     };
 
     let request = adapter
-        .apply_auth(client.post(&url), &channel.api_key)
+        .apply_auth(client.post(&url), primary_api_key(&channel.api_key))
         .json(&upstream_body);
 
     let start = Instant::now();

@@ -819,9 +819,7 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
         const currentOrder = localOrder ? [...localOrder] : displayEntries.map((e) => e.id);
         const newOrder = [entry.id, ...currentOrder.filter((id) => id !== entry.id)];
         await adapter.pool.toggle(entry.id, true);
-        setLocalOrder(currentOrder);
         await adapter.pool.reorder(newOrder);
-        requestAnimationFrame(() => queryClient.invalidateQueries({ queryKey: entriesQueryKey }));
         return;
       }
 

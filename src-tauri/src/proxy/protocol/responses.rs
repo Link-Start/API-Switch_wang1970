@@ -1228,9 +1228,17 @@ fn transform_request_to_responses(body: &mut Value, actual_model: &str) {
         responses.insert("text".to_string(), json!({ "format": rf }));
     }
 
-    // reasoning_effort: Chat API 的扁平字段 → Responses 的 reasoning 对象
+    // reasoning_effort: Chat API 的扁平字段 → Responses 的 reasoning 对象。
+    // 如果请求已带 Responses 原生 reasoning，则只覆盖/补充 effort，保留 summary 等字段。
     if let Some(effort) = obj.remove("reasoning_effort") {
-        responses.insert("reasoning".to_string(), json!({ "effort": effort }));
+        let mut reasoning = obj
+            .remove("reasoning")
+            .filter(Value::is_object)
+            .unwrap_or_else(|| json!({}));
+        if let Some(reasoning_obj) = reasoning.as_object_mut() {
+            reasoning_obj.insert("effort".to_string(), effort);
+        }
+        responses.insert("reasoning".to_string(), reasoning);
     }
 
     // 4. 其他已知字段直接拷贝（Responses API 也支持）
@@ -1242,7 +1250,6 @@ fn transform_request_to_responses(body: &mut Value, actual_model: &str) {
         "stream_options",
         "tool_choice",
         "parallel_tool_calls",
-        "reasoning",
         "service_tier",
         "user",
         "metadata",
@@ -2388,5 +2395,39 @@ pub fn merge_tool_delta(item: &mut Value, delta: &Value) {
                 item_obj.insert(key.clone(), value.clone());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod reasoning_merge_tests {
+    use super::*;
+
+    #[test]
+    fn transform_request_to_responses_merges_reasoning_effort_into_existing_reasoning() {
+        let mut body = json!({
+            "model": "gpt-test",
+            "messages": [{"role": "user", "content": "hi"}],
+            "reasoning": {"effort": "low", "summary": "auto"},
+            "reasoning_effort": "high"
+        });
+
+        transform_request_to_responses(&mut body, "gpt-test");
+
+        assert_eq!(body["reasoning"]["effort"], "high");
+        assert_eq!(body["reasoning"]["summary"], "auto");
+    }
+
+    #[test]
+    fn transform_request_to_responses_keeps_native_reasoning_without_flat_effort() {
+        let mut body = json!({
+            "model": "gpt-test",
+            "messages": [{"role": "user", "content": "hi"}],
+            "reasoning": {"effort": "medium", "summary": "auto"}
+        });
+
+        transform_request_to_responses(&mut body, "gpt-test");
+
+        assert_eq!(body["reasoning"]["effort"], "medium");
+        assert_eq!(body["reasoning"]["summary"], "auto");
     }
 }

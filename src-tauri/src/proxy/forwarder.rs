@@ -43,10 +43,10 @@ fn strip_reasoning_value(value: &mut Value, strip_top_level_system: bool) {
             if strip_top_level_system {
                 obj.remove("system");
             }
-            obj.remove("reasoning_content");
-            obj.remove("reasoning_text");
-            obj.remove("reasoning_details");
-            obj.remove("reasoning_opaque");
+            // NOT stripping reasoning_content/reasoning_text/reasoning_details/reasoning_opaque
+            // from nested objects — they are model output fields in messages[],
+            // not request-level reasoning controls. Providers like xiaomi/mimo-v2-pro
+            // require them to be passed back in thinking mode.
             if let Some(provider_specific) = obj.get_mut("provider_specific") {
                 if let Some(provider_obj) = provider_specific.as_object_mut() {
                     provider_obj.remove("thinking");
@@ -2370,9 +2370,12 @@ data: [DONE]\n",
         assert!(body.get("context_management").is_none());
         assert!(body.get("output_config").is_none());
         let msg = &body["messages"][0];
-        assert!(msg.get("reasoning_content").is_none());
-        assert!(msg.get("reasoning_text").is_none());
-        assert!(msg.get("reasoning_details").is_none());
+        // reasoning_content/reasoning_text/reasoning_details are model output fields;
+        // preserved in messages[] so thinking-mode upstreams (e.g. xiaomi/mimo-v2-pro)
+        // can receive them back as required by protocol.
+        assert_eq!(msg["reasoning_content"], "hidden");
+        assert_eq!(msg["reasoning_text"], "hidden");
+        assert_eq!(msg["reasoning_details"], "hidden");
         assert!(msg.get("provider_specific").is_none());
         assert_eq!(msg["content"].as_array().unwrap().len(), 1);
         assert_eq!(msg["content"][0]["text"], "visible");

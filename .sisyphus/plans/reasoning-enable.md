@@ -52,9 +52,9 @@ Oracle + Metis 评审通过，确认策略正确，有 2 个补充点：
 
 ### Definition of Done
 
-- [ ] `cargo build` 无错误
-- [ ] `cargo test` 无失败
-- [ ] T1-T7 测试用例全部通过
+- [x] `cargo build` 无错误
+- [x] `cargo test` 无失败
+- [x] T1-T7 测试用例全部通过
 
 ### Must Have
 
@@ -119,7 +119,7 @@ Wave 2 (验证和测试):
 
 ## TODOs
 
-- [ ] 1. 移除 handlers.rs:250 的 strip 调用
+- [x] 1. 移除 handlers.rs:250 的 strip 调用
 
   **What to do**:
   - 找到 `forwarder::strip_downstream_reasoning_request(&mut body);` 这行
@@ -164,7 +164,7 @@ Wave 2 (验证和测试):
   - Files: `src-tauri/src/proxy/handlers.rs`
   - Pre-commit: `cargo build`
 
-- [ ] 2. 移除 handlers.rs:327 的 strip 调用
+- [x] 2. 移除 handlers.rs:327 的 strip 调用
 
   **What to do**:
   - 找到 `forwarder::strip_downstream_reasoning_request(&mut openai_body);` 这行
@@ -209,7 +209,7 @@ Wave 2 (验证和测试):
   - Files: `src-tauri/src/proxy/handlers.rs`
   - Pre-commit: `cargo build`
 
-- [ ] 3. 移除 responses_handler.rs:85 的 strip 调用
+- [x] 3. 移除 responses_handler.rs:85 的 strip 调用
 
   **What to do**:
   - 找到 `forwarder::strip_downstream_reasoning_request(&mut chat_body);` 这行
@@ -256,7 +256,7 @@ Wave 2 (验证和测试):
   - Files: `src-tauri/src/proxy/responses_handler.rs`
   - Pre-commit: `cargo build`
 
-- [ ] 4. 移除 forwarder.rs:679-683 的 strip 调用
+- [x] 4. 移除 forwarder.rs:679-683 的 strip 调用
 
   **What to do**:
   - 找到 forwarder.rs:679-683 的条件 strip 逻辑
@@ -303,7 +303,7 @@ Wave 2 (验证和测试):
   - Files: `src-tauri/src/proxy/forwarder.rs`
   - Pre-commit: `cargo build`
 
-- [ ] 5. 验证转换函数对格式专属结构的处理
+- [x] 5. 验证转换函数对格式专属结构的处理
 
   **What to do**:
   - 检查 claude_to_openai_request 函数对 thinking content blocks 的处理
@@ -347,7 +347,7 @@ Wave 2 (验证和测试):
 
   **Commit**: NO
 
-- [ ] 6. 更新测试断言
+- [x] 6. 更新测试断言
 
   **What to do**:
   - 找到 forwarder.rs 中的 strip 相关测试
@@ -391,7 +391,7 @@ Wave 2 (验证和测试):
   - Files: `src-tauri/src/proxy/forwarder.rs`
   - Pre-commit: `cargo test`
 
-- [ ] 7. 执行测试验证
+- [x] 7. 执行测试验证
 
   **What to do**:
   - 启动 API Switch（本地 9090 端口）
@@ -415,7 +415,7 @@ Wave 2 (验证和测试):
   - `docs/openai-reasoning-analysis.md:12.10` - 测试方案
 
   **Acceptance Criteria**:
-  - [ ] T1-T7 测试用例全部通过
+  - [x] T1-T7 测试用例全部通过
   - [ ] 测试结果记录到文档
 
   **QA Scenarios**:
@@ -446,15 +446,15 @@ Wave 2 (验证和测试):
 
 ## Final Verification Wave
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   验证所有修改是否符合分析文档第12节的方案。
   Output: `Must Have [N/N] | VERDICT: APPROVE/REJECT`
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   运行 `cargo test`，检查代码质量。
   Output: `Build [PASS/FAIL] | Tests [N pass/N fail] | VERDICT`
 
-- [ ] F3. **Real Manual QA** — `unspecified-high`
+- [x] F3. **Real Manual QA** — `unspecified-high`
   执行 T1-T7 测试用例，验证 reasoning 功能。
   Output: `Scenarios [N/N pass] | VERDICT`
 
@@ -479,7 +479,7 @@ cargo test   # Expected: 所有测试通过
 
 ### Final Checklist
 
-- [ ] 4 个位置的 strip 调用已移除
-- [ ] responses_handler.rs:87-96 的 Responses 专属字段剥离保留
-- [ ] 所有测试通过
-- [ ] T1-T7 测试用例全部通过
+- [x] 4 个位置的 strip 调用已移除
+- [x] responses_handler.rs:87-96 的 Responses 专属字段剥离保留
+- [x] 所有测试通过
+- [x] T1-T7 测试用例全部通过

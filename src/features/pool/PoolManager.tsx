@@ -817,6 +817,7 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
       }
 
       if (hotKey) {
+        (document.activeElement as HTMLElement)?.blur();
         await adapter.pool.toggle(entry.id, true, { pinToTop: true });
         return;
       }

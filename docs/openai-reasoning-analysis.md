@@ -1297,6 +1297,8 @@ if let Some(delta) = chunk_obj
 ## 12. OPENAI 与 RESPONSES 链路修改分析
 
 > 本节基于代码审查和测试验证，详细分析两条链路的修改方案。
+> 
+> **多角度审核修订说明（2026-05-22）**：本节早期内容包含历史代码状态下的 strip 调用分析。后续代码验证确认，`handlers.rs:250`、`handlers.rs:327`、`responses_handler.rs:85`、`forwarder.rs:680/682` 等位置的强制 strip 调用在当前代码中已不存在或不再构成生产链路问题。因此，本节中关于“5 处剥离”“二次剥除”“稳定性关闭”的 P0 结论应视为历史分析残留，不再作为当前开发依据。当前真实遗留问题收敛为：**Responses→Responses 缺少同协议无损透传，导致 `summary`、`encrypted_content`、reasoning item id/status 等 Responses 原生信息可能在 Chat fallback 中损耗**。最终开发建议以第 13 节为准。
 
 ### 12.1 当前实现：思维链被"稳定性关闭"
 
@@ -1828,4 +1830,207 @@ Write-Host "=== 测试完成 ===" -ForegroundColor Cyan
 
 ---
 
-*文档版本: 2.8 (含测试方案) | 最后更新: 2026-05-22*
+## 13. 多角度审核后的最终开发建议
+
+> 审核来源：代码现状验证、外部规范核对、风险测试评审、架构评审。  
+> 最终原则：**入口保真，forwarder 决策，adapter 最小转换；Responses→Responses 走同协议透传，Chat fallback 只做兼容降级。**
+
+### 13.1 当前结论
+
+1. **不再按“修复 strip P0 BUG”推进开发**  
+   代码验证确认，早期分析中提到的 `handlers.rs:250`、`handlers.rs:327`、`responses_handler.rs:85`、`forwarder.rs:680/682` 强制剥离问题，在当前代码中已不存在或不再构成生产链路问题。第 10 节和第 12 节中的相关描述只作为历史分析保留，不作为新的开发清单。
+
+2. **当前真实问题是 Responses→Responses 缺少同协议透传**  
+   当下游入口是 Responses API，且上游 channel 也是 Responses 协议时，当前架构仍可能经过 Chat 中间形态，导致 Responses 原生信息损耗。
+
+3. **Reasoning 字段分层必须明确**
+
+| 字段 | 定位 | 开发边界 |
+|------|------|----------|
+| `reasoning_effort` | Chat Completions 推理控制字段 | 可在 Chat fallback 中与 `reasoning.effort` 互转 |
+| `reasoning.effort` | Responses API 推理控制字段 | Responses 同协议链路应原样保留 |
+| `reasoning.summary` | Responses 原生摘要控制 | Responses→Responses 同协议透传时应保留；Chat fallback 中可能降级 |
+| `reasoning.encrypted_content` | Responses 原生无状态推理内容 | 同协议透传时应保留；Chat fallback 不应伪造 |
+| `reasoning_content` / `reasoning_text` | 第三方 OpenAI-compatible 兼容扩展 | 只做已有字段归一，不视为 OpenAI 官方字段 |
+| `providerOptions.openai.thinking` | 客户端私有扩展 | 只能作为兼容输入处理，不能作为官方协议依据 |
+
+### 13.2 系统模型
+
+#### 输入
+
+- 下游客户端可能调用：
+  - `/v1/chat/completions`
+  - `/v1/responses`
+  - Claude Messages 兼容入口
+- 请求中可能包含：
+  - Chat 格式：`reasoning_effort`、`reasoning_content`、`reasoning_text`
+  - Responses 格式：`reasoning`、`include: ["reasoning.encrypted_content"]`、reasoning input/output item
+  - 第三方扩展：`thinking`、`providerOptions.*`
+
+#### 处理
+
+```text
+handler
+  → 保真解析请求，不提前 strip reasoning / responses 专有字段
+  → 提取模型和入口协议
+router
+  → 解析 auto / 分组 / 模型候选
+forwarder
+  → 已知 channel.api_type、entry.model、入口协议后决策：同协议透传还是 Chat fallback
+adapter
+  → 做最小必要转换，不缓存、不回放、不凭空生成 reasoning 历史
+upstream
+  → 返回原生响应或兼容响应
+forwarder
+  → 统一处理 failover、cooldown、SSE、usage log、错误分类
+handler
+  → 返回下游所需协议格式
+```
+
+#### 输出
+
+- 同协议 Responses→Responses：尽量保留原生 Responses 结构。
+- Chat fallback：只保证兼容子集，不承诺保留 Responses 高阶元数据。
+- 日志和统计：必须继续记录命中渠道、模型、状态码、错误、token 与 reasoning token 信息。
+
+#### 状态
+
+- 不新增 reasoning 会话缓存。
+- 不回放 reasoning item。
+- 不保存完整思维链历史。
+- 只复用现有 usage log、cooldown、circuit breaker、router 状态。
+
+### 13.3 架构原则
+
+#### 入口保真
+
+`handlers.rs` / `responses_handler.rs` 不应提前剥离：
+
+- `reasoning`
+- `reasoning_effort`
+- `include`
+- `reasoning.encrypted_content`
+- `summary`
+- `metadata`
+- `store`
+- `previous_response_id`
+
+入口层无法知道最终命中的上游协议，提前 strip 会造成不可恢复的信息损耗。
+
+#### forwarder 决策
+
+协议策略应在 forwarder 中决定，因为此时已知：
+
+- 入口协议
+- 当前候选 channel
+- `channel.api_type`
+- `entry.model`
+- adapter 类型
+
+forwarder 负责决定：
+
+| 场景 | 策略 |
+|------|------|
+| Chat→Chat | 保留 Chat 兼容 reasoning 字段，必要时做消息级归一 |
+| Chat→Responses | 最小转换：`reasoning_effort` → `reasoning.effort` |
+| Responses→Chat | Chat fallback：`reasoning.effort` → `reasoning_effort`，无法承载字段明确降级 |
+| Responses→Responses | 同协议透传，避免 Chat 中间层损耗 |
+| Claude thinking | 仅做协议必要映射，不生成历史 |
+
+#### adapter 最小转换
+
+adapter 只做协议必要映射：
+
+- 不做全局“大清洗”。
+- 不凭空生成 reasoning 内容。
+- 不缓存、不回放 reasoning 状态。
+- 对 `reasoning_content` / `reasoning_text` 只做已有字段互补归一。
+
+### 13.4 新的推荐开发范围
+
+#### 应该做
+
+1. 将第 10 / 12 节的旧 P0 strip 修复结论降级为历史分析。
+2. 新增 Responses→Responses 当前损耗测试，先证明 `summary` / `encrypted_content` 的损耗边界。
+3. 在现有 forwarder 闭环内设计 Responses→Responses 同协议透传。
+4. 确保透传路径仍经过：
+   - Access Key 鉴权
+   - router 候选选择
+   - failover
+   - cooldown
+   - circuit breaker
+   - usage log
+   - SSE 空流检测
+   - 错误分类
+   - 敏感信息脱敏
+5. 对 Chat fallback 明确记录降级行为，避免误以为是无损 Responses。
+
+#### 不应该做
+
+1. 不要新增裸 `reqwest` 直连旁路。
+2. 不要绕过 forwarder 的重试、冷却和日志链路。
+3. 不要一次性引入完整中立 IR。
+4. 不要基于模型名前缀硬编码 reasoning 能力。
+5. 不要缓存或回放完整思维链。
+6. 不要把 `reasoning_content` / `reasoning_text` 写成 OpenAI 官方字段。
+7. 不要继续开发当前代码中已经不存在的 strip 移除任务。
+
+### 13.5 推荐开发顺序
+
+#### 阶段 0：文档纠偏
+
+- 标注第 10 / 12 节为历史分析。
+- 保留第 11 节测试结果。
+- 明确当前唯一高价值开发目标：Responses→Responses 同协议透传。
+
+#### 阶段 1：补测试
+
+| 测试 | 目标 |
+|------|------|
+| Chat→OpenAI 保留 `reasoning_effort` | 防止 strip 回归 |
+| Responses→OpenAI 转出 `reasoning_effort` | 验证 Chat fallback |
+| Chat→Responses 转出 `reasoning.effort` | 验证 adapter 最小转换 |
+| Responses→Responses 当前损耗测试 | 固化 `summary` / `encrypted_content` 损耗问题 |
+| strict upstream 未知字段 400 | 验证剥离策略精准度 |
+| Responses→Responses 上游 503 | 确认透传仍触发 failover / cooldown |
+| Responses→Responses usage log | 确认日志与 token 统计不丢 |
+
+#### 阶段 2：实现受控透传
+
+目标只处理一个核心问题：
+
+```text
+下游 Responses + 上游 Responses
+  → 在现有 forwarder 闭环内走同协议 passthrough
+  → 避免 Responses→Chat→Responses 的信息损耗
+```
+
+实现约束：
+
+- 不在 handler 中裸发请求。
+- 不绕过 forwarder。
+- 优先让 forwarder / adapter 支持同协议 passthrough mode。
+- 保持 retry / failover / cooldown / usage log 行为一致。
+
+#### 阶段 3：闭环验证
+
+完成后必须验证：
+
+- Rust 编译通过。
+- 单元测试通过。
+- mock upstream 集成测试通过。
+- 非流式 Responses 正常。
+- 流式 Responses SSE 正常。
+- 上游 4xx / 5xx / timeout 行为正确。
+- usage log 中 token / reasoning token 不丢。
+- 不支持 reasoning 的上游不被污染。
+
+### 13.6 最终建议
+
+可以继续开发，但开发目标应从“修复 reasoning 被 strip”调整为：
+
+> **实现 Responses→Responses 的受控同协议透传，在不破坏现有 forwarder 闭环的前提下减少 reasoning / Responses 原生字段损耗。**
+
+---
+
+*文档版本: 2.9 (含多角度审核最终建议) | 最后更新: 2026-05-22*

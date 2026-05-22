@@ -7,7 +7,7 @@ use crate::database::{AccessKey, ApiEntry, AppSettings, Database};
 use crate::refresh_tray_if_enabled;
 use crate::services::api_key_utils::primary_api_key;
 use axum::body::Body;
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, HeaderValue};
 use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures::Stream;
@@ -23,61 +23,9 @@ use tokio::time::sleep;
 
 const STREAMING_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 const STREAMING_PING_INTERVAL: Duration = Duration::from_secs(10);
+const RAW_RESPONSES_REQUEST_FIELD: &str = "__as_raw_responses_req";
+const RESPONSES_PASSTHROUGH_HEADER: &str = "x-api-switch-responses-passthrough";
 
-pub fn strip_downstream_reasoning_request(value: &mut Value) {
-    strip_reasoning_value(value, false);
-}
-
-fn strip_downstream_reasoning_request_for_openai_compatible(value: &mut Value) {
-    strip_reasoning_value(value, true);
-}
-
-fn strip_reasoning_value(value: &mut Value, strip_top_level_system: bool) {
-    match value {
-        Value::Object(obj) => {
-            obj.remove("reasoning");
-            obj.remove("reasoning_effort");
-            obj.remove("thinking");
-            obj.remove("context_management");
-            obj.remove("output_config");
-            if strip_top_level_system {
-                obj.remove("system");
-            }
-            // NOT stripping reasoning_content/reasoning_text/reasoning_details/reasoning_opaque
-            // from nested objects — they are model output fields in messages[],
-            // not request-level reasoning controls. Providers like xiaomi/mimo-v2-pro
-            // require them to be passed back in thinking mode.
-            if let Some(provider_specific) = obj.get_mut("provider_specific") {
-                if let Some(provider_obj) = provider_specific.as_object_mut() {
-                    provider_obj.remove("thinking");
-                    provider_obj.remove("reasoning");
-                    if provider_obj.is_empty() {
-                        obj.remove("provider_specific");
-                    }
-                }
-            }
-            if let Some(include) = obj.get_mut("include").and_then(Value::as_array_mut) {
-                include.retain(|item| item.as_str() != Some("reasoning.encrypted_content"));
-            }
-            if let Some(content) = obj.get_mut("content").and_then(Value::as_array_mut) {
-                content.retain(|part| part.get("type").and_then(Value::as_str) != Some("thinking"));
-            }
-            if let Some(input) = obj.get_mut("input").and_then(Value::as_array_mut) {
-                input.retain(|item| item.get("type").and_then(Value::as_str) != Some("reasoning"));
-            }
-            for nested in obj.values_mut() {
-                strip_reasoning_value(nested, false);
-            }
-        }
-        Value::Array(arr) => {
-            arr.retain(|item| item.get("type").and_then(Value::as_str) != Some("reasoning"));
-            for item in arr.iter_mut() {
-                strip_reasoning_value(item, false);
-            }
-        }
-        _ => {}
-    }
-}
 
 #[derive(Debug, Default)]
 struct SseDoneState {
@@ -382,6 +330,7 @@ struct ForwardResult {
     response: axum::response::Response,
     prompt_tokens: i64,
     completion_tokens: i64,
+    reasoning_tokens: i64,
     first_token_ms: i64,
     status_code: i32,
 }
@@ -464,6 +413,7 @@ impl Drop for StreamLogGuard {
                     true,
                     prompt_tokens,
                     completion_tokens,
+                    0,
                     first_token_ms,
                     latency_ms,
                     status_code,
@@ -565,6 +515,7 @@ pub async fn forward_with_retry(
                         is_stream,
                         result.prompt_tokens,
                         result.completion_tokens,
+                        result.reasoning_tokens,
                         result.first_token_ms,
                         latency_ms,
                         result.status_code,
@@ -585,23 +536,24 @@ pub async fn forward_with_retry(
                 let attempt_path = attempt_path_json(&attempts);
 
                 // Step 1: Always write usage log for every failed attempt
-                log_usage(
-                    &state.db,
-                    &state.app_handle,
-                    access_key,
-                    entry,
-                    requested_model,
-                    is_stream,
-                    0,
-                    0,
-                    0,
-                    latency_ms,
-                    log_status,
-                    false,
-                    Some(&e),
-                    Some(attempt_path.as_str()),
-                    None,
-                );
+log_usage(
+                        &state.db,
+                        &state.app_handle,
+                        access_key,
+                        entry,
+                        requested_model,
+                        is_stream,
+                        0,
+                        0,
+                        0,
+                        0,
+                        latency_ms,
+                        log_status,
+                        false,
+                        Some(&e),
+                        Some(attempt_path.as_str()),
+                        None,
+                    );
 
                 // Step 2: disable unrecoverable status codes or error messages
                 // matching disable keywords; otherwise cool down briefly.
@@ -673,10 +625,29 @@ async fn forward_single(
 
     let adapter = get_adapter(&channel.api_type);
     let url = adapter.build_chat_url(&channel.base_url, &entry.model);
+    let is_responses_passthrough = matches!(caller_kind, CallerKind::Responses)
+        && channel.api_type == "responses"
+        && body.get(RAW_RESPONSES_REQUEST_FIELD).is_some();
 
-    let mut upstream_body = body.clone();
-    adapter.transform_request(&mut upstream_body, &entry.model);
+    let mut upstream_body = if is_responses_passthrough {
+        let mut raw = body
+            .get(RAW_RESPONSES_REQUEST_FIELD)
+            .cloned()
+            .unwrap_or_else(|| body.clone());
+        if let Some(obj) = raw.as_object_mut() {
+            obj.insert("model".to_string(), Value::String(entry.model.clone()));
+            obj.remove(RAW_RESPONSES_REQUEST_FIELD);
+        }
+        raw
+    } else {
+        let mut converted = body.clone();
+        adapter.transform_request(&mut converted, &entry.model);
+        converted
+    };
 
+    if let Some(obj) = upstream_body.as_object_mut() {
+        obj.remove(RAW_RESPONSES_REQUEST_FIELD);
+    }
 
     // Normalize reasoning fields in request messages (reasoning_content ↔ reasoning_text)
     if let Some(messages) = upstream_body
@@ -736,9 +707,9 @@ async fn forward_single(
     let status_code = status as i32;
 
     if is_stream {
-        let needs_transform = adapter.needs_sse_transform();
+        let needs_transform = !is_responses_passthrough && adapter.needs_sse_transform();
         let append_model_info = should_append_model_info(state, body, caller_kind);
-        let response = build_streaming_response(
+        let mut response = build_streaming_response(
             state,
             entry,
             access_key,
@@ -754,10 +725,17 @@ async fn forward_single(
             middleware,
             &ctx,
         );
+        if is_responses_passthrough {
+            response.headers_mut().insert(
+                RESPONSES_PASSTHROUGH_HEADER,
+                HeaderValue::from_static("true"),
+            );
+        }
         Ok(ForwardResult {
             response,
             prompt_tokens: 0,
             completion_tokens: 0,
+            reasoning_tokens: 0,
             first_token_ms: 0,
             status_code,
         })
@@ -767,16 +745,18 @@ async fn forward_single(
             .await
             .map_err(|e| (format!("Failed to parse response: {e}"), 502))?;
 
-        adapter.transform_response(&mut response_body);
+        if !is_responses_passthrough {
+            adapter.transform_response(&mut response_body);
 
-        // Normalize reasoning fields in response messages (reasoning_content ↔ reasoning_text)
-        if let Some(choices) = response_body
-            .get_mut("choices")
-            .and_then(|c| c.as_array_mut())
-        {
-            for choice in choices.iter_mut() {
-                if let Some(message) = choice.get_mut("message") {
-                    normalize_reasoning_fields(message);
+            // Normalize reasoning fields in response messages (reasoning_content ↔ reasoning_text)
+            if let Some(choices) = response_body
+                .get_mut("choices")
+                .and_then(|c| c.as_array_mut())
+            {
+                for choice in choices.iter_mut() {
+                    if let Some(message) = choice.get_mut("message") {
+                        normalize_reasoning_fields(message);
+                    }
                 }
             }
         }
@@ -784,36 +764,67 @@ async fn forward_single(
         for mw in middleware.iter() {
             mw.on_response_complete(&mut response_body, &ctx);
         }
-        let (prompt_tokens, completion_tokens) = extract_usage_tokens(&response_body);
+        let (prompt_tokens, completion_tokens, reasoning_tokens) = extract_usage_tokens(&response_body);
 
-        if !nonstream_response_has_valid_output(&response_body) {
+        let has_valid_output = if is_responses_passthrough {
+            responses_response_has_valid_output(&response_body)
+        } else {
+            nonstream_response_has_valid_output(&response_body)
+        };
+        if !has_valid_output {
             return Err((
                 "upstream HTTP 200 completed without valid output".to_string(),
                 502,
             ));
         }
 
+        let mut response = axum::Json(response_body).into_response();
+        if is_responses_passthrough {
+            response.headers_mut().insert(
+                RESPONSES_PASSTHROUGH_HEADER,
+                HeaderValue::from_static("true"),
+            );
+        }
+
         Ok(ForwardResult {
-            response: axum::Json(response_body).into_response(),
+            response,
             prompt_tokens,
             completion_tokens,
+            reasoning_tokens,
             first_token_ms: 0,
             status_code,
         })
     }
 }
 
-fn extract_usage_tokens(body: &Value) -> (i64, i64) {
-    let usage = body.get("usage");
+fn extract_usage_tokens(body: &Value) -> (i64, i64, i64) {
+    let usage = body
+        .get("usage")
+        .or_else(|| body.pointer("/response/usage"));
     let prompt_tokens = usage
         .and_then(|v| v.get("prompt_tokens"))
+        .or_else(|| usage.and_then(|v| v.get("input_tokens")))
         .and_then(Value::as_i64)
         .unwrap_or(0);
     let completion_tokens = usage
         .and_then(|v| v.get("completion_tokens"))
+        .or_else(|| usage.and_then(|v| v.get("output_tokens")))
         .and_then(Value::as_i64)
         .unwrap_or(0);
-    (prompt_tokens, completion_tokens)
+    let reasoning_tokens = usage
+        .and_then(|v| v.pointer("/completion_tokens_details/reasoning_tokens"))
+        .or_else(|| usage.and_then(|v| v.pointer("/output_tokens_details/reasoning_tokens")))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    (prompt_tokens, completion_tokens, reasoning_tokens)
+}
+
+fn responses_response_has_valid_output(body: &Value) -> bool {
+    body.get("object").and_then(Value::as_str) == Some("response")
+        && body
+            .get("output")
+            .and_then(Value::as_array)
+            .is_some_and(|output| !output.is_empty())
 }
 
 fn nonstream_response_has_valid_output(body: &Value) -> bool {
@@ -834,8 +845,14 @@ fn nonstream_response_has_valid_output(body: &Value) -> bool {
             let has_function_call = message
                 .and_then(|msg| msg.get("function_call"))
                 .is_some_and(|function_call| !function_call.is_null());
+            // 推理模型可能返回 reasoning_content 而无 content
+            let has_reasoning = message.is_some_and(|msg| {
+                msg.get("reasoning_content").and_then(Value::as_str).is_some_and(|v| !v.is_empty())
+                    || msg.get("reasoning_text").and_then(Value::as_str).is_some_and(|v| !v.is_empty())
+                    || msg.get("reasoning_details").and_then(Value::as_str).is_some_and(|v| !v.is_empty())
+            });
 
-            has_content || has_tool_calls || has_function_call
+            has_content || has_tool_calls || has_function_call || has_reasoning
         })
 }
 
@@ -1023,6 +1040,7 @@ fn build_streaming_response(
                             true,
                             pt,
                             ct,
+                            0,
                             ft,
                             lat,
                             504,
@@ -1081,23 +1099,24 @@ fn build_streaming_response(
                             let ft = first_token_ms.load(Ordering::SeqCst);
                             let lat = start.elapsed().as_millis() as i64;
                             tokio::spawn(async move {
-                                log_usage(
-                                    &db2,
-                                    &ah2,
-                                    ak2.as_ref(),
-                                    &e2,
-                                    &rm2,
-                                    true,
-                                    pt,
-                                    ct,
-                                    ft,
-                                    lat,
-                                    413,
-                                    false,
-                                    Some("stream buffer exceeds 10MB limit"),
-                                    Some(attempt_path.as_str()),
-                                    Some(StreamEndReason::Dropped),
-                                );
+log_usage(
+                                &db2,
+                                &ah2,
+                                ak2.as_ref(),
+                                &e2,
+                                &rm2,
+                                true,
+                                pt,
+                                ct,
+                                0,
+                                ft,
+                                lat,
+                                413,
+                                false,
+                                Some("stream buffer exceeds 10MB limit"),
+                                Some(attempt_path.as_str()),
+                                Some(StreamEndReason::Dropped),
+                            );
                             });
                             spawn_cool_down_entry(
                                 circuit_breakers.clone(),
@@ -1238,6 +1257,7 @@ fn build_streaming_response(
                                 true,
                                 pt,
                                 ct,
+                                0,
                                 ft,
                                 lat,
                                 502,
@@ -1341,6 +1361,7 @@ fn build_streaming_response(
                                 true,
                                 pt,
                                 ct,
+                                0,
                                 ft,
                                 lat,
                                 sc,
@@ -1382,7 +1403,7 @@ fn build_streaming_response(
 }
 
 fn stream_chunk_has_text_delta(value: &Value) -> bool {
-    value
+    let has_chat_text = value
         .get("choices")
         .and_then(Value::as_array)
         .into_iter()
@@ -1393,7 +1414,22 @@ fn stream_chunk_has_text_delta(value: &Value) -> bool {
                 .and_then(|delta| delta.get("content"))
                 .and_then(Value::as_str)
                 .is_some_and(|content| !content.is_empty())
-        })
+        });
+    if has_chat_text {
+        return true;
+    }
+
+    matches!(
+        value.get("type").and_then(Value::as_str),
+        Some(
+            "response.output_text.delta"
+                | "response.reasoning_text.delta"
+                | "response.reasoning_summary_text.delta"
+        )
+    ) && value
+        .get("delta")
+        .and_then(Value::as_str)
+        .is_some_and(|delta| !delta.is_empty())
 }
 
 /// 在 message / delta 级别归一已有的 reasoning 等价字段。
@@ -1497,6 +1533,19 @@ fn stream_chunk_has_model_info_delta(value: &Value, model: &str) -> bool {
 /// 一旦响应中存在工具调用，本轮就是 CALL 中间态，不应附加模型信息，
 /// 否则下游循环复用时会把 `model: ...` 当成对话内容重复显示。
 fn stream_chunk_has_tool_calls(value: &Value) -> bool {
+    let has_responses_tool = matches!(
+        value.get("type").and_then(Value::as_str),
+        Some("response.function_call_arguments.delta")
+    ) || (value.get("type").and_then(Value::as_str) == Some("response.output_item.added")
+        && value
+            .get("item")
+            .and_then(|item| item.get("type"))
+            .and_then(Value::as_str)
+            == Some("function_call"));
+    if has_responses_tool {
+        return true;
+    }
+
     value
         .get("choices")
         .and_then(Value::as_array)
@@ -1685,7 +1734,7 @@ fn append_and_parse_sse(
                     done_state.upstream_model_info_seen = true;
                 }
             }
-            let (prompt, completion) = extract_usage_tokens(&value);
+            let (prompt, completion, _reasoning) = extract_usage_tokens(&value);
             if prompt > 0 {
                 prompt_tokens.store(prompt, Ordering::Relaxed);
             }
@@ -2008,6 +2057,7 @@ fn log_usage(
     is_stream: bool,
     prompt_tokens: i64,
     completion_tokens: i64,
+    reasoning_tokens: i64,
     first_token_ms: i64,
     latency_ms: i64,
     status_code: i32,
@@ -2026,6 +2076,7 @@ fn log_usage(
         "first_token_ms": first_token_ms,
         "status_code": status_code,
         "success": success,
+        "reasoning_tokens": reasoning_tokens,
         "attempt_path": attempt_path.and_then(|path| serde_json::from_str::<Value>(path).ok()),
         "stream_end_reason": stream_end_reason.map(StreamEndReason::as_str),
     })
@@ -2335,65 +2386,67 @@ data: [DONE]\n",
     }
 
     #[test]
-    fn strip_downstream_reasoning_request_removes_chat_reasoning_fields() {
-        let mut body = serde_json::json!({
-            "model": "auto",
-            "reasoning_effort": "high",
-            "reasoning": {"effort": "high"},
-            "thinking": {"type": "enabled"},
-            "context_management": {"strategy": "auto"},
-            "output_config": {"reasoning": true},
-            "system": "keep non-forwarder top-level system here",
-            "messages": [{
-                "role": "assistant",
-                "content": [{"type": "thinking", "thinking": "hidden"}, {"type": "text", "text": "visible"}],
-                "reasoning_content": "hidden",
-                "reasoning_text": "hidden",
-                "reasoning_details": "hidden",
-                "provider_specific": {"thinking": "hidden"}
-            }]
+    fn passthrough_responses_usage_detection_supports_input_output_tokens() {
+        let body = serde_json::json!({
+            "object": "response",
+            "output": [],
+            "usage": {"input_tokens": 12, "output_tokens": 7}
         });
+        let (prompt_tokens, completion_tokens, _reasoning) = extract_usage_tokens(&body);
 
-        strip_downstream_reasoning_request(&mut body);
-
-        assert_eq!(body["system"], "keep non-forwarder top-level system here");
-        strip_downstream_reasoning_request_for_openai_compatible(&mut body);
-        assert!(body.get("system").is_none());
-
-        assert!(body.get("reasoning_effort").is_none());
-        assert!(body.get("reasoning").is_none());
-        assert!(body.get("thinking").is_none());
-        assert!(body.get("context_management").is_none());
-        assert!(body.get("output_config").is_none());
-        let msg = &body["messages"][0];
-        // reasoning_content/reasoning_text/reasoning_details are model output fields;
-        // preserved in messages[] so thinking-mode upstreams (e.g. xiaomi/mimo-v2-pro)
-        // can receive them back as required by protocol.
-        assert_eq!(msg["reasoning_content"], "hidden");
-        assert_eq!(msg["reasoning_text"], "hidden");
-        assert_eq!(msg["reasoning_details"], "hidden");
-        assert!(msg.get("provider_specific").is_none());
-        assert_eq!(msg["content"].as_array().unwrap().len(), 1);
-        assert_eq!(msg["content"][0]["text"], "visible");
+        assert_eq!(prompt_tokens, 12);
+        assert_eq!(completion_tokens, 7);
+        assert!(!responses_response_has_valid_output(&body));
     }
 
     #[test]
-    fn strip_downstream_reasoning_request_removes_responses_reasoning_inputs() {
-        let mut body = serde_json::json!({
-            "model": "auto",
-            "include": ["reasoning.encrypted_content", "file_search_call.results"],
-            "input": [
-                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]},
-                {"type": "reasoning", "encrypted_content": "hidden", "summary": [{"type": "summary_text", "text": "hidden"}]}
-            ]
+    fn passthrough_responses_valid_output_requires_nonempty_output_array() {
+        let valid = serde_json::json!({
+            "object": "response",
+            "output": [{"type": "message"}]
+        });
+        let invalid = serde_json::json!({
+            "object": "response",
+            "output": []
         });
 
-        strip_downstream_reasoning_request(&mut body);
+        assert!(responses_response_has_valid_output(&valid));
+        assert!(!responses_response_has_valid_output(&invalid));
+    }
 
-        assert_eq!(body["include"].as_array().unwrap().len(), 1);
-        assert_eq!(body["include"][0], "file_search_call.results");
-        assert_eq!(body["input"].as_array().unwrap().len(), 1);
-        assert_eq!(body["input"][0]["type"], "message");
+    #[test]
+    fn passthrough_responses_text_delta_is_valid_stream_output() {
+        let text = serde_json::json!({
+            "type": "response.output_text.delta",
+            "delta": "hi"
+        });
+        let reasoning = serde_json::json!({
+            "type": "response.reasoning_text.delta",
+            "delta": "think"
+        });
+        let empty = serde_json::json!({
+            "type": "response.output_text.delta",
+            "delta": ""
+        });
+
+        assert!(stream_chunk_has_text_delta(&text));
+        assert!(stream_chunk_has_text_delta(&reasoning));
+        assert!(!stream_chunk_has_text_delta(&empty));
+    }
+
+    #[test]
+    fn passthrough_responses_tool_call_chunks_are_valid_stream_output() {
+        let tool_delta = serde_json::json!({
+            "type": "response.function_call_arguments.delta",
+            "delta": "{\"city\":"
+        });
+        let item_added = serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {"type": "function_call", "id": "call_1"}
+        });
+
+        assert!(stream_chunk_has_tool_calls(&tool_delta));
+        assert!(stream_chunk_has_tool_calls(&item_added));
     }
 
     #[test]
@@ -2530,13 +2583,13 @@ data: [DONE]\n",
         assert!(nonstream_response_has_valid_output(&tool_call));
     }
 
-    #[test]
-    fn nonstream_response_reasoning_only_is_not_visible_output() {
+#[test]
+    fn nonstream_response_reasoning_only_is_valid_output() {
         let reasoning_only = serde_json::json!({
             "choices": [{"message": {"role": "assistant", "content": "", "reasoning_content": "hidden"}}],
             "usage": {"prompt_tokens": 100, "completion_tokens": 20}
         });
-        assert!(!nonstream_response_has_valid_output(&reasoning_only));
+        assert!(nonstream_response_has_valid_output(&reasoning_only));
     }
 
     #[test]

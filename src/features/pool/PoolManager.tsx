@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { GripVertical, Plus, MessageSquare, RefreshCw, XCircle, X, Trash2, Check, ChevronsUpDown, Tag } from "lucide-react";
 import { toast } from "sonner";
@@ -671,6 +671,7 @@ export function PoolManager() {
     getNextPageParam: (lastPage) =>
       lastPage.page * lastPage.page_size < lastPage.total ? lastPage.page + 1 : undefined,
     initialPageParam: 1,
+    placeholderData: keepPreviousData,
     staleTime: 0,
   });
 
@@ -816,10 +817,7 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
       }
 
       if (hotKey) {
-        const currentOrder = localOrder ? [...localOrder] : displayEntries.map((e) => e.id);
-        const newOrder = [entry.id, ...currentOrder.filter((id) => id !== entry.id)];
-        await adapter.pool.toggle(entry.id, true);
-        await adapter.pool.reorder(newOrder);
+        await adapter.pool.toggle(entry.id, true, { pinToTop: true });
         return;
       }
 

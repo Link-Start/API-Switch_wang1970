@@ -5,6 +5,7 @@ use crate::database::ApiEntry;
 use crate::services::pool_service;
 use axum::extract::{Json, Path, Query, State};
 use serde::Deserialize;
+use serde_json::Value;
 
 // ---------- Request/Response Types -----------------------------------------
 
@@ -108,8 +109,19 @@ pub async fn create(
 pub async fn toggle(
     State(state): State<AdminState>,
     Path(id): Path<String>,
-    Json(enabled): Json<bool>,
+    Json(payload): Json<Value>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
+    let (enabled, pin_to_top) = match payload {
+        Value::Bool(enabled) => (enabled, false),
+        Value::Object(map) => (
+            map.get("enabled").and_then(Value::as_bool).unwrap_or(false),
+            map.get("pinToTop")
+                .or_else(|| map.get("pin_to_top"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        ),
+        _ => (false, false),
+    };
     pool_service::toggle_entry(
         &state.db,
         &state
@@ -121,6 +133,7 @@ pub async fn toggle(
             .failure_counts,
         &id,
         enabled,
+        pin_to_top,
     )?;
     state.mark_pool_dirty();
     Ok(Json(serde_json::json!({"ok": true})))

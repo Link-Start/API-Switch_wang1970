@@ -320,10 +320,10 @@ export const apiAdapter: ApiAdapter = {
             channel_id: channelId,
           }),
 
-    toggle: (id, enabled) =>
+    toggle: (id, enabled, options) =>
       useTauri()
-        ? tauriCmd<void>('toggle_entry', { id, enabled })
-        : webRequest<void>('PUT', `/pool/${id}/toggle`, enabled),
+        ? tauriCmd<void>('toggle_entry', { id, enabled, pinToTop: options?.pinToTop })
+        : webRequest<void>('PUT', `/pool/${id}/toggle`, options?.pinToTop ? { enabled, pinToTop: true } : enabled),
 
     batchToggle: (ids, enabled) =>
       useTauri()

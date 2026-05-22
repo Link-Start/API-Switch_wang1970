@@ -9,7 +9,7 @@ use super::auth;
 use super::forwarder;
 use super::handlers::ProxyError;
 use super::protocol::responses::{
-    build_responses_base_response, build_responses_sse_http_response, input_to_messages,
+    build_responses_base_response, build_responses_sse_http_response,
     responses_failed_response, responses_sse_done, responses_sse_line,
     responses_to_openai_chat_request, transform_openai_sse_to_responses_stream,
     wrap_openai_response_as_responses,
@@ -25,6 +25,16 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 // ─── Handler ─────────────────────────────────────────────────────────
+
+/// 识别 forwarder 返回的“同协议透传响应”。
+/// 当上游 channel 本身也是 Responses API 时，forwarder 会把原始 Responses JSON/SSE
+/// 直接透传给 handler，此时 handler 不应再做 Responses↔Chat 的二次包装与转换。
+fn is_responses_passthrough_response(resp: &axum::response::Response) -> bool {
+    resp.headers()
+        .get("x-api-switch-responses-passthrough")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("true"))
+}
 
 /// POST /v1/responses — Responses API compatibility endpoint.
 ///
@@ -83,6 +93,15 @@ pub async fn handle_responses(
 
     let (mut chat_body, is_stream, model) = responses_to_openai_chat_request(&req_body);
 
+    // 携带原始 Responses 请求，供 forwarder 在上游同为 Responses 协议时选择同协议透传。
+    // 这样可以避免 Responses→Chat→Responses 中间转换损耗 reasoning.summary、
+    // reasoning.encrypted_content 等原生字段。
+    if let Some(obj) = chat_body.as_object_mut() {
+        obj.insert(
+            "__as_raw_responses_req".to_string(),
+            req_body.clone(),
+        );
+    }
 
     // Strip Responses-specific fields that shouldn't leak to upstream Chat API
     let responses_fields = [
@@ -95,7 +114,6 @@ pub async fn handle_responses(
             obj.remove(*field);
         }
     }
-
 
     let response_id = format!("resp_{}", Uuid::new_v4().to_string().replace('-', ""));
     let item_id = format!(
@@ -159,6 +177,10 @@ pub async fn handle_responses(
 
     match upstream_response {
         Ok(resp) => {
+            if is_responses_passthrough_response(&resp) {
+                return Ok(resp);
+            }
+
             let status = resp.status().as_u16();
 
             if status != 200 {
@@ -358,8 +380,9 @@ pub async fn cancel_response(
 mod tests {
     use super::*;
     use crate::proxy::protocol::responses::{
-        convert_tools, passthrough_output_item, responses_hosted_tool_types_for_chat_fallback,
-        responses_hosted_tools_degradation_prompt, responses_to_openai_chat_request,
+        convert_tools, input_to_messages, passthrough_output_item,
+        responses_hosted_tool_types_for_chat_fallback, responses_hosted_tools_degradation_prompt,
+        responses_to_openai_chat_request,
     };
 
     // ── Tool Type Tests ──

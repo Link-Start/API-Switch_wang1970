@@ -62,7 +62,9 @@ pub struct TestChannelDirectParams {
 #[derive(Deserialize)]
 pub struct ProbeUrlParams {
     pub url: String,
+    #[serde(alias = "apiType")]
     pub api_type: Option<String>,
+    #[serde(alias = "apiKey")]
     pub api_key: Option<String>,
 }
 
@@ -333,3 +335,36 @@ pub async fn save_with_models(
     state.mark_pool_dirty();
     Ok(Json(result))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ProbeUrlParams;
+    use serde_json::json;
+
+    #[test]
+    fn probe_url_params_accept_web_camel_case_payload() {
+        let params: ProbeUrlParams = serde_json::from_value(json!({
+            "url": "https://example.com/v1",
+            "apiType": "openai",
+            "apiKey": "sk-test"
+        }))
+        .expect("camelCase Web payload should deserialize");
+
+        assert_eq!(params.api_type.as_deref(), Some("openai"));
+        assert_eq!(params.api_key.as_deref(), Some("sk-test"));
+    }
+
+    #[test]
+    fn probe_url_params_keep_snake_case_payload_compatibility() {
+        let params: ProbeUrlParams = serde_json::from_value(json!({
+            "url": "https://example.com/v1",
+            "api_type": "claude",
+            "api_key": "sk-test"
+        }))
+        .expect("snake_case payload should deserialize");
+
+        assert_eq!(params.api_type.as_deref(), Some("claude"));
+        assert_eq!(params.api_key.as_deref(), Some("sk-test"));
+    }
+}
+

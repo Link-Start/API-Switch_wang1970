@@ -1617,7 +1617,16 @@ forwarder.rs strip 逻辑修改  ←── 根因，必须先改
 
 测试已证明 `reasoning_effort` 对非推理模型安全（被忽略，不报错）。采用"下游发起"策略，直接移除所有 strip 调用。
 
-#### 修改清单
+#### 字段分类与边界
+
+| 字段类型 | 字段 | 透传安全性 | 说明 |
+|----------|------|-----------|------|
+| **标准参数** | `reasoning_effort`, `reasoning` | ✅ 安全 | OpenAI 规范参数，非推理模型忽略 |
+| **非标准参数** | `thinking`, `context_management`, `output_config` | 🟡 大多数安全 | 大多数上游忽略，少数严格校验的可能拒绝 |
+| **格式专属结构** | `content[].type=="thinking"`, `input[].type=="reasoning"` | ⚠️ 需验证 | Chat Completions 格式无定义，需转换函数处理 |
+| **嵌套字段** | `provider_specific.thinking`, `provider_specific.reasoning` | 🟡 大多数安全 | 大多数上游忽略未知嵌套字段 |
+
+#### 修改清单（最终版）
 
 | 优先级 | 修改 | 文件 | 说明 |
 |--------|------|------|------|
@@ -1625,8 +1634,11 @@ forwarder.rs strip 逻辑修改  ←── 根因，必须先改
 | **P0** | 移除 strip 调用 | handlers.rs:327 | Claude 入口 |
 | **P0** | 移除 strip 调用 | responses_handler.rs:85 | Responses 入口 |
 | **P0** | 移除 strip 调用 | forwarder.rs:679-683 | 转发层 |
+| **P0** | 保留 Responses 专属字段剥离 | responses_handler.rs:87-96 | `include`, `store` 等协议转换必须的清理 |
 | P1 | 更新测试断言 | forwarder.rs | 测试需同步更新 |
-| P2 | 补充 CLAUDE 链路测试 | - | 评审新增 |
+| P1 | 验证转换函数对格式专属结构的处理 | claude.rs, responses.rs | 确认 `content[].type=="thinking"` 被正确处理 |
+| P2 | 补充回归测试 | - | Claude thinking → Chat、Responses reasoning → Chat |
+| P2 | 清理 strip 函数死代码 | forwarder.rs | 删除 `strip_reasoning_value` 函数定义 |
 
 #### 修改顺序（原子操作）
 
@@ -1635,10 +1647,19 @@ forwarder.rs strip 逻辑修改  ←── 根因，必须先改
 2. handlers.rs:327 → 移除 strip 调用
 3. responses_handler.rs:85 → 移除 strip 调用
 4. forwarder.rs:679-683 → 移除 strip 调用
-5. 更新测试断言
-6. cargo test 验证
+5. 保留 responses_handler.rs:87-96 的 Responses 专属字段剥离
+6. 验证转换函数对格式专属结构的处理
+7. 更新测试断言
+8. cargo test 验证
 ```
+
+#### 回退策略
+
+如发现严格上游（Azure OpenAI、某些私有部署）因非标准字段返回 400：
+- 回退为**条件剥离策略**
+- 基于 `channel.api_type` 或模型前缀判断
+- 只剥离格式专属结构项，保留标准参数
 
 ---
 
-*文档版本: 2.6 (最终版) | 最后更新: 2026-05-22*
+*文档版本: 2.7 (最终审核版) | 最后更新: 2026-05-22*

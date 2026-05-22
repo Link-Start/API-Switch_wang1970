@@ -84,6 +84,19 @@ pub async fn handle_responses(
     let (mut chat_body, is_stream, model) = responses_to_openai_chat_request(&req_body);
     forwarder::strip_downstream_reasoning_request(&mut chat_body);
 
+    // Strip Responses-specific fields that shouldn't leak to upstream Chat API
+    let responses_fields = [
+        "include", "store", "client_metadata", "metadata",
+        "prompt_cache_key", "prompt_cache_retention",
+        "safety_identifier", "user"
+    ];
+    if let Some(obj) = chat_body.as_object_mut() {
+        for field in &responses_fields {
+            obj.remove(*field);
+        }
+    }
+
+
     let response_id = format!("resp_{}", Uuid::new_v4().to_string().replace('-', ""));
     let item_id = format!(
         "msg_{}",

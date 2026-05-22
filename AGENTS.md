@@ -8,6 +8,7 @@
 ##新会话开始
 -阅读 PLAN.md
 -阅读WHITEPAPER.md
+-阅读 TODO.md（参考记录，没有明确指令不执行）
 -禁止猜想，脑补相关的功能和流程，如有疑问或不清晰，请终止对话要求补充相关规则。
 
 ## 版本管理
@@ -92,6 +93,13 @@ node scripts/bump-version.cjs
 6. 执行本地 `git commit`。
 7. 禁止自动 `git push`。
 
+
+### TODO.md — 待办清单
+
+`TODO.md` 是执行级待办参考清单，仅用于**记录和追踪**。
+**Agent 不得主动执行 TODO.md 中的任务**，除非用户在对话中明确下达了相关指令。
+
+---
 ## 项目架构速查
 
 - 前端：React + TypeScript + TanStack Query + i18next
@@ -174,3 +182,5 @@ src/**/*.rs / src/**/*.tsx (代码层)
 2. **WHITEPAPER.md**：架构变更时更新，保持与代码一致
 3. **docs/*.md**：功能开发时创建，完成后保留归档
 4. **代码注释**：随代码提交，Review 时检查
+5. **TODO.md**：执行级待办清单，按优先级排序。**仅做参考，没有明确指令不执行**
+

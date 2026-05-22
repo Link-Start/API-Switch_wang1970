@@ -2438,6 +2438,13 @@ pub fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value
                             continue;
                         }
 
+                        
+                        // ── reasoning 跳过（思维链元数据，不是对话消息） ──
+                        "reasoning" => {
+                            i += 1;
+                            continue;
+                        }
+
                         // ── 常规消息 ──
                         _ => {
                             let role = match obj.get("role") {

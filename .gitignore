@@ -122,3 +122,5 @@ src-tauri/target-codex*/
 # Agent-specific
 HEADLESS.md
 
+
+/query

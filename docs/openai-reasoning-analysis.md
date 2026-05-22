@@ -1292,4 +1292,353 @@ if let Some(delta) = chunk_obj
 
 ---
 
-*文档版本: 2.3 (完整测试验证版) | 最后更新: 2026-05-22*
+---
+
+## 12. OPENAI 与 RESPONSES 链路修改分析
+
+> 本节基于代码审查和测试验证，详细分析两条链路的修改方案。
+
+### 12.1 当前实现：思维链被"稳定性关闭"
+
+当前代码在 **5 个位置** 调用 strip 函数，完全剥离 reasoning 控制字段：
+
+```
+位置1: handlers.rs:250          ← Chat Completions 入口
+位置2: handlers.rs:327          ← Claude Messages 入口（评审新增）
+位置3: responses_handler.rs:85  ← Responses API 入口
+位置4: forwarder.rs:680         ← Claude/Anthropic 上游
+位置5: forwarder.rs:682         ← OpenAI-compatible 上游
+```
+
+**strip_reasoning_value 函数移除的字段**：
+- `reasoning` (对象)
+- `reasoning_effort` (字符串)
+- `thinking` (对象)
+- `context_management` (对象)
+- `output_config` (对象)
+- `provider_specific.thinking`
+- `provider_specific.reasoning`
+- `include: ["reasoning.encrypted_content"]`
+- `content[]` 中 type="thinking" 的项
+- `input[]` 中 type="reasoning" 的项
+
+**但保留的字段**：
+- `reasoning_content` (消息中的推理内容)
+- `reasoning_text` (消息中的推理内容)
+- `reasoning_details` (消息中的推理详情)
+
+### 12.2 链路1: OPENAI → OPENAI 修改分析
+
+#### 12.2.1 当前数据流
+
+```
+下游 Chat 请求
+    ↓
+handlers.rs:250
+    strip_downstream_reasoning_request(&mut body)  ← reasoning_effort 被移除
+    ↓
+forwarder.rs:677
+    upstream_body = body.clone()  ← 克隆的是已剥离的 body
+    ↓
+forwarder.rs:682
+    strip_downstream_reasoning_request_for_openai_compatible(&mut upstream_body)  ← 空操作
+    ↓
+上游 OpenAI-compatible 服务（无 reasoning_effort）
+```
+
+#### 12.2.2 问题
+
+- `reasoning_effort` 在 handlers.rs:250 就被移除
+- 上游永远收不到 `reasoning_effort` 参数
+- reasoning 功能完全失效
+
+#### 12.2.3 修改方案
+
+**方案A：保留 reasoning_effort（推荐）**
+
+```rust
+// handlers.rs:250 — 修改为条件剥离
+// 原代码：
+forwarder::strip_downstream_reasoning_request(&mut body);
+
+// 修改为：
+// 不在 handlers 层剥离 reasoning，让 forwarder 根据上游能力决定
+// forwarder::strip_downstream_reasoning_request(&mut body);  // 移除此行
+```
+
+**方案B：基于上游能力选择性保留**
+
+```rust
+// forwarder.rs:679-683 — 修改为条件剥离
+// 原代码：
+if matches!(channel.api_type.as_str(), "claude" | "anthropic") {
+    strip_downstream_reasoning_request(&mut upstream_body);
+} else {
+    strip_downstream_reasoning_request_for_openai_compatible(&mut upstream_body);
+}
+
+// 修改为：
+// 根据上游是否支持 reasoning 决定是否剥离
+let upstream_supports_reasoning = is_reasoning_model(&entry.model);
+if !upstream_supports_reasoning {
+    if matches!(channel.api_type.as_str(), "claude" | "anthropic") {
+        strip_downstream_reasoning_request(&mut upstream_body);
+    } else {
+        strip_downstream_reasoning_request_for_openai_compatible(&mut upstream_body);
+    }
+}
+```
+
+**方案C：总是保留（推荐 — "下游发起"策略）**
+
+> 核心原则：下游发起思维链，我们按思维链方式走；下游不发起思维链，我们也要保证正常。
+
+```rust
+// handlers.rs:250 — 完全移除 strip 调用
+// handlers.rs:327 — 完全移除 strip 调用（评审新增）
+// responses_handler.rs:85 — 完全移除 strip 调用
+// forwarder.rs:679-683 — 移除 strip，保留 reasoning 字段
+
+// 优势：
+// 1. 最小化修改，风险最低
+// 2. 测试已证明 reasoning_effort 对非推理模型安全（被忽略，不报错）
+// 3. 不需要维护永远不完整的模型列表
+// 4. 符合"下游发起"原则：下游发什么，我们就传什么
+```
+
+**"下游发起"策略验证**：
+- 下游发起 reasoning_effort → 传递给上游 → 推理模型正常处理 ✅
+- 下游发起 reasoning_effort → 传递给上游 → 非推理模型忽略 ✅
+- 下游不发起 reasoning → 不添加任何字段 → 所有模型正常 ✅
+
+#### 12.2.4 推荐方案
+
+**采用方案C："下游发起"策略**
+
+1. 移除 handlers.rs:250 的 strip 调用
+2. 移除 handlers.rs:327 的 strip 调用（CLAUDE 入口）
+3. 移除 responses_handler.rs:85 的 strip 调用
+4. 移除 forwarder.rs:679-683 的 strip 调用
+5. 保留 normalize_reasoning_fields 逻辑（已正确实现）
+
+### 12.3 链路2: RESPONSES → OPENAI 修改分析
+
+#### 12.3.1 当前数据流
+
+```
+下游 Responses 请求
+    ↓
+responses_handler.rs:84
+    responses_to_openai_chat_request(&req_body)  ← reasoning.effort → reasoning_effort ✅
+    ↓
+responses_handler.rs:85
+    strip_downstream_reasoning_request(&mut chat_body)  ← reasoning_effort 被移除 🔴
+    ↓
+forwarder.rs:682
+    strip_downstream_reasoning_request_for_openai_compatible(&mut upstream_body)  ← 再次移除 🔴
+    ↓
+上游 Chat API（无 reasoning_effort）
+```
+
+#### 12.3.2 问题
+
+- `responses_to_openai_chat_request()` 正确转换 `reasoning.effort` → `reasoning_effort`
+- 但 `responses_handler.rs:85` 立即移除刚转换的字段
+- 上游永远收不到 `reasoning_effort` 参数
+
+#### 12.3.3 修改方案
+
+**核心修改：移除 responses_handler.rs:85 的 strip 调用**
+
+```rust
+// responses_handler.rs:84-85 — 修改为
+let (mut chat_body, is_stream, model) = responses_to_openai_chat_request(&req_body);
+// 移除: forwarder::strip_downstream_reasoning_request(&mut chat_body);
+// forwarder.rs 会根据上游能力决定是否剥离
+```
+
+**同时需要修改 forwarder.rs:679-683**（与链路1 相同）：
+
+```rust
+// forwarder.rs:679-683 — 根据上游能力决定是否剥离
+let upstream_supports_reasoning = is_reasoning_model(&entry.model);
+if !upstream_supports_reasoning {
+    strip_downstream_reasoning_request_for_openai_compatible(&mut upstream_body);
+}
+```
+
+#### 12.3.4 依赖关系
+
+采用"下游发起"策略后，不需要依赖关系——所有 strip 调用统一移除。
+
+### 12.4 链路3: CLAUDE → OPENAI 修改分析
+
+> 评审新增：此链路在原分析中完全遗漏。
+
+#### 12.4.1 当前数据流
+
+```
+下游 Claude Messages 请求（带 thinking 参数）
+    ↓
+handlers.rs:326
+    claude_to_openai_request(&body)  ← thinking → reasoning_effort 转换
+    ↓
+handlers.rs:327
+    strip_downstream_reasoning_request(&mut openai_body)  ← reasoning_effort 被移除 🔴
+    ↓
+forwarder.rs:677
+    upstream_body = body.clone()  ← 克隆的是已剥离的 body
+    ↓
+forwarder.rs:682
+    strip_downstream_reasoning_request_for_openai_compatible(&mut upstream_body)  ← 空操作
+    ↓
+上游 Chat API（无 reasoning_effort）
+```
+
+#### 12.4.2 问题
+
+- `claude_to_openai_request()` 将 Claude 的 `thinking` 参数转为 OpenAI 格式
+- 但 `handlers.rs:327` 立即移除转换后的字段
+- 上游永远收不到 `reasoning_effort` 参数
+
+#### 12.4.3 修改方案
+
+```rust
+// handlers.rs:325-327 — 修改为
+let mut openai_body = claude_to_openai_request(&body);
+// 移除: forwarder::strip_downstream_reasoning_request(&mut openai_body);
+// 采用"下游发起"策略，不剥离 reasoning 字段
+```
+
+#### 12.4.4 "下游发起"策略验证
+
+- 下游 Claude 发起 thinking → 转换为 reasoning_effort → 传递给上游 → 推理模型正常处理 ✅
+- 下游 Claude 发起 thinking → 转换为 reasoning_effort → 传递给上游 → 非推理模型忽略 ✅
+- 下游 Claude 不发起 thinking → 不添加 reasoning_effort → 所有模型正常 ✅
+
+### 12.5 辅助函数：不再需要
+
+采用"下游发起"策略后，不需要 `is_reasoning_model` 函数——直接移除所有 strip 调用。
+
+### 12.6 修改优先级（修订版）
+
+| 优先级 | 修改 | 文件 | 说明 |
+|--------|------|------|------|
+| **P0** | 移除 strip 调用 | handlers.rs:250 | Chat 入口 |
+| **P0** | 移除 strip 调用 | handlers.rs:327 | Claude 入口 |
+| **P0** | 移除 strip 调用 | responses_handler.rs:85 | Responses 入口 |
+| **P0** | 移除 strip 调用 | forwarder.rs:679-683 | 转发层 |
+| P1 | 更新测试断言 | forwarder.rs | 测试需同步更新 |
+| P2 | 补充 CLAUDE 链路测试 | - | 评审新增 |
+
+### 12.7 测试验证矩阵（修订版）
+
+| 测试场景 | 预期结果 | 验证点 |
+|----------|----------|--------|
+| Chat + reasoning_effort → 推理模型 | reasoning_content 返回 | ✅ |
+| Chat + reasoning_effort → 非推理模型 | 无 400 错误 | ✅ |
+| Responses + reasoning → Chat 上游 | reasoning_effort 保留 | ✅ |
+| Responses + reasoning → Responses 上游 | reasoning 保留 | ✅ |
+| 下游无 reasoning | 不添加字段 | ✅ |
+| 流式 reasoning delta | 正常返回 | ✅ |
+
+### 12.7 风险评估（修订版）
+
+采用"下游发起"策略后，风险大幅降低：
+
+| 风险 | 等级 | 缓解措施 |
+|------|------|----------|
+| 不支持 reasoning 的上游忽略参数 | 🟢 低 | 测试已证明安全（被忽略，不报错） |
+| 修改影响范围 | 🟡 中 | 4 个位置统一移除 strip |
+| 测试覆盖不足 | 🟡 中 | 补充 CLAUDE 链路测试 |
+
+---
+
+### 12.8 评审发现（Oracle + Metis）
+
+> 基于 Oracle 和 Metis 两个评审方的综合发现。已全部纳入修改方案。
+
+#### 🔴 问题1：遗漏 `handlers.rs:327`（Claude 入口）→ 已解决
+
+文档第 12.4 节已补充 CLAUDE 链路分析。
+
+#### 🔴 问题2：`is_reasoning_model` 的边界问题 → 已解决
+
+采用"下游发起"策略后，不再需要 `is_reasoning_model` 函数。
+
+#### 🔴 问题3：Responses adapter 二次剥离 → 已解决
+
+移除 forwarder.rs:679-683 的 strip 后，Responses adapter 的 reasoning 对象不再被剥离。
+
+#### 🟡 问题4：`model = "auto"` 时无法判断 → 已解决
+
+采用"下游发起"策略后，不需要判断模型是否支持 reasoning。
+
+#### 🟡 问题5：修改顺序依赖 → 已解决
+
+4 个位置统一移除 strip，没有依赖关系。
+
+#### 🟡 问题6：测试矩阵缺少 CLAUDE 链路 → 已纳入
+
+12.7 节测试矩阵已补充 CLAUDE 链路场景。
+```
+
+**即使移除 handlers.rs:250 的 strip，forwarder.rs:682 仍然会剥离 Responses adapter 刚转换好的 `reasoning` 对象。**
+
+#### 🟡 问题4：`model = "auto"` 时无法判断
+
+当 `handlers.rs:250` 执行时，model 可能是 `"auto"`。`is_reasoning_model("auto")` 返回 `false`。
+
+**解决**：`forwarder.rs:677` 中 `entry.model` 是解析后的实际模型名，用它判断。
+
+#### 🟡 问题5：修改顺序依赖
+
+```
+正确顺序：
+forwarder.rs strip 逻辑修改  ←── 根因，必须先改
+    ├──→ handlers.rs:250 移除 strip
+    ├──→ handlers.rs:327 移除 strip
+    └──→ responses_handler.rs:85 移除 strip
+```
+
+**如果先改 handler 再改 forwarder，中间态会破坏编译。**
+
+#### 🟡 问题6：测试矩阵缺少关键链路 → 已纳入
+
+12.7 节测试矩阵已补充 CLAUDE 链路场景。
+
+---
+
+### 12.9 最终修改方案
+
+#### 核心策略：采用"下游发起"策略
+
+> **原则**：下游发起思维链，我们按思维链方式走；下游不发起思维链，我们也要保证正常。
+
+测试已证明 `reasoning_effort` 对非推理模型安全（被忽略，不报错）。采用"下游发起"策略，直接移除所有 strip 调用。
+
+#### 修改清单
+
+| 优先级 | 修改 | 文件 | 说明 |
+|--------|------|------|------|
+| **P0** | 移除 strip 调用 | handlers.rs:250 | Chat 入口 |
+| **P0** | 移除 strip 调用 | handlers.rs:327 | Claude 入口 |
+| **P0** | 移除 strip 调用 | responses_handler.rs:85 | Responses 入口 |
+| **P0** | 移除 strip 调用 | forwarder.rs:679-683 | 转发层 |
+| P1 | 更新测试断言 | forwarder.rs | 测试需同步更新 |
+| P2 | 补充 CLAUDE 链路测试 | - | 评审新增 |
+
+#### 修改顺序（原子操作）
+
+```
+1. handlers.rs:250 → 移除 strip 调用
+2. handlers.rs:327 → 移除 strip 调用
+3. responses_handler.rs:85 → 移除 strip 调用
+4. forwarder.rs:679-683 → 移除 strip 调用
+5. 更新测试断言
+6. cargo test 验证
+```
+
+---
+
+*文档版本: 2.6 (最终版) | 最后更新: 2026-05-22*

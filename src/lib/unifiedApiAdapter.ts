@@ -365,7 +365,13 @@ export const apiAdapter: ApiAdapter = {
           error_detail: result.error_detail,
         };
       }
-      return webRequest<{ entry_id: string; latency_ms: number | null; score: number; error_detail?: string }>('POST', `/pool/${id}/test-latency`, { model_score: modelScore });
+      const result = await webRequest<{ status: string; response_ms: string; score: number; error_detail?: string }>('POST', `/pool/${id}/test-latency`, { model_score: modelScore });
+      return {
+        entry_id: id,
+        latency_ms: result.status === 'ok' && result.response_ms !== 'X' ? parseInt(result.response_ms, 10) : null,
+        score: result.score,
+        error_detail: result.error_detail,
+      };
     },
 
     backfillCatalogMeta: (items) =>

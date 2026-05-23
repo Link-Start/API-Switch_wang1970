@@ -98,10 +98,7 @@ fn apply_disable_reasoning_for_test_chat(body: &mut Value) {
     obj.remove("reasoning_content");
     obj.remove("reasoning_text");
     obj.remove("reasoning_details");
-    obj.insert(
-        "reasoning_effort".to_string(),
-        Value::String("none".to_string()),
-    );
+    obj.remove("reasoning_effort");
 }
 
 #[tauri::command]
@@ -441,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_disable_reasoning_for_test_chat_forces_none() {
+    fn apply_disable_reasoning_for_test_chat_removes_fields() {
         let mut body = json!({
             "model": "qwen/qwen3.5-122b-a10b",
             "thinking": true,
@@ -460,9 +457,6 @@ mod tests {
         assert!(!obj.contains_key("reasoning_content"));
         assert!(!obj.contains_key("reasoning_text"));
         assert!(!obj.contains_key("reasoning_details"));
-        assert_eq!(
-            obj.get("reasoning_effort"),
-            Some(&Value::String("none".to_string()))
-        );
+        assert!(!obj.contains_key("reasoning_effort"));
     }
 }

@@ -215,11 +215,11 @@ set: reasoning_effort = "none"
 ## 实施结果
 
 - 后端新增全局设置 `disable_reasoning`，默认关闭，持久化在 SQLite `config` 表。
-- 前端设置页新增“关闭思维链请求”开关，并同步中英文文案与类型定义。
+- 前端设置页新增"关闭思维链请求"开关，并同步中英文文案与类型定义。
 - 转发链路在协议适配器归一到 OpenAI-compatible 请求体后执行统一改写。
 - 开关开启时删除请求顶层和 `messages[]` 对象中的 `thinking`、`reasoning`、`reasoning_content`、`reasoning_text`、`reasoning_details`、`reasoning_effort`。
-- 开关开启时强制在请求顶层写入 `reasoning_effort: "none"`。
-- 开关开启时跳过请求侧 reasoning 字段归一化，避免从 `reasoning_text` / `reasoning_details` 重新生成 `reasoning_content`。
+- 不注入 `reasoning_effort: "none"`，避免不支持该字段的上游返回异常。
+- 响应侧回退逻辑：`content` 为空时读取 `reasoning_content` / `reasoning_text` / `reasoning_details`，兼容 reasoning-only 模型。
 - 已补充四个测试模型的请求改写单元测试，并通过 `cargo test`、`cargo check`、`pnpm typecheck` 验证。
 
 ## 验收标准
@@ -230,12 +230,12 @@ set: reasoning_effort = "none"
    - `thinking`
    - `reasoning`
    - `reasoning_content`
-4. 开关开启时，转发上游前请求体顶层包含：
-   - `reasoning_effort: "none"`
-5. 如果下游传入 `reasoning_effort: "high"`，最终上游请求必须被覆盖为 `"none"`。
-6. NVIDIA `qwen/qwen3.5-122b-a10b` 非流式请求返回标准 `content`。
-7. 流式请求不再只输出 `reasoning_content` delta。
-8. 不支持该参数的上游失败时，日志能看到明确上游错误，不静默吞掉。
+   - `reasoning_text`
+   - `reasoning_details`
+   - `reasoning_effort`
+4. 响应侧回退逻辑正常：`content` 为空时读取 `reasoning_content` 等字段。
+5. NVIDIA `qwen/qwen3.5-122b-a10b` 对话测试通过（依赖响应侧回退）。
+6. 魔塔社区模型对话测试通过（不传 `reasoning_effort`，不报错）。
 
 ## 待评审问题
 

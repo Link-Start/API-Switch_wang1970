@@ -628,13 +628,6 @@ fn apply_disable_reasoning(body: &mut Value) {
             remove_reasoning_trigger_fields(message);
         }
     }
-
-    if let Some(obj) = body.as_object_mut() {
-        obj.insert(
-            "reasoning_effort".to_string(),
-            Value::String("none".to_string()),
-        );
-    }
 }
 
 async fn forward_single(
@@ -3127,7 +3120,7 @@ data: [DONE]\n"
             assert!(!obj.contains_key("reasoning_content"));
             assert!(!obj.contains_key("reasoning_text"));
             assert!(!obj.contains_key("reasoning_details"));
-            assert_eq!(obj.get("reasoning_effort"), Some(&Value::String("none".to_string())));
+            assert!(!obj.contains_key("reasoning_effort"));
 
             let messages = body.get("messages").and_then(Value::as_array).expect("必须保留消息数组");
             let assistant = messages.get(1).and_then(Value::as_object).expect("必须保留助手消息");

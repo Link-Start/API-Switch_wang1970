@@ -7,6 +7,7 @@
     "channels": "Channels",
     "logs": "Usage Logs",
     "tokens": "Access Keys",
+    "link": "Connect Apps",
     "dashboard": "Dashboard",
     "cli": "Connect CLI",
     "settings": "Settings",
@@ -470,6 +471,31 @@
     "guide": {
       "title": "Usage Guide",
       "link": "View usage guide and configurations"
+    }
+  },
+  "link": {
+    "title": "Connect Apps",
+    "connect": "Connect",
+    "comingSoon": "Supported next version",
+    "confirm": {
+      "title": "Connect {{appName}}",
+      "description": "Generate API-Switch minimal config for: {{filePath}}. Windows desktop will back up and overwrite the file; other environments will show the config for manual copy. Continue?",
+      "autoKey": "API-Switch will use the automatically generated AUTO access key."
+    },
+    "success": "Config written: {{filePath}}",
+    "backup": "Original backed up: {{backupPath}}",
+    "clipboard": {
+      "title": "Connect {{appName}}",
+      "copy": "Copy",
+      "copied": "Copied"
+    },
+    "error": {
+      "app_not_found": "Connection app not found",
+      "unsupported_app": "This app is not supported yet",
+      "key_error": "Failed to get AUTO access key",
+      "path_expand_failed": "Failed to resolve user directory",
+      "backup_failed": "Backup failed: {{reason}}",
+      "write_failed": "Write failed: {{reason}}"
     }
   },
   "common": {

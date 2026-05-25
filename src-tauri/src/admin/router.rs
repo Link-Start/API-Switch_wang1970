@@ -1,6 +1,7 @@
 use crate::admin::auth::require_auth;
 use crate::admin::channel_handlers;
 use crate::admin::chat_handlers;
+use crate::admin::connection_apps_handlers;
 use crate::admin::cors::apply_admin_cors;
 use crate::admin::handlers;
 use crate::admin::pool_handlers;
@@ -139,6 +140,11 @@ pub fn build_admin_router(state: AdminState) -> Router {
         .route("/admin/proxy/start", post(proxy_handlers::start))
         .route("/admin/proxy/stop", post(proxy_handlers::stop))
         .route("/admin/test-chat", post(chat_handlers::test_chat))
+        .route("/admin/connection-apps", get(connection_apps_handlers::list))
+        .route(
+            "/admin/connection-apps/:id/execute",
+            post(connection_apps_handlers::execute),
+        )
         .route(
             "/admin/translation-relay",
             get(translation_handlers::get_translation_relay),

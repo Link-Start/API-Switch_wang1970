@@ -43,6 +43,10 @@
     delete(id: string): Promise<void>;
     toggle(id: string, enabled: boolean): Promise<void>;
   };
+  connectionApps: {
+    list(): Promise<ConnectionAppItem[]>;
+    execute(id: string): Promise<AppConfigResult>;
+  };
 settings: {
     get(): Promise<AppSettings>;
     update(settings: AppSettings): Promise<void>;
@@ -73,6 +77,6 @@ settings: {
 
 
 import type { Channel, CreateChannelParams, UpdateChannelParams, FetchModelsResult, ProbeResult, TestChannelResult, TestChannelDirectParams, ModelInfo, ModelCatalogMetaUpdate, SaveChannelWithModelsParams, SaveChannelWithModelsResult } from '../features/channels/types';
-import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, ProxyStatus, AdminStatus, TestChatResponse, TranslationRelayPayload, TranslationRelayRequest } from '../types';
+import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, ProxyStatus, AdminStatus, TestChatResponse, TranslationRelayPayload, TranslationRelayRequest, ConnectionAppItem, AppConfigResult } from '../types';
 
 

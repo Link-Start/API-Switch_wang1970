@@ -7,6 +7,7 @@
     "channels": "渠道管理",
     "logs": "使用日志",
     "tokens": "令牌管理",
+    "link": "连接应用",
     "dashboard": "数据看板",
     "cli": "连接 CLI",
     "settings": "系统设置",
@@ -470,6 +471,31 @@
     "guide": {
       "title": "使用指南",
       "link": "查看使用指南与常见配置"
+    }
+  },
+  "link": {
+    "title": "连接应用",
+    "connect": "连接",
+    "comingSoon": "下一版本支持",
+    "confirm": {
+      "title": "连接 {{appName}}",
+      "description": "将为以下文件生成 API-Switch 最小配置：{{filePath}}。Windows 桌面环境会先备份再覆盖写入；其他环境将展示配置内容供手动复制。是否继续？",
+      "autoKey": "将使用 API-Switch 自动生成的 AUTO access key。"
+    },
+    "success": "配置已写入: {{filePath}}",
+    "backup": "原文件已备份为: {{backupPath}}",
+    "clipboard": {
+      "title": "连接 {{appName}}",
+      "copy": "复制",
+      "copied": "已复制"
+    },
+    "error": {
+      "app_not_found": "未找到连接应用",
+      "unsupported_app": "该应用暂不支持连接",
+      "key_error": "获取 AUTO access key 失败",
+      "path_expand_failed": "获取用户目录失败",
+      "backup_failed": "备份原配置失败: {{reason}}",
+      "write_failed": "配置写入失败: {{reason}}"
     }
   },
   "common": {

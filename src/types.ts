@@ -359,6 +359,30 @@ export interface TranslationRelayPayload {
  * HTTP response shape for translation relay endpoint.
  */
 export interface TranslationRelayResponse {
-  /** The latest payload, or null if none */
+  /** 最新结果，没有则为 null */
   latest: TranslationRelayPayload | null;
+}
+
+// --- Connection Apps ---
+
+export interface ConnectionAppItem {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  configMode: "write" | "clipboard";
+  status?: "available" | "coming_soon";
+  config: {
+    file?: string;
+    format?: "json" | "jsonc" | "toml";
+    instructions?: string;
+  };
+}
+
+export interface AppConfigResult {
+  action: "write" | "clipboard";
+  file_path?: string;
+  backup_path?: string;
+  content?: string;
+  instructions?: string;
 }

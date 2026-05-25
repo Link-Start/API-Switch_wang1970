@@ -28,6 +28,8 @@ import type {
   TestChatResponse,
   TranslationRelayPayload,
   TranslationRelayRequest,
+  ConnectionAppItem,
+  AppConfigResult,
 } from '../types';
 import { ADMIN_API_PREFIX } from './adminApiConfig';
 import { clearToken, emitAuthExpired, TOKEN_KEY } from './webAuth';
@@ -434,6 +436,18 @@ export const apiAdapter: ApiAdapter = {
       useTauri()
         ? tauriCmd<void>('toggle_access_key', { id, enabled })
         : webRequest<void>('PUT', `/tokens/${id}/toggle`, enabled),
+  },
+
+  connectionApps: {
+    list: () =>
+      useTauri()
+        ? tauriCmd<ConnectionAppItem[]>('list_connection_apps')
+        : webRequest<ConnectionAppItem[]>('GET', '/connection-apps'),
+
+    execute: (id) =>
+      useTauri()
+        ? tauriCmd<AppConfigResult>('execute_connection_app', { id })
+        : webRequest<AppConfigResult>('POST', `/connection-apps/${id}/execute`),
   },
 
   settings: {

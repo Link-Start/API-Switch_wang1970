@@ -108,6 +108,7 @@ tmp/
 .sisyphus/
 .codex_tmp/
 .omx/
+.omo/
 
 # Playwright e2e tests - local development only
 playwright.config.ts

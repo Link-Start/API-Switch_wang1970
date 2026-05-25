@@ -13,6 +13,7 @@ import { checkUpdate, type UpdateInfo } from "@/lib/api";
 const ApiPoolPage = lazy(() => import("@/pages/ApiPoolPage").then((m) => ({ default: m.ApiPoolPage })));
 const ChannelPage = lazy(() => import("@/pages/ChannelPage").then((m) => ({ default: m.ChannelPage })));
 const TokenPage = lazy(() => import("@/pages/TokenPage").then((m) => ({ default: m.TokenPage })));
+const LinkPage = lazy(() => import("@/pages/LinkPage").then((m) => ({ default: m.LinkPage })));
 const LogPage = lazy(() => import("@/pages/LogPage").then((m) => ({ default: m.LogPage })));
 const DashboardPage = lazy(() => import("@/pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
@@ -117,6 +118,7 @@ function MainApp({ onLogout }: { onLogout?: () => void }) {
         case "apiPool": return <ApiPoolPage />;
         case "channels": return <ChannelPage />;
         case "tokens": return <TokenPage />;
+        case "link": return <LinkPage />;
         case "logs": return <LogPage />;
         case "dashboard": return <DashboardPage />;
         case "settings": return <SettingsPage />;

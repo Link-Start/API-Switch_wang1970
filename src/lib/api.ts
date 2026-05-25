@@ -110,14 +110,6 @@ export async function updateEntryResponseMs(entryId: string, responseMs: string)
   return invoke("update_entry_response_ms", { entryId, responseMs });
 }
 
-export async function setUserEnvVars(vars: { key: string; value: string }[]): Promise<void> {
-  return invoke("set_user_env_vars", { vars });
-}
-
-export async function getCliData(): Promise<unknown | null> {
-  return invoke("get_cli_data");
-}
-
 // --- Limit Query ---
 
 export async function queryLimit(baseUrl: string, apiKey: string): Promise<LimitQueryResult> {

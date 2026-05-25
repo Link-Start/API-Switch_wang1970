@@ -25,7 +25,7 @@
   pool: {
     list(): Promise<ApiEntry[]>;
     listPaginated(params: { page: number; pageSize: number; groupName?: string; search?: string; channelId?: string }): Promise<PaginatedResult<ApiEntry>>;
-    toggle(id: string, enabled: boolean): Promise<void>;
+    toggle(id: string, enabled: boolean, options?: { pinToTop?: boolean }): Promise<void>;
     batchToggle(ids: string[], enabled: boolean): Promise<void>;
     reorder(orderedIds: string[]): Promise<void>;
     create(params: { channelId: string; model: string; displayName?: string; groupName?: string }): Promise<ApiEntry>;
@@ -42,6 +42,10 @@
     create(name: string): Promise<AccessKey>;
     delete(id: string): Promise<void>;
     toggle(id: string, enabled: boolean): Promise<void>;
+  };
+  connectionApps: {
+    list(): Promise<ConnectionAppItem[]>;
+    execute(id: string): Promise<AppConfigResult>;
   };
 settings: {
     get(): Promise<AppSettings>;
@@ -73,6 +77,6 @@ settings: {
 
 
 import type { Channel, CreateChannelParams, UpdateChannelParams, FetchModelsResult, ProbeResult, TestChannelResult, TestChannelDirectParams, ModelInfo, ModelCatalogMetaUpdate, SaveChannelWithModelsParams, SaveChannelWithModelsResult } from '../features/channels/types';
-import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, ProxyStatus, AdminStatus, TestChatResponse, TranslationRelayPayload, TranslationRelayRequest } from '../types';
+import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, ProxyStatus, AdminStatus, TestChatResponse, TranslationRelayPayload, TranslationRelayRequest, ConnectionAppItem, AppConfigResult } from '../types';
 
 

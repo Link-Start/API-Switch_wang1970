@@ -1523,6 +1523,13 @@ fn transform_request_to_responses(body: &mut Value, actual_model: &str) {
         return;
     };
 
+    // 已经是 Responses 原生请求时只更新实际模型名，保留 reasoning.summary、
+    // include: ["reasoning.encrypted_content"] 等 Responses 专属字段。
+    if obj.contains_key("input") && !obj.contains_key("messages") {
+        obj.insert("model".to_string(), json!(actual_model));
+        return;
+    }
+
     // 1. 先收集和转换 messages → input
     let (instructions, input_items) = messages_to_input(obj.remove("messages"));
 
@@ -2770,5 +2777,25 @@ mod reasoning_merge_tests {
 
         assert_eq!(body["reasoning"]["effort"], "medium");
         assert_eq!(body["reasoning"]["summary"], "auto");
+    }
+
+    #[test]
+    fn transform_request_to_responses_keeps_native_responses_request_lossless() {
+        let mut body = json!({
+            "model": "auto",
+            "input": "hi",
+            "reasoning": {"effort": "high", "summary": "detailed"},
+            "include": ["reasoning.encrypted_content"],
+            "metadata": {"trace": "keep"}
+        });
+
+        transform_request_to_responses(&mut body, "gpt-responses");
+
+        assert_eq!(body["model"], "gpt-responses");
+        assert_eq!(body["input"], "hi");
+        assert_eq!(body["reasoning"]["effort"], "high");
+        assert_eq!(body["reasoning"]["summary"], "detailed");
+        assert_eq!(body["include"][0], "reasoning.encrypted_content");
+        assert_eq!(body["metadata"]["trace"], "keep");
     }
 }

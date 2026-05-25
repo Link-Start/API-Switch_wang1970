@@ -1,0 +1,46 @@
+[
+  {
+    "id": "opencode",
+    "name": "OpenCode CLI",
+    "description": "自动配置 OpenCode CLI 连接到本地代理",
+    "icon": "ExternalLink",
+    "configMode": "write",
+    "config": {
+      "file": "~/.config/opencode/opencode.jsonc",
+      "format": "jsonc"
+    }
+  },
+  {
+    "id": "codex",
+    "name": "Codex CLI",
+    "description": "自动配置 Codex CLI 连接到本地代理",
+    "icon": "Terminal",
+    "configMode": "write",
+    "config": {
+      "file": "~/.codex/config.toml",
+      "format": "toml"
+    }
+  },
+  {
+    "id": "claude-code",
+    "name": "Claude Code",
+    "description": "自动配置 Claude Code 连接到本地代理",
+    "icon": "MessageSquare",
+    "configMode": "write",
+    "config": {
+      "file": "~/.claude/settings.json",
+      "format": "json"
+    }
+  },
+  {
+    "id": "workbuddy",
+    "name": "Workbuddy",
+    "description": "自动配置 Workbuddy 连接到本地代理",
+    "icon": "Link",
+    "configMode": "write",
+    "config": {
+      "file": "~/.workbuddy/models.json",
+      "format": "json"
+    }
+  }
+]

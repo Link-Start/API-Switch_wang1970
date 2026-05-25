@@ -1,6 +1,7 @@
 mod auth;
 mod channel_handlers;
 mod chat_handlers;
+mod connection_apps_handlers;
 mod cors;
 mod error;
 mod handlers;

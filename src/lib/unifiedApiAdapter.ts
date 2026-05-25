@@ -28,6 +28,8 @@ import type {
   TestChatResponse,
   TranslationRelayPayload,
   TranslationRelayRequest,
+  ConnectionAppItem,
+  AppConfigResult,
 } from '../types';
 import { ADMIN_API_PREFIX } from './adminApiConfig';
 import { clearToken, emitAuthExpired, TOKEN_KEY } from './webAuth';
@@ -320,10 +322,10 @@ export const apiAdapter: ApiAdapter = {
             channel_id: channelId,
           }),
 
-    toggle: (id, enabled) =>
+    toggle: (id, enabled, options) =>
       useTauri()
-        ? tauriCmd<void>('toggle_entry', { id, enabled })
-        : webRequest<void>('PUT', `/pool/${id}/toggle`, enabled),
+        ? tauriCmd<void>('toggle_entry', { id, enabled, pinToTop: options?.pinToTop })
+        : webRequest<void>('PUT', `/pool/${id}/toggle`, options?.pinToTop ? { enabled, pinToTop: true } : enabled),
 
     batchToggle: (ids, enabled) =>
       useTauri()
@@ -365,7 +367,13 @@ export const apiAdapter: ApiAdapter = {
           error_detail: result.error_detail,
         };
       }
-      return webRequest<{ entry_id: string; latency_ms: number | null; score: number; error_detail?: string }>('POST', `/pool/${id}/test-latency`, { model_score: modelScore });
+      const result = await webRequest<{ status: string; response_ms: string; score: number; error_detail?: string }>('POST', `/pool/${id}/test-latency`, { model_score: modelScore });
+      return {
+        entry_id: id,
+        latency_ms: result.status === 'ok' && result.response_ms !== 'X' ? parseInt(result.response_ms, 10) : null,
+        score: result.score,
+        error_detail: result.error_detail,
+      };
     },
 
     backfillCatalogMeta: (items) =>
@@ -428,6 +436,18 @@ export const apiAdapter: ApiAdapter = {
       useTauri()
         ? tauriCmd<void>('toggle_access_key', { id, enabled })
         : webRequest<void>('PUT', `/tokens/${id}/toggle`, enabled),
+  },
+
+  connectionApps: {
+    list: () =>
+      useTauri()
+        ? tauriCmd<ConnectionAppItem[]>('list_connection_apps')
+        : webRequest<ConnectionAppItem[]>('GET', '/connection-apps'),
+
+    execute: (id) =>
+      useTauri()
+        ? tauriCmd<AppConfigResult>('execute_connection_app', { id })
+        : webRequest<AppConfigResult>('POST', `/connection-apps/${id}/execute`),
   },
 
   settings: {

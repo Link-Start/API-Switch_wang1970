@@ -29,10 +29,12 @@ export function useDirtyPolling(
       try {
         const isDirty = await apiAdapter.dirty.take(module);
         if (isDirty) {
+          const scrollY = window.scrollY;
           const keys = queryKeys ?? DEFAULT_DIRTY_QUERY_KEYS[module];
           keys.forEach((key) => {
             queryClient.invalidateQueries({ queryKey: [...key] });
           });
+          requestAnimationFrame(() => window.scrollTo(0, scrollY));
         }
       } catch (e) {
         console.error('脏标记轮询失败:', e);

@@ -87,8 +87,9 @@ pub async fn toggle_entry(
     state: State<'_, AppState>,
     id: String,
     enabled: bool,
+    pin_to_top: Option<bool>,
 ) -> Result<(), AppError> {
-    pool_service::toggle_entry(&state.db, &state.failure_counts, &id, enabled)?;
+    pool_service::toggle_entry(&state.db, &state.failure_counts, &id, enabled, pin_to_top.unwrap_or(false))?;
     let _ = app.emit("entries-changed", ());
     crate::refresh_tray_if_enabled(&app);
     Ok(())

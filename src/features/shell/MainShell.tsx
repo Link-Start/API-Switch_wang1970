@@ -1,19 +1,19 @@
-import { BarChart3, BookOpen, ExternalLink, FileText, KeyRound, Layers, LogOut, Power, Route, Settings } from 'lucide-react';
+import { BarChart3, BookOpen, ExternalLink, FileText, KeyRound, Layers, Link, LogOut, Power, Route, Settings } from 'lucide-react';
 
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Toaster } from 'sonner';
 import { cn } from '@/lib/utils';
 import type { AdminStatus, AppSettings, ProxyStatus } from '@/types';
 
-export type MainPage = 'apiPool' | 'channels' | 'tokens' | 'logs' | 'dashboard' | 'translator' | 'settings' | 'guide';
+export type MainPage = 'apiPool' | 'channels' | 'tokens' | 'link' | 'logs' | 'dashboard' | 'translator' | 'settings' | 'guide';
 
 const NAV_ITEMS: { key: MainPage; icon: typeof Layers; labelKey: string; externalLang?: Record<string, string> }[] = [
   { key: 'apiPool', icon: Layers, labelKey: 'nav.apiPool' },
   { key: 'channels', icon: Route, labelKey: 'nav.channels' },
   { key: 'tokens', icon: KeyRound, labelKey: 'nav.tokens' },
+  { key: 'link', icon: Link, labelKey: 'nav.link' },
   { key: 'logs', icon: FileText, labelKey: 'nav.logs' },
   { key: 'dashboard', icon: BarChart3, labelKey: 'nav.dashboard' },
     { key: 'settings', icon: Settings, labelKey: 'nav.settings' },
@@ -65,7 +65,11 @@ export function MainShell({
             {t('update.goDownload')}
             <ExternalLink className="h-3 w-3" />
           </button>
-          <button onClick={onUpdateDismiss} className="ml-1 opacity-60 hover:opacity-100">
+          <button
+            type="button"
+            onClick={onUpdateDismiss}
+            className="ml-1 opacity-60 hover:opacity-100"
+          >
             ✕
           </button>
         </div>
@@ -140,7 +144,6 @@ export function MainShell({
         {children}
       </div>
 
-      <Toaster position="top-center" richColors closeButton />
     </div>
   );
 }

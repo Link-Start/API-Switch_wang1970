@@ -45,7 +45,7 @@ impl ModelsEndpointError {
     fn is_blocking(&self) -> bool {
         matches!(
             self,
-            Self::Network(_) | Self::Timeout(_) | Self::Auth(_) | Self::RateLimited(_)
+            Self::Network(_) | Self::Timeout(_)
         )
     }
 
@@ -654,6 +654,20 @@ async fn detect_type_with_base_url(
                         corrected_base_url,
                     });
                 }
+            }
+                        Err(ModelsEndpointError::Auth(status)) => {
+                // Auth (401/403) means endpoint exists but key is invalid
+                let corrected_base_url = canonical_base_url_for_success(api_type, base_url, url);
+                let detected_type = if respect_selected_type {
+                    api_type.to_string()
+                } else {
+                    resolve_detected_type(api_type, &corrected_base_url)
+                };
+                log::info!("[detect_endpoint] Endpoint exists via {url}, type={detected_type} (auth, HTTP {status})");
+                return DetectionResult::Found(EndpointGuess {
+                    detected_type,
+                    corrected_base_url,
+                });
             }
             Err(err) if err.is_blocking() => return DetectionResult::Blocked(err),
             Err(_) => {}

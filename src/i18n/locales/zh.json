@@ -1,4 +1,4 @@
-﻿{
+{
   "app": {
     "title": "API Switch"
   },
@@ -7,6 +7,7 @@
     "channels": "渠道管理",
     "logs": "使用日志",
     "tokens": "令牌管理",
+    "link": "连接应用",
     "dashboard": "数据看板",
     "cli": "连接 CLI",
     "settings": "系统设置",
@@ -398,6 +399,9 @@
   },
   "settings": {
     "title": "系统设置",
+    "ports": {
+      "title": "端口管理"
+    },
     "proxy": {
       "title": "代理设置",
       "enabled": "启用代理",
@@ -460,11 +464,38 @@
       "defaultSortModeDesc": "模型管理页面的默认模型排序方式",
       "showConversationModel": "显示对话模型（实验）",
       "showConversationModelDesc": "流式回答结束时追加实际命中的模型名称",
+      "disableReasoning": "关闭思维链",
+      "disableReasoningDesc": "开启后会拦截思维链相关数据，不传递到上游（默认开启）",
       "currentVersion": "当前版本"
     },
     "guide": {
       "title": "使用指南",
       "link": "查看使用指南与常见配置"
+    }
+  },
+  "link": {
+    "title": "连接应用",
+    "connect": "连接",
+    "comingSoon": "下一版本支持",
+    "confirm": {
+      "title": "连接 {{appName}}",
+      "description": "将为以下文件生成 API-Switch 最小配置：{{filePath}}。Windows 桌面环境会先备份再覆盖写入；其他环境将展示配置内容供手动复制。是否继续？",
+      "autoKey": "将使用 API-Switch 自动生成的 AUTO access key。"
+    },
+    "success": "配置已写入: {{filePath}}",
+    "backup": "原文件已备份为: {{backupPath}}",
+    "clipboard": {
+      "title": "连接 {{appName}}",
+      "copy": "复制",
+      "copied": "已复制"
+    },
+    "error": {
+      "app_not_found": "未找到连接应用",
+      "unsupported_app": "该应用暂不支持连接",
+      "key_error": "获取 AUTO access key 失败",
+      "path_expand_failed": "获取用户目录失败",
+      "backup_failed": "备份原配置失败: {{reason}}",
+      "write_failed": "配置写入失败: {{reason}}"
     }
   },
   "common": {

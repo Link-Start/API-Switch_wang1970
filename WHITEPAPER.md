@@ -356,6 +356,12 @@ Access Key 用于客户端访问代理时的身份识别和可选鉴权。关闭
 
 设置表保存代理、管理端、冷却、UI 和运行行为配置。Web Admin 设置更新带版本号，用于处理多页面或多进程修改冲突。
 
+关键运行行为设置：
+
+| 设置项 | 默认值 | 作用 |
+|--------|--------|------|
+| `disable_reasoning` | `true` | 全局控制 reasoning/thinking 是否传递到上游。默认关闭（`true`），删除 thinking/reasoning 触发字段；开启后原样传递上游，不清理任何字段 |
+
 ---
 
 ## 7. 渠道与模型同步流程
@@ -418,6 +424,7 @@ Client → POST /v1/chat/completions
   ├─ 4. forwarder::forward_with_retry()
   │     ├─ 遍历 entries:
   │     │   ├─ adapter.build_chat_url() + apply_auth() + transform_request()
+  │     │   ├─ 如果 settings.disable_reasoning = true，在归一后的 OpenAI-compatible 请求体上统一关闭 reasoning/thinking
   │     │   ├─ reqwest::send()
   │     │   ├─ 成功 → 清除冷却 → 返回客户端
   │     │   └─ 失败 → 设置冷却 → 继续下一个
@@ -425,7 +432,24 @@ Client → POST /v1/chat/completions
   └─ 5. insert_usage_log()
 ```
 
-### 8.3 路由匹配顺序（唯一真相）
+### 8.3 全局控制 reasoning/thinking 请求
+
+设置项 `disable_reasoning` 控制 reasoning/thinking 数据是否传递到上游。该设置**默认开启**（`true`），即默认不传递 reasoning 数据，存储在 SQLite `config` 表，并通过 `AppSettings` 暴露给 Desktop 与 Web Admin 设置页。
+
+处理位置固定在各协议适配器完成 `transform_request()` 后、`reqwest::send()` 前。此时 Claude / Gemini / Azure / Responses 等入口已经归一为 OpenAI-compatible 上游请求体，因此只需要在 `forwarder.rs` 的公共路径执行一次改写，避免五套协议分别实现造成遗漏或行为分叉。
+
+`disable_reasoning = true`（默认）时：
+
+- 删除请求体顶层的 `thinking`、`reasoning`、`reasoning_content`、`reasoning_text`、`reasoning_details`、`reasoning_effort`。
+- 删除 `messages[]` 中每个对象上的同名字段。
+- 不往上游注入任何字段。
+- 不递归改写 `messages[].content` 等用户文本内容，避免误伤真实输入。
+
+`disable_reasoning = false` 时：
+
+- reasoning/thinking 字段原样传递上游，不做任何处理。
+
+### 8.4 路由匹配顺序（唯一真相）
 
 | 场景 | 行为 |
 |---|---|
@@ -437,7 +461,7 @@ Client → POST /v1/chat/completions
 | AUTO 组定义 | AUTO 组就是 `group_name = "auto"`，不再受 settings / API 管理页当前分组 / tray 状态影响 |
 | 最终失败 | 当分组精确匹配、模型模糊匹配、AUTO 组 fallback 都没有可用条目时，按当前正常模型请求失败流程处理 |
 
-### 8.4 排序策略
+### 8.5 排序策略
 
 同一候选集合内支持：
 
@@ -447,7 +471,7 @@ Client → POST /v1/chat/completions
 
 排序策略影响候选尝试顺序；同一模型跨多个渠道时，失败后继续尝试下一个候选。
 
-### 8.5 冷却与熔断 — 三级容错体系
+### 8.6 冷却与熔断 — 三级容错体系
 
 失败处理由三层层叠的冷却/熔断机制组成，范围逐层收缩、时效逐层递增：
 

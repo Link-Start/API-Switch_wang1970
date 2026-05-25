@@ -104,8 +104,12 @@ pub fn toggle_entry(
     failure_counts: &std::sync::Arc<tokio::sync::RwLock<std::collections::HashMap<String, u32>>>,
     id: &str,
     enabled: bool,
+    pin_to_top: bool,
 ) -> Result<(), AppError> {
     toggle_entry_inner(db, failure_counts, id, enabled)?;
+    if pin_to_top {
+        db.set_entry_priority(id, 0)?;
+    }
     crate::state_version::bump("pool");
     Ok(())
 }
@@ -233,7 +237,7 @@ pub async fn test_entry_latency(
 
     let mut upstream_body = json!({
         "model": entry.model,
-        "messages": [{"role": "user", "content": "请只回复 OK"}],
+        "messages": [{"role": "user", "content": "Say OK"}],
         "stream": false,
     });
     adapter.transform_request(&mut upstream_body, &entry.model);

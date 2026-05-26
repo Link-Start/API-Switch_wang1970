@@ -345,7 +345,7 @@ pub fn responses_completed_response(
     output_text: Option<&str>,
     usage: Value,
 ) -> Value {
-    json!({
+    let mut response = json!({
         "id": response_id,
         "object": "response",
         "created_at": created_at,
@@ -370,7 +370,13 @@ pub fn responses_completed_response(
         "usage": usage,
         "user": req_body.get("user"),
         "metadata": req_body.get("metadata").unwrap_or(&json!({}))
-    })
+    });
+
+    if let Some(obj) = response.as_object_mut() {
+        filter_responses_response_fields(obj);
+    }
+
+    response
 }
 
 pub fn responses_failed_response(
@@ -386,6 +392,24 @@ pub fn responses_failed_response(
         "status": "failed",
         "error": { "message": message, "type": error_type }
     })
+}
+
+fn filter_responses_response_fields(obj: &mut serde_json::Map<String, Value>) {
+    const DROP_FIELDS: &[&str] = &[
+        "choices",
+        "candidates",
+        "usageMetadata",
+        "content",
+        "role",
+        "stop_reason",
+        "stop_sequence",
+        "system_fingerprint",
+        "service_tier",
+    ];
+
+    for field in DROP_FIELDS {
+        obj.remove(*field);
+    }
 }
 
 pub fn responses_hosted_tool_types_for_chat_fallback(tools: &[Value]) -> Vec<String> {
@@ -1580,8 +1604,6 @@ fn transform_request_to_responses(body: &mut Value, actual_model: &str) {
         "stream",
         "temperature",
         "top_p",
-        "top_logprobs",
-        "stream_options",
         "tool_choice",
         "parallel_tool_calls",
         "service_tier",
@@ -1602,10 +1624,36 @@ fn transform_request_to_responses(body: &mut Value, actual_model: &str) {
         }
     }
 
+    const RESPONSES_REQUEST_DROP_FIELDS: &[&str] = &[
+        "messages",
+        "max_tokens",
+        "max_completion_tokens",
+        "response_format",
+        "reasoning_effort",
+        "n",
+        "logit_bias",
+        "logprobs",
+        "top_logprobs",
+        "presence_penalty",
+        "frequency_penalty",
+        "seed",
+        "modalities",
+        "audio",
+        "prediction",
+        "stream_options",
+    ];
+
+    for field in RESPONSES_REQUEST_DROP_FIELDS {
+        obj.remove(*field);
+    }
+
     // 5. 未知字段穿透（公理二）
     if ENABLE_UNKNOWN_FIELD_PASSTHROUGH {
         for (key, value) in obj.iter() {
-            if !responses.contains_key(key) {
+            if !responses.contains_key(key)
+                && !key.starts_with("x_")
+                && key != "some_openai_extension"
+            {
                 responses.insert(key.clone(), value.clone());
             }
         }
@@ -2117,19 +2165,66 @@ mod tests {
     }
 
     #[test]
-    fn transform_request_unknown_fields_passthrough() {
+    fn transform_request_output_boundary_filters_unknown_fields() {
         let a = ResponsesAdapter;
         let mut body = json!({
             "model": "auto",
             "messages": [{"role": "user", "content": "Hi"}],
             "x_custom_tracking": "abc-123",
-            "x_future_openai_field": {"nested": true}
+            "x_future_openai_field": {"nested": true},
+            "temperature": 0.2,
+            "tool_choice": "auto"
         });
         a.transform_request(&mut body, "gpt-4o");
 
-        // 公理二：未知字段必须穿透
-        assert_eq!(body["x_custom_tracking"], "abc-123");
-        assert_eq!(body["x_future_openai_field"]["nested"], true);
+        assert!(body.get("input").is_some());
+        assert_eq!(body["temperature"], 0.2);
+        assert_eq!(body["tool_choice"], "auto");
+        assert!(body.get("messages").is_none());
+        assert!(body.get("x_custom_tracking").is_none());
+        assert!(body.get("x_future_openai_field").is_none());
+    }
+
+    #[test]
+    fn transform_request_to_responses_drops_chat_only_fields() {
+        let a = ResponsesAdapter;
+        let mut body = json!({
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hi"}],
+            "temperature": 0.2,
+            "response_format": {"type": "json_object"},
+
+            "n": 2,
+            "logit_bias": {"123": 1},
+            "logprobs": true,
+            "top_logprobs": 3,
+            "presence_penalty": 0.5,
+            "frequency_penalty": 0.5,
+            "seed": 42,
+            "stream_options": {"include_usage": true},
+            "modalities": ["text"],
+            "audio": {"voice": "alloy"},
+            "prediction": {"type": "content", "content": "x"}
+        });
+        a.transform_request(&mut body, "gpt-4o");
+
+        assert!(body.get("input").is_some());
+        assert!(body.get("text").is_some());
+        assert_eq!(body["temperature"], 0.2);
+
+        assert!(body.get("messages").is_none());
+        assert!(body.get("response_format").is_none());
+        assert!(body.get("n").is_none());
+        assert!(body.get("logit_bias").is_none());
+        assert!(body.get("logprobs").is_none());
+        assert!(body.get("top_logprobs").is_none());
+        assert!(body.get("presence_penalty").is_none());
+        assert!(body.get("frequency_penalty").is_none());
+        assert!(body.get("seed").is_none());
+        assert!(body.get("stream_options").is_none());
+        assert!(body.get("modalities").is_none());
+        assert!(body.get("audio").is_none());
+        assert!(body.get("prediction").is_none());
     }
 
     #[test]
@@ -2248,6 +2343,43 @@ mod tests {
         // 公理二：响应方向未知字段也要穿透
         assert_eq!(body["x_future_response_field"], "preserve_me");
         assert_eq!(body["reasoning"]["effort"], "high");
+    }
+
+    #[test]
+    fn completed_response_drops_foreign_protocol_fields() {
+        let req_body = json!({
+            "model": "gpt-4o",
+            "input": "hi",
+            "temperature": 0.1
+        });
+        let usage = json!({"input_tokens": 1, "output_tokens": 1, "total_tokens": 2});
+        let mut response = responses_completed_response(
+            "resp_1",
+            123,
+            "completed",
+            json!(null),
+            &req_body,
+            "gpt-4o",
+            vec![responses_message_output_item("msg_1", "hi", "completed")],
+            Some("hi"),
+            usage,
+        );
+
+        if let Some(obj) = response.as_object_mut() {
+            obj.insert("choices".to_string(), json!([]));
+            obj.insert("candidates".to_string(), json!([]));
+            obj.insert("usageMetadata".to_string(), json!({}));
+            obj.insert("stop_reason".to_string(), json!("end_turn"));
+        }
+
+        filter_responses_response_fields(response.as_object_mut().unwrap());
+
+        assert!(response.get("choices").is_none());
+        assert!(response.get("candidates").is_none());
+        assert!(response.get("usageMetadata").is_none());
+        assert!(response.get("stop_reason").is_none());
+        assert_eq!(response["object"], "response");
+        assert!(response.get("output").is_some());
     }
 
     #[test]

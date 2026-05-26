@@ -1131,7 +1131,7 @@ mod tests {
         });
         gemini::transform_request_to_gemini(&mut body, "gemini-2.0-flash");
 
-        assert_eq!(body["model"], "gemini-2.0-flash");
+        assert!(body.get("model").is_none());
         assert!(body.get("systemInstruction").is_some());
         assert_eq!(
             body["systemInstruction"]["parts"][0]["text"],

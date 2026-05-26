@@ -23,6 +23,47 @@ fn has_custom_api_path(base_url: &str) -> bool {
     false
 }
 
+fn filter_openai_chat_request_fields(obj: &mut serde_json::Map<String, Value>) {
+    const DROP_FIELDS: &[&str] = &[
+        "input",
+        "instructions",
+        "include",
+        "prompt",
+        "max_output_tokens",
+        "text",
+        "truncation",
+        "previous_response_id",
+        "max_tool_calls",
+    ];
+
+    for field in DROP_FIELDS {
+        obj.remove(*field);
+    }
+}
+
+fn filter_openai_chat_response_fields(obj: &mut serde_json::Map<String, Value>) {
+    const DROP_FIELDS: &[&str] = &[
+        "output",
+        "output_text",
+        "candidates",
+        "usageMetadata",
+        "content",
+        "role",
+        "stop_reason",
+        "stop_sequence",
+        "incomplete_details",
+        "instructions",
+        "parallel_tool_calls",
+        "previous_response_id",
+        "text",
+        "truncation",
+    ];
+
+    for field in DROP_FIELDS {
+        obj.remove(*field);
+    }
+}
+
 impl ProtocolAdapter for OpenAiAdapter {
     fn build_chat_url(&self, base_url: &str, _model: &str) -> String {
         if has_custom_api_path(base_url) {
@@ -60,13 +101,19 @@ impl ProtocolAdapter for OpenAiAdapter {
 
     fn transform_request(&self, body: &mut Value, actual_model: &str) {
         // OpenAI-compatible reasoning/THINK extensions are passthrough only: preserve, never synthesize.
+        // Cross-protocol residual fields from Responses/Gemini/Claude intermediates are removed here.
         if let Some(obj) = body.as_object_mut() {
+            filter_openai_chat_request_fields(obj);
             obj.insert("model".to_string(), Value::String(actual_model.to_string()));
         }
     }
 
-    fn transform_response(&self, _body: &mut Value) {
-        // Passthrough preserves non-standard reasoning_content returned by OpenAI-compatible providers.
+    fn transform_response(&self, body: &mut Value) {
+        // Passthrough preserves non-standard OpenAI-compatible reasoning fields,
+        // while dropping obvious foreign-protocol response fields.
+        if let Some(obj) = body.as_object_mut() {
+            filter_openai_chat_response_fields(obj);
+        }
     }
 
     fn needs_sse_transform(&self) -> bool {
@@ -147,6 +194,56 @@ mod tests {
     }
 
     #[test]
+    fn transform_request_drops_responses_only_fields() {
+        let adapter = OpenAiAdapter;
+        let mut body = json!({
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hi"}],
+
+            "input": "hi",
+            "instructions": "be brief",
+            "include": ["reasoning.encrypted_content"],
+            "prompt": {"id": "pmpt_123"},
+            "max_output_tokens": 100,
+            "text": {"format": {"type": "text"}},
+            "truncation": "auto",
+            "previous_response_id": "resp_123",
+            "max_tool_calls": 3,
+
+            "temperature": 0.3,
+            "metadata": {"k": "v"},
+            "store": true,
+            "prompt_cache_key": "cache-key",
+            "safety_identifier": "safe-user",
+            "reasoning_effort": "medium",
+            "thinking": {"type": "enabled"}
+        });
+
+        adapter.transform_request(&mut body, "gpt-4o");
+
+        assert_eq!(body["model"], "gpt-4o");
+
+        assert!(body.get("input").is_none());
+        assert!(body.get("instructions").is_none());
+        assert!(body.get("include").is_none());
+        assert!(body.get("prompt").is_none());
+        assert!(body.get("max_output_tokens").is_none());
+        assert!(body.get("text").is_none());
+        assert!(body.get("truncation").is_none());
+        assert!(body.get("previous_response_id").is_none());
+        assert!(body.get("max_tool_calls").is_none());
+
+        assert_eq!(body["messages"][0]["role"], "user");
+        assert_eq!(body["temperature"], 0.3);
+        assert_eq!(body["metadata"]["k"], "v");
+        assert_eq!(body["store"], true);
+        assert_eq!(body["prompt_cache_key"], "cache-key");
+        assert_eq!(body["safety_identifier"], "safe-user");
+        assert_eq!(body["reasoning_effort"], "medium");
+        assert_eq!(body["thinking"]["type"], "enabled");
+    }
+
+    #[test]
     fn transform_response_preserves_openai_compatible_reasoning_extensions() {
         let adapter = OpenAiAdapter;
         let mut body = json!({
@@ -163,5 +260,40 @@ mod tests {
         adapter.transform_response(&mut body);
 
         assert_eq!(body, original);
+    }
+
+    #[test]
+    fn transform_response_drops_foreign_protocol_fields() {
+        let adapter = OpenAiAdapter;
+        let mut body = json!({
+            "id": "chatcmpl_1",
+            "object": "chat.completion",
+            "created": 123,
+            "model": "gpt-4o",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "system_fingerprint": "fp_123",
+            "reasoning_text": "kept extension",
+
+            "output": [],
+            "output_text": "wrong protocol",
+            "candidates": [],
+            "usageMetadata": {},
+            "stop_reason": "end_turn",
+            "instructions": "wrong protocol"
+        });
+
+        adapter.transform_response(&mut body);
+
+        assert!(body.get("output").is_none());
+        assert!(body.get("output_text").is_none());
+        assert!(body.get("candidates").is_none());
+        assert!(body.get("usageMetadata").is_none());
+        assert!(body.get("stop_reason").is_none());
+        assert!(body.get("instructions").is_none());
+
+        assert_eq!(body["object"], "chat.completion");
+        assert!(body.get("choices").is_some());
+        assert_eq!(body["reasoning_text"], "kept extension");
     }
 }

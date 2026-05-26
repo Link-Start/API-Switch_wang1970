@@ -527,9 +527,10 @@ mod gemini_roundtrip {
         );
     }
 
-    /// **公理二**：响应方向未知字段穿透
+    /// 输出边界规则：Gemini 输出方向只保留 Gemini 标准/显式扩展字段，
+    /// OpenAI 残留字段不应继续出现在 Gemini 输出里。
     #[test]
-    fn response_unknown_field_passthrough() {
+    fn response_output_boundary_filters_foreign_fields() {
         let openai = json!({
             "id": "chatcmpl-xyz",
             "model": "gemini-1.5-pro",
@@ -545,14 +546,10 @@ mod gemini_roundtrip {
 
         let gemini = openai_to_gemini_response(&openai);
 
-        assert!(
-            gemini.get("x_openai_future_field").is_some(),
-            "openai_to_gemini_response 丢失未知字段 x_openai_future_field（阶段2 修）"
-        );
-        assert!(
-            gemini.get("system_fingerprint").is_some(),
-            "openai_to_gemini_response 丢失 system_fingerprint（阶段2 修）"
-        );
+        assert!(gemini.get("candidates").is_some());
+        assert!(gemini.get("usageMetadata").is_some());
+        assert!(gemini.get("x_openai_future_field").is_some());
+        assert!(gemini.get("system_fingerprint").is_none());
     }
 }
 
@@ -650,7 +647,7 @@ mod openai_roundtrip {
         );
     }
 
-    /// Custom adapter 同上：只改 model
+    /// Custom adapter 同上：只改 model，并复用 OpenAI 出站边界过滤
     #[test]
     fn custom_adapter_preserves_body() {
         let adapter = crate::proxy::protocol::get_adapter("custom");
@@ -665,8 +662,68 @@ mod openai_roundtrip {
         assert_eq!(body["model"], "deepseek-chat");
         assert_eq!(
             body["x_deepseek_specific"], "value",
-            "Custom adapter 应保留所有非 model 字段"
+            "Custom adapter 应保留 OpenAI-compatible 扩展字段"
         );
+    }
+
+    #[test]
+    fn custom_adapter_uses_openai_boundary_filter() {
+        let adapter = crate::proxy::protocol::get_adapter("custom");
+        let mut body = json!({
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hi"}],
+            "input": "hi",
+            "instructions": "x",
+            "include": ["x"],
+            "max_output_tokens": 10,
+            "text": {"format": {"type": "text"}},
+            "x_deepseek_specific": "value",
+            "reasoning_effort": "high"
+        });
+
+        adapter.transform_request(&mut body, "deepseek-chat");
+
+        assert_eq!(body["model"], "deepseek-chat");
+        assert!(body.get("input").is_none());
+        assert!(body.get("instructions").is_none());
+        assert!(body.get("include").is_none());
+        assert!(body.get("max_output_tokens").is_none());
+        assert!(body.get("text").is_none());
+
+        assert_eq!(body["messages"][0]["role"], "user");
+        assert_eq!(body["x_deepseek_specific"], "value");
+        assert_eq!(body["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn openai_adapter_filters_responses_to_chat_intermediate_body() {
+        let adapter = crate::proxy::protocol::get_adapter("openai");
+        let mut body = json!({
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hello"}],
+            "prompt": {"id": "pmpt_abc"},
+            "include": ["web_search_call.action.sources"],
+            "max_output_tokens": 256,
+            "text": {"format": {"type": "json_object"}},
+            "truncation": "auto",
+            "previous_response_id": "resp_abc",
+            "temperature": 0.2,
+            "tools": []
+        });
+
+        adapter.transform_request(&mut body, "gpt-4o-mini");
+
+        assert_eq!(body["model"], "gpt-4o-mini");
+        assert!(body.get("prompt").is_none());
+        assert!(body.get("include").is_none());
+        assert!(body.get("max_output_tokens").is_none());
+        assert!(body.get("text").is_none());
+        assert!(body.get("truncation").is_none());
+        assert!(body.get("previous_response_id").is_none());
+
+        assert!(body.get("messages").is_some());
+        assert_eq!(body["temperature"], 0.2);
+        assert!(body.get("tools").is_some());
     }
 }
 
@@ -757,25 +814,29 @@ mod responses_roundtrip {
         assert_eq!(body["usage"]["completion_tokens"], 5);
     }
 
-    /// **公理二占位**：Responses 上游方向的未知字段穿透
+    /// 输出边界规则：Responses 上游方向只保留 Responses 标准/显式扩展字段，
+    /// 中间协议里不属于 Responses 的未知字段必须被剔除。
     #[test]
-    fn upstream_unknown_field_passthrough() {
+    fn upstream_output_boundary_filters_foreign_fields() {
         let adapter = crate::proxy::protocol::get_adapter("responses");
         let mut body = json!({
             "model": "gpt-4o",
             "messages": [{"role": "user", "content": "Hi"}],
             "x_future_field": "preserve_me",
-            "some_openai_extension": {"nested": true}
+            "some_openai_extension": {"nested": true},
+            "temperature": 0.2,
+            "response_format": {"type": "json_object"},
+            "n": 2,
+            "logit_bias": {"123": 1}
         });
         adapter.transform_request(&mut body, "gpt-4o");
 
-        assert!(
-            body.get("x_future_field").is_some(),
-            "ResponsesAdapter.transform_request 应保留未知字段"
-        );
-        assert!(
-            body.get("some_openai_extension").is_some(),
-            "ResponsesAdapter.transform_request 应保留嵌套未知字段"
-        );
+        assert!(body.get("input").is_some());
+        assert!(body.get("messages").is_none());
+        assert!(body.get("text").is_some());
+        assert!(body.get("n").is_none());
+        assert!(body.get("logit_bias").is_none());
+        assert!(body.get("x_future_field").is_none());
+        assert!(body.get("some_openai_extension").is_none());
     }
 }

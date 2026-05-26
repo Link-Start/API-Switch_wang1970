@@ -19,6 +19,48 @@ use serde_json::{json, Value};
 /// Default API version for Azure OpenAI.
 const AZURE_API_VERSION: &str = "2024-02-01";
 
+fn filter_azure_chat_request_fields(obj: &mut serde_json::Map<String, Value>) {
+    const DROP_FIELDS: &[&str] = &[
+        "model",
+        "input",
+        "instructions",
+        "include",
+        "prompt",
+        "max_output_tokens",
+        "text",
+        "truncation",
+        "previous_response_id",
+        "max_tool_calls",
+    ];
+
+    for field in DROP_FIELDS {
+        obj.remove(*field);
+    }
+}
+
+fn filter_azure_chat_response_fields(obj: &mut serde_json::Map<String, Value>) {
+    const DROP_FIELDS: &[&str] = &[
+        "output",
+        "output_text",
+        "candidates",
+        "usageMetadata",
+        "content",
+        "role",
+        "stop_reason",
+        "stop_sequence",
+        "incomplete_details",
+        "instructions",
+        "parallel_tool_calls",
+        "previous_response_id",
+        "text",
+        "truncation",
+    ];
+
+    for field in DROP_FIELDS {
+        obj.remove(*field);
+    }
+}
+
 /// 是否在翻译时穿透本协议官方文档未定义的字段。
 ///
 /// Azure OpenAI 的请求/响应与 OpenAI 协议完全兼容，body 字段直通即可
@@ -70,18 +112,19 @@ impl ProtocolAdapter for AzureAdapter {
     }
 
     fn transform_request(&self, body: &mut Value, _actual_model: &str) {
-        // Azure ignores the `model` field in the request body — the deployment
-        // name is already in the URL. We still set it so logging / compatibility
-        // tools can see what was requested, but it has no effect on routing.
-        // No other transformation needed — Azure uses OpenAI format natively.
-        // Remove `model` from body to avoid Azure 400 errors for unknown model.
+        // Azure ignores the `model` field in the request body because deployment is in the URL.
+        // The outbound Azure request must stay within the Azure/OpenAI Chat schema boundary.
         if let Some(obj) = body.as_object_mut() {
-            obj.remove("model");
+            filter_azure_chat_request_fields(obj);
         }
     }
 
-    fn transform_response(&self, _body: &mut Value) {
-        // Azure response is already in OpenAI format. No transformation needed.
+    fn transform_response(&self, body: &mut Value) {
+        // Azure response is OpenAI-compatible, but outbound Azure-shaped response output
+        // must not leak obvious foreign-protocol fields.
+        if let Some(obj) = body.as_object_mut() {
+            filter_azure_chat_response_fields(obj);
+        }
     }
 
     fn needs_sse_transform(&self) -> bool {
@@ -239,5 +282,63 @@ mod tests {
         let azure = json!({});
         let openai = azure_to_openai_request(&azure, "gpt-4-deploy");
         assert_eq!(openai["model"], "gpt-4-deploy");
+    }
+
+    #[test]
+    fn azure_transform_request_drops_foreign_protocol_fields() {
+        let adapter = AzureAdapter;
+        let mut body = json!({
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hi"}],
+            "temperature": 0.2,
+            "input": "wrong",
+            "instructions": "wrong",
+            "include": ["wrong"],
+            "prompt": {"id": "pmpt_1"},
+            "max_output_tokens": 10,
+            "text": {"format": {"type": "text"}},
+            "truncation": "auto",
+            "previous_response_id": "resp_1",
+            "max_tool_calls": 2
+        });
+
+        adapter.transform_request(&mut body, "deployment-name");
+
+        assert!(body.get("model").is_none());
+        assert!(body.get("input").is_none());
+        assert!(body.get("instructions").is_none());
+        assert!(body.get("include").is_none());
+        assert!(body.get("prompt").is_none());
+        assert!(body.get("max_output_tokens").is_none());
+        assert!(body.get("text").is_none());
+        assert!(body.get("truncation").is_none());
+        assert!(body.get("previous_response_id").is_none());
+        assert!(body.get("max_tool_calls").is_none());
+
+        assert!(body.get("messages").is_some());
+        assert_eq!(body["temperature"], 0.2);
+    }
+
+    #[test]
+    fn azure_transform_response_drops_foreign_protocol_fields() {
+        let adapter = AzureAdapter;
+        let mut body = json!({
+            "id": "chatcmpl_1",
+            "object": "chat.completion",
+            "created": 123,
+            "model": "gpt-4o",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "output": [],
+            "usageMetadata": {},
+            "instructions": "wrong protocol"
+        });
+
+        adapter.transform_response(&mut body);
+
+        assert!(body.get("output").is_none());
+        assert!(body.get("usageMetadata").is_none());
+        assert!(body.get("instructions").is_none());
+        assert!(body.get("choices").is_some());
     }
 }

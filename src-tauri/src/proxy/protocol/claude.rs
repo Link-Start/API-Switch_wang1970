@@ -282,6 +282,39 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
         }
     }
 
+    const CLAUDE_REQUEST_DROP_FIELDS: &[&str] = &[
+        "frequency_penalty",
+        "presence_penalty",
+        "response_format",
+        "logit_bias",
+        "logprobs",
+        "top_logprobs",
+        "n",
+        "seed",
+        "stream_options",
+        "parallel_tool_calls",
+        "service_tier",
+        "modalities",
+        "audio",
+        "prediction",
+        "prompt_cache_key",
+        "prompt_cache_retention",
+        "safety_identifier",
+        "input",
+        "instructions",
+        "include",
+        "prompt",
+        "max_output_tokens",
+        "text",
+        "truncation",
+        "previous_response_id",
+        "max_tool_calls",
+    ];
+
+    for field in CLAUDE_REQUEST_DROP_FIELDS {
+        obj.remove(*field);
+    }
+
     // Pass through all remaining fields (pure relay)
     if let Value::Object(ref mut anthropic_obj) = anthropic {
         for (key, value) in obj.iter() {
@@ -1279,11 +1312,21 @@ pub fn openai_to_claude_response(openai: &Value) -> Value {
         obj.insert("stop_reason".to_string(), json!(stop_reason));
         obj.insert("usage".to_string(), usage_json);
 
-        // 移除 OpenAI 特有但 Claude 不应出现的字段
+        // 移除 OpenAI / Gemini / Responses 特有但 Claude 不应出现的字段
         obj.remove("object"); // "chat.completion" 不是 Claude 语义
         obj.remove("choices"); // Claude 没有 choices 结构
         obj.remove("created"); // Claude 用 id 而不是时间戳
         obj.remove("system_fingerprint"); // OpenAI 特有
+        obj.remove("candidates"); // Gemini 特有
+        obj.remove("usageMetadata"); // Gemini 特有
+        obj.remove("output"); // Responses 特有
+        obj.remove("output_text"); // Responses 特有
+        obj.remove("incomplete_details"); // Responses 特有
+        obj.remove("instructions"); // Responses 特有
+        obj.remove("parallel_tool_calls"); // OpenAI request/response 混入字段
+        obj.remove("previous_response_id"); // Responses 特有
+        obj.remove("text"); // Responses 特有
+        obj.remove("truncation"); // Responses 特有
 
         // 如果关了穿透，只保留 Claude 官方文档已知字段
         if !ENABLE_UNKNOWN_FIELD_PASSTHROUGH {
@@ -2186,15 +2229,15 @@ mod tests {
             "service_tier": "auto"
         });
         transform_request_to_anthropic(&mut body, "claude-3-sonnet-20240229");
-        // All fields should be passed through (pure relay)
-        assert!(body.get("frequency_penalty").is_some());
-        assert!(body.get("presence_penalty").is_some());
-        assert!(body.get("seed").is_some());
-        assert!(body.get("logit_bias").is_some());
-        assert!(body.get("logprobs").is_some());
-        assert!(body.get("n").is_some());
-        assert!(body.get("top_logprobs").is_some());
-        assert!(body.get("service_tier").is_some());
+        // 输出边界：不属于 Claude 协议的字段必须被剔除
+        assert!(body.get("frequency_penalty").is_none());
+        assert!(body.get("presence_penalty").is_none());
+        assert!(body.get("seed").is_none());
+        assert!(body.get("logit_bias").is_none());
+        assert!(body.get("logprobs").is_none());
+        assert!(body.get("n").is_none());
+        assert!(body.get("top_logprobs").is_none());
+        assert!(body.get("service_tier").is_none());
         // core fields must survive
         assert!(body.get("model").is_some());
         assert!(body.get("messages").is_some());
@@ -2791,6 +2834,88 @@ mod tests {
         });
         let openai = claude_to_openai_request(&claude);
         assert_eq!(openai["tool_choice"], "auto");
+    }
+
+    #[test]
+    fn openai_to_claude_request_drops_unsupported_fields() {
+        let mut body = json!({
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+            "response_format": {"type": "json_object"},
+            "logit_bias": {"123": 1},
+            "logprobs": true,
+            "top_logprobs": 2,
+            "n": 2,
+            "seed": 123,
+            "stream_options": {"include_usage": true},
+            "parallel_tool_calls": true,
+            "service_tier": "auto",
+            "prompt_cache_key": "cache",
+            "safety_identifier": "safe",
+            "input": "wrong",
+            "instructions": "wrong",
+            "include": ["wrong"],
+            "prompt": {"id": "pmpt_1"},
+            "max_output_tokens": 10,
+            "text": {"format": {"type": "text"}},
+            "truncation": "auto",
+            "previous_response_id": "resp_1",
+            "max_tool_calls": 2
+        });
+
+        transform_request_to_anthropic(&mut body, "claude-3-5-sonnet");
+
+        assert!(body.get("messages").is_some());
+        assert!(body.get("max_tokens").is_some());
+        assert!(body.get("response_format").is_none());
+        assert!(body.get("logit_bias").is_none());
+        assert!(body.get("logprobs").is_none());
+        assert!(body.get("top_logprobs").is_none());
+        assert!(body.get("n").is_none());
+        assert!(body.get("seed").is_none());
+        assert!(body.get("stream_options").is_none());
+        assert!(body.get("parallel_tool_calls").is_none());
+        assert!(body.get("service_tier").is_none());
+        assert!(body.get("prompt_cache_key").is_none());
+        assert!(body.get("safety_identifier").is_none());
+        assert!(body.get("input").is_none());
+        assert!(body.get("instructions").is_none());
+        assert!(body.get("include").is_none());
+        assert!(body.get("prompt").is_none());
+        assert!(body.get("max_output_tokens").is_none());
+        assert!(body.get("text").is_none());
+        assert!(body.get("truncation").is_none());
+        assert!(body.get("previous_response_id").is_none());
+        assert!(body.get("max_tool_calls").is_none());
+    }
+
+    #[test]
+    fn openai_to_claude_response_drops_foreign_fields() {
+        let openai = json!({
+            "id": "chatcmpl_1",
+            "object": "chat.completion",
+            "created": 123,
+            "model": "claude-3-5-sonnet",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "system_fingerprint": "fp_1",
+            "candidates": [],
+            "output": [],
+            "x_anthropic_future_field": "keep"
+        });
+
+        let claude = openai_to_claude_response(&openai);
+
+        assert_eq!(claude["type"], "message");
+        assert!(claude.get("content").is_some());
+        assert!(claude.get("object").is_none());
+        assert!(claude.get("choices").is_none());
+        assert!(claude.get("created").is_none());
+        assert!(claude.get("system_fingerprint").is_none());
+        assert!(claude.get("candidates").is_none());
+        assert!(claude.get("output").is_none());
+        assert_eq!(claude["x_anthropic_future_field"], "keep");
     }
 
     // ─── image reverse conversion tests (downstream) ─────────────────────

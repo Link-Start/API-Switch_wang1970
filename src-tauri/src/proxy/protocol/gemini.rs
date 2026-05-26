@@ -227,7 +227,6 @@ pub fn transform_request_to_gemini(body: &mut Value, actual_model: &str) {
     // Build Gemini request
     let mut gemini = json!({
         "contents": contents,
-        "model": actual_model,
     });
 
     if let Some(sys) = system_instruction {
@@ -242,7 +241,10 @@ pub fn transform_request_to_gemini(body: &mut Value, actual_model: &str) {
     if let Some(top_p) = obj.remove("top_p") {
         gen_config["topP"] = top_p;
     }
-    if let Some(max_tokens) = obj.remove("max_tokens") {
+    if let Some(max_tokens) = obj
+        .remove("max_completion_tokens")
+        .or_else(|| obj.remove("max_tokens"))
+    {
         gen_config["maxOutputTokens"] = max_tokens;
     }
     if let Some(stop) = obj.remove("stop") {
@@ -770,11 +772,24 @@ pub fn openai_to_gemini_response(openai: &Value) -> Value {
             }),
         );
 
-        // 移除 OpenAI 特有但 Gemini 不用的字段（已翻译成 candidates/usageMetadata）
-        obj.remove("object"); // "chat.completion" 不是 Gemini 语义
-        obj.remove("choices"); // 已翻译成 candidates
-        obj.remove("created"); // Gemini 不用时间戳
+        // 移除 OpenAI / Claude / Responses 特有但 Gemini 不应出现的字段
+        obj.remove("object"); // OpenAI 特有
+        obj.remove("choices"); // OpenAI 特有
+        obj.remove("created"); // OpenAI 特有
         obj.remove("usage"); // 已翻译成 usageMetadata
+        obj.remove("system_fingerprint"); // OpenAI 特有
+        obj.remove("output"); // Responses 特有
+        obj.remove("output_text"); // Responses 特有
+        obj.remove("stop_reason"); // Claude / foreign shape
+        obj.remove("stop_sequence"); // Claude 特有
+        obj.remove("incomplete_details"); // Responses 特有
+        obj.remove("instructions"); // Responses 特有
+        obj.remove("parallel_tool_calls"); // OpenAI request/response 混入字段
+        obj.remove("previous_response_id"); // Responses 特有
+        obj.remove("text"); // Responses 特有
+        obj.remove("truncation"); // Responses 特有
+        obj.remove("id"); // Gemini response shape 不使用 OpenAI id
+        obj.remove("model"); // Gemini response shape 使用 modelVersion / promptFeedback / responseId
 
         // 如果关了穿透，只保留 Gemini 官方文档已知字段
         if !ENABLE_UNKNOWN_FIELD_PASSTHROUGH {
@@ -783,12 +798,13 @@ pub fn openai_to_gemini_response(openai: &Value) -> Value {
                 "usageMetadata",
                 "modelVersion",
                 "promptFeedback",
+                "responseId",
             ]
             .into_iter()
             .collect();
             obj.retain(|k, _| gemini_known.contains(k.as_str()));
         }
-        // 否则（默认）保留 system_fingerprint、x_openai_future_field 等其他字段
+        // 否则（默认）保留显式项目扩展字段
     }
     out
 }
@@ -1183,8 +1199,105 @@ mod tests {
     }
 
     #[test]
-    fn openai_sse_chunk_done_returns_none() {
-        assert!(openai_sse_chunk_to_gemini("[DONE]").is_none());
+    fn openai_sse_chunk_model_passthrough_json_value() {
+        let chunk = json!({
+            "id": "chatcmpl-1",
+            "object": "chat.completion.chunk",
+            "model": "gpt-4o",
+            "choices": [{"delta": {"content": "hi"}, "finish_reason": null}]
+        });
+        let out = transform_gemini_sse_line(&chunk.to_string()).unwrap();
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["model"], "gpt-4o");
+    }
+
+    #[test]
+    fn openai_to_gemini_request_drops_unsupported_fields() {
+        let openai = json!({
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hi"}],
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "max_tokens": 100,
+            "response_format": {"type": "json_object"},
+            "stream_options": {"include_usage": true},
+            "logit_bias": {"123": 1},
+            "top_logprobs": 2,
+            "tool_choice": "auto",
+            "parallel_tool_calls": true,
+            "service_tier": "auto",
+            "metadata": {"k": "v"},
+            "user": "user-1",
+            "prompt_cache_key": "cache",
+            "safety_identifier": "safe",
+            "reasoning_effort": "medium",
+            "thinking": {"type": "enabled"},
+            "provider_specific": {"x": true},
+            "input": "wrong",
+            "instructions": "wrong",
+            "include": ["wrong"],
+            "prompt": {"id": "pmpt_1"},
+            "max_output_tokens": 10,
+            "text": {"format": {"type": "text"}},
+            "truncation": "auto",
+            "previous_response_id": "resp_1",
+            "max_tool_calls": 2
+        });
+
+        let mut gemini = openai.clone();
+        transform_request_to_gemini(&mut gemini, "gemini-pro");
+
+        assert!(gemini.get("contents").is_some());
+        assert!(gemini.get("generationConfig").is_some());
+        assert!(gemini.get("model").is_none());
+        assert!(gemini.get("stream_options").is_none());
+        assert!(gemini.get("logit_bias").is_none());
+        assert!(gemini.get("top_logprobs").is_none());
+        assert!(gemini.get("tool_choice").is_none());
+        assert!(gemini.get("parallel_tool_calls").is_none());
+        assert!(gemini.get("service_tier").is_none());
+        assert!(gemini.get("metadata").is_none());
+        assert!(gemini.get("user").is_none());
+        assert!(gemini.get("prompt_cache_key").is_none());
+        assert!(gemini.get("safety_identifier").is_none());
+        assert!(gemini.get("reasoning_effort").is_none());
+        assert!(gemini.get("thinking").is_none());
+        assert!(gemini.get("provider_specific").is_none());
+        assert!(gemini.get("input").is_none());
+        assert!(gemini.get("instructions").is_none());
+        assert!(gemini.get("include").is_none());
+        assert!(gemini.get("prompt").is_none());
+        assert!(gemini.get("max_output_tokens").is_none());
+        assert!(gemini.get("text").is_none());
+        assert!(gemini.get("truncation").is_none());
+        assert!(gemini.get("previous_response_id").is_none());
+        assert!(gemini.get("max_tool_calls").is_none());
+    }
+
+    #[test]
+    fn openai_to_gemini_response_drops_foreign_fields() {
+        let openai = json!({
+            "id": "chatcmpl_1",
+            "object": "chat.completion",
+            "created": 123,
+            "model": "gemini-pro",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "system_fingerprint": "fp_1",
+            "output": [],
+            "stop_reason": "end_turn"
+        });
+
+        let gemini = openai_to_gemini_response(&openai);
+
+        assert!(gemini.get("candidates").is_some());
+        assert!(gemini.get("usageMetadata").is_some());
+        assert!(gemini.get("object").is_none());
+        assert!(gemini.get("choices").is_none());
+        assert!(gemini.get("created").is_none());
+        assert!(gemini.get("system_fingerprint").is_none());
+        assert!(gemini.get("output").is_none());
+        assert!(gemini.get("stop_reason").is_none());
     }
 
     #[test]

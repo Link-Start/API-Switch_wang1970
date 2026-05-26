@@ -28,33 +28,28 @@ const GEMINI_NATIVE_EXTENSION_FIELDS: &[&str] = &[
 // ─── 白名单常量：Gemini 请求/响应/扩展字段 ───────────────────────
 
 /// Gemini（OpenAI-compatible endpoint）请求体标准字段白名单
+/// 参考：https://ai.google.dev/gemini-api/docs/openai
+/// 注意：Gemini 不支持 logit_bias, logprobs, top_logprobs, parallel_tool_calls, user, store, metadata
 const GEMINI_REQUEST_ALLOWED_FIELDS: &[&str] = &[
     "messages",
     "temperature",
     "top_p",
     "n",
     "stream",
-    "stream_options",
     "stop",
     "max_tokens",
-    "max_completion_tokens",
     "presence_penalty",
     "frequency_penalty",
-    "logit_bias",
-    "logprobs",
-    "top_logprobs",
-    "user",
     "tools",
     "tool_choice",
-    "parallel_tool_calls",
     "response_format",
     "seed",
     "service_tier",
-    "metadata",
-    "store",
 ];
 
 /// Gemini（OpenAI-compatible endpoint）响应体标准字段白名单
+/// 参考：https://ai.google.dev/gemini-api/docs/openai
+/// 注意：Gemini 响应不包含 system_fingerprint, metadata
 const GEMINI_RESPONSE_ALLOWED_FIELDS: &[&str] = &[
     "id",
     "object",
@@ -62,9 +57,7 @@ const GEMINI_RESPONSE_ALLOWED_FIELDS: &[&str] = &[
     "model",
     "choices",
     "usage",
-    "system_fingerprint",
     "service_tier",
-    "metadata",
 ];
 
 /// Gemini 扩展字段白名单

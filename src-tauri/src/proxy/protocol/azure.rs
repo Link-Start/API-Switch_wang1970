@@ -22,16 +22,16 @@ const AZURE_API_VERSION: &str = "2024-02-01";
 // ─── 白名单常量：Azure 请求/响应/扩展字段 ───────────────────────
 
 /// Azure Chat Completions 请求体标准字段白名单（不含 model，Azure 通过 URL 传递）
+/// 参考：https://learn.microsoft.com/en-us/azure/ai-services/openai/reference#chat-completions
+/// 注意：Azure 不支持 prompt_cache_key, prompt_cache_retention, safety_identifier
 const AZURE_REQUEST_ALLOWED_FIELDS: &[&str] = &[
     "messages",
     "temperature",
     "top_p",
     "n",
     "stream",
-    "stream_options",
     "stop",
     "max_tokens",
-    "max_completion_tokens",
     "presence_penalty",
     "frequency_penalty",
     "logit_bias",
@@ -40,15 +40,14 @@ const AZURE_REQUEST_ALLOWED_FIELDS: &[&str] = &[
     "user",
     "tools",
     "tool_choice",
-    "parallel_tool_calls",
     "response_format",
     "seed",
     "service_tier",
-    "metadata",
     "store",
 ];
 
 /// Azure Chat Completions 响应体标准字段白名单
+/// 参考：https://learn.microsoft.com/en-us/azure/ai-services/openai/reference#chat-completions
 const AZURE_RESPONSE_ALLOWED_FIELDS: &[&str] = &[
     "id",
     "object",
@@ -58,7 +57,6 @@ const AZURE_RESPONSE_ALLOWED_FIELDS: &[&str] = &[
     "usage",
     "system_fingerprint",
     "service_tier",
-    "metadata",
 ];
 
 /// Azure 扩展字段白名单（reasoning/thinking 等兼容扩展）

@@ -1288,9 +1288,64 @@ pub fn transform_openai_sse_to_responses_stream(
         })
 }
 
+/// Responses 请求方向标准字段白名单（基于官方文档）
+/// 参考：https://developers.openai.com/api/reference/resources/responses/methods/create
+/// 注意：model, input, instructions, tools, max_output_tokens, reasoning, response_format
+/// 已在 transform_request_to_responses 中手动处理
+const RESPONSES_REQUEST_STANDARD_FIELDS: &[&str] = &[
+    "background",
+    "conversation",
+    "include",
+    "context_management",
+    "max_tool_calls",
+    "metadata",
+    "parallel_tool_calls",
+    "previous_response_id",
+    "prompt",
+    "prompt_cache_key",
+    "prompt_cache_retention",
+    "safety_identifier",
+    "service_tier",
+    "store",
+    "stream",
+    "temperature",
+    "text",
+    "tool_choice",
+    "top_logprobs",
+    "top_p",
+    "truncation",
+    "user",
+];
+
 /// Responses 请求方向扩展字段白名单
 const RESPONSES_REQUEST_EXTENSION_FIELDS: &[&str] = &[
     "x_responses_future_field",
+];
+
+/// Responses 响应方向标准字段白名单（基于官方文档）
+/// 参考：https://developers.openai.com/api/reference/resources/responses/
+/// 注意：id, object, created_at, model, output, usage, status, error, 
+/// incomplete_details, metadata 已在 responses_completed_response 中手动构造
+const RESPONSES_RESPONSE_STANDARD_FIELDS: &[&str] = &[
+    "instructions",
+    "parallel_tool_calls",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "top_p",
+    "background",
+    "conversation",
+    "max_output_tokens",
+    "max_tool_calls",
+    "previous_response_id",
+    "prompt",
+    "prompt_cache_key",
+    "prompt_cache_retention",
+    "safety_identifier",
+    "service_tier",
+    "store",
+    "truncation",
+    "user",
 ];
 
 /// Responses 响应方向扩展字段白名单
@@ -1607,52 +1662,12 @@ fn transform_request_to_responses(body: &mut Value, actual_model: &str) {
         responses.insert("reasoning".to_string(), reasoning);
     }
 
-    // 4. 其他已知字段直接拷贝（Responses API 也支持）
-    for field in [
-        "stream",
-        "temperature",
-        "top_p",
-        "tool_choice",
-        "parallel_tool_calls",
-        "service_tier",
-        "user",
-        "metadata",
-        "store",
-        "include",
-        "max_tool_calls",
-        "previous_response_id",
-        "truncation",
-        "safety_identifier",
-        "prompt",
-        "prompt_cache_key",
-        "prompt_cache_retention",
-    ] {
-        if let Some(val) = obj.remove(field) {
-            responses.insert(field.to_string(), val);
+    // 4. 其他已知字段直接拷贝（Responses API 标准字段）
+    // 使用白名单方式，只拷贝 Responses 标准字段
+    for field in RESPONSES_REQUEST_STANDARD_FIELDS {
+        if let Some(val) = obj.remove(*field) {
+            responses.insert((*field).to_string(), val);
         }
-    }
-
-    const RESPONSES_REQUEST_DROP_FIELDS: &[&str] = &[
-        "messages",
-        "max_tokens",
-        "max_completion_tokens",
-        "response_format",
-        "reasoning_effort",
-        "n",
-        "logit_bias",
-        "logprobs",
-        "top_logprobs",
-        "presence_penalty",
-        "frequency_penalty",
-        "seed",
-        "modalities",
-        "audio",
-        "prediction",
-        "stream_options",
-    ];
-
-    for field in RESPONSES_REQUEST_DROP_FIELDS {
-        obj.remove(*field);
     }
 
     // 5. 白名单穿透：只保留显式声明的 Responses 扩展字段
@@ -2222,7 +2237,8 @@ mod tests {
         assert!(body.get("n").is_none());
         assert!(body.get("logit_bias").is_none());
         assert!(body.get("logprobs").is_none());
-        assert!(body.get("top_logprobs").is_none());
+        // top_logprobs 是 Responses API 支持的标准字段，应保留
+        assert!(body.get("top_logprobs").is_some());
         assert!(body.get("presence_penalty").is_none());
         assert!(body.get("frequency_penalty").is_none());
         assert!(body.get("seed").is_none());

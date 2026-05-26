@@ -286,42 +286,24 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
     // 只允许显式声明的扩展字段穿透，其余一律丢弃
     const CLAUDE_EXTENSION_FIELDS: &[&str] = &["x_anthropic_future_field"];
 
-    // 丢弃非 Claude 标准字段（黑名单兜底）
-    const CLAUDE_REQUEST_DROP_FIELDS: &[&str] = &[
-        "frequency_penalty",
-        "presence_penalty",
-        "response_format",
-        "logit_bias",
-        "logprobs",
-        "top_logprobs",
-        "n",
-        "seed",
-        "stream_options",
-        "parallel_tool_calls",
-        "service_tier",
-        "modalities",
-        "audio",
-        "prediction",
-        "prompt_cache_key",
-        "prompt_cache_retention",
-        "safety_identifier",
-        "input",
-        "instructions",
-        "include",
-        "prompt",
-        "max_output_tokens",
-        "text",
-        "truncation",
-        "previous_response_id",
-        "max_tool_calls",
+    // Claude 标准字段白名单（基于官方文档）
+    // 参考：https://platform.claude.com/docs/en/api/messages
+    // 注意：model, messages, max_tokens, system, tools, stream, temperature, 
+    // top_p, top_k, stop_sequences, tool_choice, thinking 已在前面手动处理
+    const CLAUDE_STANDARD_FIELDS: &[&str] = &[
+        "metadata",
+        "betas",
     ];
 
-    for field in CLAUDE_REQUEST_DROP_FIELDS {
-        obj.remove(*field);
-    }
-
-    // 只穿透白名单中的扩展字段（替换原来的全部穿透）
+    // 将 obj 中剩余的 Claude 标准字段复制到 anthropic
     if let Value::Object(ref mut anthropic_obj) = anthropic {
+        for key in CLAUDE_STANDARD_FIELDS {
+            if let Some(value) = obj.remove(*key) {
+                anthropic_obj.insert((*key).to_string(), value);
+            }
+        }
+
+        // 只穿透白名单中的扩展字段
         for key in CLAUDE_EXTENSION_FIELDS {
             if let Some(value) = obj.get(*key) {
                 anthropic_obj.insert((*key).to_string(), value.clone());

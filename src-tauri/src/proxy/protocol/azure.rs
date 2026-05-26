@@ -19,59 +19,98 @@ use serde_json::{json, Value};
 /// Default API version for Azure OpenAI.
 const AZURE_API_VERSION: &str = "2024-02-01";
 
-fn filter_azure_chat_request_fields(obj: &mut serde_json::Map<String, Value>) {
-    const DROP_FIELDS: &[&str] = &[
-        "model",
-        "input",
-        "instructions",
-        "include",
-        "prompt",
-        "max_output_tokens",
-        "text",
-        "truncation",
-        "previous_response_id",
-        "max_tool_calls",
-    ];
+// ─── 白名单常量：Azure 请求/响应/扩展字段 ───────────────────────
 
-    for field in DROP_FIELDS {
-        obj.remove(*field);
+/// Azure Chat Completions 请求体标准字段白名单（不含 model，Azure 通过 URL 传递）
+const AZURE_REQUEST_ALLOWED_FIELDS: &[&str] = &[
+    "messages",
+    "temperature",
+    "top_p",
+    "n",
+    "stream",
+    "stream_options",
+    "stop",
+    "max_tokens",
+    "max_completion_tokens",
+    "presence_penalty",
+    "frequency_penalty",
+    "logit_bias",
+    "logprobs",
+    "top_logprobs",
+    "user",
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+    "response_format",
+    "seed",
+    "service_tier",
+    "metadata",
+    "store",
+];
+
+/// Azure Chat Completions 响应体标准字段白名单
+const AZURE_RESPONSE_ALLOWED_FIELDS: &[&str] = &[
+    "id",
+    "object",
+    "created",
+    "model",
+    "choices",
+    "usage",
+    "system_fingerprint",
+    "service_tier",
+    "metadata",
+];
+
+/// Azure 扩展字段白名单（reasoning/thinking 等兼容扩展）
+const AZURE_EXTENSION_FIELDS: &[&str] = &[
+    "reasoning_effort",
+    "thinking",
+    "reasoning_content",
+    "reasoning_text",
+    "reasoning_details",
+    "provider_specific",
+    "extra_body",
+];
+
+// ─── 白名单构建器函数 ───────────────────────────────────────────
+
+/// 从中间协议构建 Azure 请求输出对象（只保留白名单字段，不含 model）
+fn build_azure_request_output(src: &serde_json::Map<String, Value>) -> Value {
+    let mut out = serde_json::Map::new();
+
+    for key in AZURE_REQUEST_ALLOWED_FIELDS {
+        if let Some(value) = src.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
     }
+
+    for key in AZURE_EXTENSION_FIELDS {
+        if let Some(value) = src.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
+    }
+
+    Value::Object(out)
 }
 
-fn filter_azure_chat_response_fields(obj: &mut serde_json::Map<String, Value>) {
-    const DROP_FIELDS: &[&str] = &[
-        "output",
-        "output_text",
-        "candidates",
-        "usageMetadata",
-        "content",
-        "role",
-        "stop_reason",
-        "stop_sequence",
-        "incomplete_details",
-        "instructions",
-        "parallel_tool_calls",
-        "previous_response_id",
-        "text",
-        "truncation",
-    ];
+/// 从中间协议构建 Azure 响应输出对象（只保留白名单字段）
+fn build_azure_response_output(src: &serde_json::Map<String, Value>) -> Value {
+    let mut out = serde_json::Map::new();
 
-    for field in DROP_FIELDS {
-        obj.remove(*field);
+    for key in AZURE_RESPONSE_ALLOWED_FIELDS {
+        if let Some(value) = src.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
     }
-}
 
-/// 是否在翻译时穿透本协议官方文档未定义的字段。
-///
-/// Azure OpenAI 的请求/响应与 OpenAI 协议完全兼容，body 字段直通即可
-/// （见 `azure_to_openai_request` / `AzureAdapter::transform_request`），
-/// 因此本协议**没有独立的 passthrough 代码分支**，该常量仅作范式一致性标记：
-/// 所有协议模块顶部都有这个常量，便于未来按需扩展时一处切换。
-///
-/// 如果未来 Azure 出现需要按字段穿透的场景，可在翻译函数里加上
-/// `if ENABLE_UNKNOWN_FIELD_PASSTHROUGH { ... }` 分支。
-#[allow(dead_code)]
-const ENABLE_UNKNOWN_FIELD_PASSTHROUGH: bool = true;
+    for key in AZURE_EXTENSION_FIELDS {
+        if let Some(value) = src.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
+    }
+
+    Value::Object(out)
+}
 
 pub struct AzureAdapter;
 
@@ -112,19 +151,19 @@ impl ProtocolAdapter for AzureAdapter {
     }
 
     fn transform_request(&self, body: &mut Value, _actual_model: &str) {
-        // Azure ignores the `model` field in the request body because deployment is in the URL.
-        // The outbound Azure request must stay within the Azure/OpenAI Chat schema boundary.
-        if let Some(obj) = body.as_object_mut() {
-            filter_azure_chat_request_fields(obj);
-        }
+        // 白名单构建：只保留 Azure 标准字段 + 扩展字段（不含 model，Azure 通过 URL 传递）
+        let Some(src) = body.as_object() else {
+            return;
+        };
+        *body = build_azure_request_output(src);
     }
 
     fn transform_response(&self, body: &mut Value) {
-        // Azure response is OpenAI-compatible, but outbound Azure-shaped response output
-        // must not leak obvious foreign-protocol fields.
-        if let Some(obj) = body.as_object_mut() {
-            filter_azure_chat_response_fields(obj);
-        }
+        // 白名单构建：只保留 Azure 标准字段 + 扩展字段
+        let Some(src) = body.as_object() else {
+            return;
+        };
+        *body = build_azure_response_output(src);
     }
 
     fn needs_sse_transform(&self) -> bool {

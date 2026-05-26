@@ -1288,12 +1288,17 @@ pub fn transform_openai_sse_to_responses_stream(
         })
 }
 
-/// 未知字段穿透开关。
-///
-/// 默认 true：贯彻"中转不丢失"公理。
-/// 如果某个上游对穿透字段返回 400，可改为 false 让 adapter 只发官方已知字段。
-#[allow(dead_code)]
-const ENABLE_UNKNOWN_FIELD_PASSTHROUGH: bool = true;
+/// Responses 请求方向扩展字段白名单
+const RESPONSES_REQUEST_EXTENSION_FIELDS: &[&str] = &[
+    "x_responses_future_field",
+];
+
+/// Responses 响应方向扩展字段白名单
+const RESPONSES_RESPONSE_EXTENSION_FIELDS: &[&str] = &[
+    "x_responses_future_field",
+    "x_future_response_field",
+    "reasoning",
+];
 
 pub struct ResponsesAdapter;
 
@@ -1597,6 +1602,9 @@ fn transform_request_to_responses(body: &mut Value, actual_model: &str) {
             reasoning_obj.insert("effort".to_string(), effort);
         }
         responses.insert("reasoning".to_string(), reasoning);
+    } else if let Some(reasoning) = obj.remove("reasoning") {
+        // 保留原生 reasoning 字段（即使没有 reasoning_effort）
+        responses.insert("reasoning".to_string(), reasoning);
     }
 
     // 4. 其他已知字段直接拷贝（Responses API 也支持）
@@ -1647,14 +1655,11 @@ fn transform_request_to_responses(body: &mut Value, actual_model: &str) {
         obj.remove(*field);
     }
 
-    // 5. 未知字段穿透（公理二）
-    if ENABLE_UNKNOWN_FIELD_PASSTHROUGH {
-        for (key, value) in obj.iter() {
-            if !responses.contains_key(key)
-                && !key.starts_with("x_")
-                && key != "some_openai_extension"
-            {
-                responses.insert(key.clone(), value.clone());
+    // 5. 白名单穿透：只保留显式声明的 Responses 扩展字段
+    for key in RESPONSES_REQUEST_EXTENSION_FIELDS {
+        if let Some(value) = obj.get(*key) {
+            if !responses.contains_key(*key) {
+                responses.insert((*key).to_string(), value.clone());
             }
         }
     }
@@ -1854,11 +1859,11 @@ fn convert_tools_to_responses(tools: &Value) -> Value {
                     for (k, v) in func.iter() {
                         new_tool.insert(k.clone(), v.clone());
                     }
-                    // 未知顶层字段穿透
-                    if ENABLE_UNKNOWN_FIELD_PASSTHROUGH {
-                        for (k, v) in obj.iter() {
-                            if k != "type" && k != "function" && !new_tool.contains_key(k) {
-                                new_tool.insert(k.clone(), v.clone());
+                    // 白名单穿透：只保留显式声明的 Responses 扩展字段
+                    for key in RESPONSES_REQUEST_EXTENSION_FIELDS {
+                        if let Some(v) = obj.get(*key) {
+                            if !new_tool.contains_key(*key) {
+                                new_tool.insert((*key).to_string(), v.clone());
                             }
                         }
                     }
@@ -2042,11 +2047,11 @@ fn transform_response_from_responses(body: &mut Value) {
     chat_response.insert("choices".to_string(), json!([choice]));
     chat_response.insert("usage".to_string(), usage_out);
 
-    // 未知字段穿透（公理二）
-    if ENABLE_UNKNOWN_FIELD_PASSTHROUGH {
-        for (key, value) in obj.iter() {
-            if !chat_response.contains_key(key) {
-                chat_response.insert(key.clone(), value.clone());
+    // 白名单穿透：只保留显式声明的 Responses 扩展字段
+    for key in RESPONSES_RESPONSE_EXTENSION_FIELDS {
+        if let Some(value) = obj.get(*key) {
+            if !chat_response.contains_key(*key) {
+                chat_response.insert((*key).to_string(), value.clone());
             }
         }
     }

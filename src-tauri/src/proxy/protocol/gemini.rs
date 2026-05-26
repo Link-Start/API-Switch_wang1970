@@ -18,15 +18,109 @@ use super::{join_url, ProtocolAdapter};
 /// - https://ai.google.dev/api/models
 use serde_json::{json, Value};
 
-/// 穿透开关：true = 未知字段保留穿透，false = 只保留已知白名单字段
-///
-/// 默认 true，贯彻「中转翻译器不丢信息」的公理。
-/// 如果发现某个上游/客户端对未知字段返回 400，可临时改为 false 发布紧急版本。
-///
-/// 注：GeminiAdapter 通过 Google OpenAI-compatible endpoint 直通，body 不翻译，
-/// 此常量为阶段 3 预留，阶段 2 暂未使用。
-#[allow(dead_code)]
-const ENABLE_UNKNOWN_FIELD_PASSTHROUGH: bool = true;
+/// Gemini 原生格式扩展字段白名单（用于 native Gemini 转换函数的穿透）
+const GEMINI_NATIVE_EXTENSION_FIELDS: &[&str] = &[
+    "x_future_gemini_field",
+    "safetySettings",
+    "cachedContent",
+];
+
+// ─── 白名单常量：Gemini 请求/响应/扩展字段 ───────────────────────
+
+/// Gemini（OpenAI-compatible endpoint）请求体标准字段白名单
+const GEMINI_REQUEST_ALLOWED_FIELDS: &[&str] = &[
+    "messages",
+    "temperature",
+    "top_p",
+    "n",
+    "stream",
+    "stream_options",
+    "stop",
+    "max_tokens",
+    "max_completion_tokens",
+    "presence_penalty",
+    "frequency_penalty",
+    "logit_bias",
+    "logprobs",
+    "top_logprobs",
+    "user",
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+    "response_format",
+    "seed",
+    "service_tier",
+    "metadata",
+    "store",
+];
+
+/// Gemini（OpenAI-compatible endpoint）响应体标准字段白名单
+const GEMINI_RESPONSE_ALLOWED_FIELDS: &[&str] = &[
+    "id",
+    "object",
+    "created",
+    "model",
+    "choices",
+    "usage",
+    "system_fingerprint",
+    "service_tier",
+    "metadata",
+];
+
+/// Gemini 扩展字段白名单
+const GEMINI_EXTENSION_FIELDS: &[&str] = &[
+    "reasoning_effort",
+    "thinking",
+    "reasoning_content",
+    "reasoning_text",
+    "reasoning_details",
+    "provider_specific",
+    "extra_body",
+];
+
+// ─── 白名单构建器函数 ───────────────────────────────────────────
+
+/// 从中间协议构建 Gemini 请求输出对象（只保留白名单字段）
+fn build_gemini_request_output(
+    src: &serde_json::Map<String, Value>,
+    actual_model: &str,
+) -> Value {
+    let mut out = serde_json::Map::new();
+    out.insert("model".to_string(), Value::String(actual_model.to_string()));
+
+    for key in GEMINI_REQUEST_ALLOWED_FIELDS {
+        if let Some(value) = src.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
+    }
+
+    for key in GEMINI_EXTENSION_FIELDS {
+        if let Some(value) = src.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
+    }
+
+    Value::Object(out)
+}
+
+/// 从中间协议构建 Gemini 响应输出对象（只保留白名单字段）
+fn build_gemini_response_output(src: &serde_json::Map<String, Value>) -> Value {
+    let mut out = serde_json::Map::new();
+
+    for key in GEMINI_RESPONSE_ALLOWED_FIELDS {
+        if let Some(value) = src.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
+    }
+
+    for key in GEMINI_EXTENSION_FIELDS {
+        if let Some(value) = src.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
+    }
+
+    Value::Object(out)
+}
 
 pub struct GeminiAdapter;
 
@@ -62,14 +156,19 @@ impl ProtocolAdapter for GeminiAdapter {
     }
 
     fn transform_request(&self, body: &mut Value, actual_model: &str) {
-        if let Some(obj) = body.as_object_mut() {
-            obj.insert("model".to_string(), Value::String(actual_model.to_string()));
-        }
+        // 白名单构建：只保留 Gemini 标准字段 + 扩展字段
+        let Some(src) = body.as_object() else {
+            return;
+        };
+        *body = build_gemini_request_output(src, actual_model);
     }
 
-    fn transform_response(&self, _body: &mut Value) {
-        // Google's OpenAI-compatible endpoint returns standard OpenAI format.
-        // No transformation needed.
+    fn transform_response(&self, body: &mut Value) {
+        // 白名单构建：只保留 Gemini 标准字段 + 扩展字段
+        let Some(src) = body.as_object() else {
+            return;
+        };
+        *body = build_gemini_response_output(src);
     }
 
     fn needs_sse_transform(&self) -> bool {
@@ -682,13 +781,12 @@ pub fn gemini_to_openai_request(gemini: &Value) -> Value {
         }
     }
 
-    // 公理二：未知字段穿透。保留 Gemini 原始请求里的 safetySettings、cachedContent、
-    // x_future_gemini_field 等官方/未来/自定义字段，避免"中转翻译器"丢信息。
-    if ENABLE_UNKNOWN_FIELD_PASSTHROUGH {
-        if let (Some(src), Some(dst)) = (gemini.as_object(), openai.as_object_mut()) {
-            for (key, value) in src {
-                if !dst.contains_key(key) {
-                    dst.insert(key.clone(), value.clone());
+    // 白名单穿透：只保留显式声明的 Gemini 扩展字段
+    if let (Some(src), Some(dst)) = (gemini.as_object(), openai.as_object_mut()) {
+        for key in GEMINI_NATIVE_EXTENSION_FIELDS {
+            if let Some(value) = src.get(*key) {
+                if !dst.contains_key(*key) {
+                    dst.insert((*key).to_string(), value.clone());
                 }
             }
         }
@@ -772,39 +870,18 @@ pub fn openai_to_gemini_response(openai: &Value) -> Value {
             }),
         );
 
-        // 移除 OpenAI / Claude / Responses 特有但 Gemini 不应出现的字段
-        obj.remove("object"); // OpenAI 特有
-        obj.remove("choices"); // OpenAI 特有
-        obj.remove("created"); // OpenAI 特有
-        obj.remove("usage"); // 已翻译成 usageMetadata
-        obj.remove("system_fingerprint"); // OpenAI 特有
-        obj.remove("output"); // Responses 特有
-        obj.remove("output_text"); // Responses 特有
-        obj.remove("stop_reason"); // Claude / foreign shape
-        obj.remove("stop_sequence"); // Claude 特有
-        obj.remove("incomplete_details"); // Responses 特有
-        obj.remove("instructions"); // Responses 特有
-        obj.remove("parallel_tool_calls"); // OpenAI request/response 混入字段
-        obj.remove("previous_response_id"); // Responses 特有
-        obj.remove("text"); // Responses 特有
-        obj.remove("truncation"); // Responses 特有
-        obj.remove("id"); // Gemini response shape 不使用 OpenAI id
-        obj.remove("model"); // Gemini response shape 使用 modelVersion / promptFeedback / responseId
-
-        // 如果关了穿透，只保留 Gemini 官方文档已知字段
-        if !ENABLE_UNKNOWN_FIELD_PASSTHROUGH {
-            let gemini_known: std::collections::HashSet<&str> = [
-                "candidates",
-                "usageMetadata",
-                "modelVersion",
-                "promptFeedback",
-                "responseId",
-            ]
-            .into_iter()
-            .collect();
-            obj.retain(|k, _| gemini_known.contains(k.as_str()));
-        }
-        // 否则（默认）保留显式项目扩展字段
+        // 白名单构建：只保留 Gemini 响应标准字段 + 扩展字段
+        let gemini_allowed: std::collections::HashSet<&str> = [
+            "candidates",
+            "usageMetadata",
+            "modelVersion",
+            "promptFeedback",
+            "responseId",
+        ]
+        .into_iter()
+        .chain(GEMINI_NATIVE_EXTENSION_FIELDS.iter().copied())
+        .collect();
+        obj.retain(|k, _| gemini_allowed.contains(k.as_str()));
     }
     out
 }

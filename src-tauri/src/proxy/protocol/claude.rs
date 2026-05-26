@@ -282,6 +282,11 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
         }
     }
 
+    // ─── 白名单：Claude 扩展字段 ───────────────────────────────
+    // 只允许显式声明的扩展字段穿透，其余一律丢弃
+    const CLAUDE_EXTENSION_FIELDS: &[&str] = &["x_anthropic_future_field"];
+
+    // 丢弃非 Claude 标准字段（黑名单兜底）
     const CLAUDE_REQUEST_DROP_FIELDS: &[&str] = &[
         "frequency_penalty",
         "presence_penalty",
@@ -315,11 +320,11 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
         obj.remove(*field);
     }
 
-    // Pass through all remaining fields (pure relay)
+    // 只穿透白名单中的扩展字段（替换原来的全部穿透）
     if let Value::Object(ref mut anthropic_obj) = anthropic {
-        for (key, value) in obj.iter() {
-            if !anthropic_obj.contains_key(key) {
-                anthropic_obj.insert(key.clone(), value.clone());
+        for key in CLAUDE_EXTENSION_FIELDS {
+            if let Some(value) = obj.get(*key) {
+                anthropic_obj.insert((*key).to_string(), value.clone());
             }
         }
     }

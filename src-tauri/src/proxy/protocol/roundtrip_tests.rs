@@ -211,14 +211,14 @@ mod claude_roundtrip {
         let mut back_to_claude = openai_intermediate.clone();
         adapter.transform_request(&mut back_to_claude, TEST_MODEL);
 
-        // 还原后仍然在
-        assert_eq!(
-            back_to_claude["x_api_switch_tracking_id"], "abc-123",
-            "ClaudeAdapter.transform_request 丢失了自定义字段"
+        // 白名单模式：只保留 Claude 扩展字段（x_anthropic_future_field），其他自定义字段被过滤
+        assert!(
+            back_to_claude.get("x_api_switch_tracking_id").is_none(),
+            "ClaudeAdapter 白名单模式应过滤非白名单字段 x_api_switch_tracking_id"
         );
-        assert_eq!(
-            back_to_claude["x_future_anthropic_field"]["nested"], "value",
-            "ClaudeAdapter.transform_request 丢失了嵌套自定义字段"
+        assert!(
+            back_to_claude.get("x_future_anthropic_field").is_none(),
+            "ClaudeAdapter 白名单模式应过滤非白名单字段 x_future_anthropic_field"
         );
     }
 
@@ -548,7 +548,11 @@ mod gemini_roundtrip {
 
         assert!(gemini.get("candidates").is_some());
         assert!(gemini.get("usageMetadata").is_some());
-        assert!(gemini.get("x_openai_future_field").is_some());
+        // 白名单模式：x_openai_future_field 不在 Gemini 扩展字段白名单中，应被过滤
+        assert!(
+            gemini.get("x_openai_future_field").is_none(),
+            "Gemini 白名单模式应过滤非白名单字段 x_openai_future_field"
+        );
         assert!(gemini.get("system_fingerprint").is_none());
     }
 }
@@ -641,9 +645,10 @@ mod openai_roundtrip {
         assert_eq!(body["model"], "gpt-4o");
         assert_eq!(body["messages"], original_messages);
         assert_eq!(body["temperature"], 0.5);
-        assert_eq!(
-            body["x_custom"], original_custom,
-            "OpenAI adapter 不应丢弃自定义字段"
+        // 白名单模式：x_custom 不在 OpenAI 扩展字段白名单中，应被过滤
+        assert!(
+            body.get("x_custom").is_none(),
+            "OpenAI 白名单模式应过滤非白名单字段 x_custom"
         );
     }
 
@@ -660,9 +665,10 @@ mod openai_roundtrip {
         adapter.transform_request(&mut body, "deepseek-chat");
 
         assert_eq!(body["model"], "deepseek-chat");
-        assert_eq!(
-            body["x_deepseek_specific"], "value",
-            "Custom adapter 应保留 OpenAI-compatible 扩展字段"
+        // 白名单模式：x_deepseek_specific 不在 OpenAI 扩展字段白名单中，应被过滤
+        assert!(
+            body.get("x_deepseek_specific").is_none(),
+            "Custom adapter 白名单模式应过滤非白名单字段 x_deepseek_specific"
         );
     }
 
@@ -691,7 +697,11 @@ mod openai_roundtrip {
         assert!(body.get("text").is_none());
 
         assert_eq!(body["messages"][0]["role"], "user");
-        assert_eq!(body["x_deepseek_specific"], "value");
+        // 白名单模式：x_deepseek_specific 不在 OpenAI 扩展字段白名单中，应被过滤
+        assert!(
+            body.get("x_deepseek_specific").is_none(),
+            "Custom adapter 白名单模式应过滤非白名单字段 x_deepseek_specific"
+        );
         assert_eq!(body["reasoning_effort"], "high");
     }
 

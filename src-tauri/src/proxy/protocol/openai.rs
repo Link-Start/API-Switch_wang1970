@@ -23,45 +23,104 @@ fn has_custom_api_path(base_url: &str) -> bool {
     false
 }
 
-fn filter_openai_chat_request_fields(obj: &mut serde_json::Map<String, Value>) {
-    const DROP_FIELDS: &[&str] = &[
-        "input",
-        "instructions",
-        "include",
-        "prompt",
-        "max_output_tokens",
-        "text",
-        "truncation",
-        "previous_response_id",
-        "max_tool_calls",
-    ];
+// ─── 白名单常量：OpenAI 请求/响应/扩展字段 ───────────────────────
 
-    for field in DROP_FIELDS {
-        obj.remove(*field);
+/// OpenAI Chat Completions 请求体标准字段白名单
+const OPENAI_REQUEST_ALLOWED_FIELDS: &[&str] = &[
+    "messages",
+    "temperature",
+    "top_p",
+    "n",
+    "stream",
+    "stream_options",
+    "stop",
+    "max_tokens",
+    "max_completion_tokens",
+    "presence_penalty",
+    "frequency_penalty",
+    "logit_bias",
+    "logprobs",
+    "top_logprobs",
+    "user",
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+    "response_format",
+    "seed",
+    "service_tier",
+    "metadata",
+    "store",
+    "prompt_cache_key",
+    "prompt_cache_retention",
+    "safety_identifier",
+];
+
+/// OpenAI Chat Completions 响应体标准字段白名单
+const OPENAI_RESPONSE_ALLOWED_FIELDS: &[&str] = &[
+    "id",
+    "object",
+    "created",
+    "model",
+    "choices",
+    "usage",
+    "system_fingerprint",
+    "service_tier",
+    "metadata",
+];
+
+/// OpenAI 扩展字段白名单（reasoning/thinking 等兼容扩展）
+const OPENAI_EXTENSION_FIELDS: &[&str] = &[
+    "reasoning_effort",
+    "thinking",
+    "reasoning_content",
+    "reasoning_text",
+    "reasoning_details",
+    "provider_specific",
+    "extra_body",
+];
+
+// ─── 白名单构建器函数 ───────────────────────────────────────────
+
+/// 从中间协议构建 OpenAI 请求输出对象（只保留白名单字段）
+fn build_openai_request_output(
+    src: &serde_json::Map<String, Value>,
+    actual_model: &str,
+) -> Value {
+    let mut out = serde_json::Map::new();
+    out.insert("model".to_string(), Value::String(actual_model.to_string()));
+
+    for key in OPENAI_REQUEST_ALLOWED_FIELDS {
+        if let Some(value) = src.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
     }
+
+    for key in OPENAI_EXTENSION_FIELDS {
+        if let Some(value) = src.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
+    }
+
+    Value::Object(out)
 }
 
-fn filter_openai_chat_response_fields(obj: &mut serde_json::Map<String, Value>) {
-    const DROP_FIELDS: &[&str] = &[
-        "output",
-        "output_text",
-        "candidates",
-        "usageMetadata",
-        "content",
-        "role",
-        "stop_reason",
-        "stop_sequence",
-        "incomplete_details",
-        "instructions",
-        "parallel_tool_calls",
-        "previous_response_id",
-        "text",
-        "truncation",
-    ];
+/// 从中间协议构建 OpenAI 响应输出对象（只保留白名单字段）
+fn build_openai_response_output(src: &serde_json::Map<String, Value>) -> Value {
+    let mut out = serde_json::Map::new();
 
-    for field in DROP_FIELDS {
-        obj.remove(*field);
+    for key in OPENAI_RESPONSE_ALLOWED_FIELDS {
+        if let Some(value) = src.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
     }
+
+    for key in OPENAI_EXTENSION_FIELDS {
+        if let Some(value) = src.get(*key) {
+            out.insert((*key).to_string(), value.clone());
+        }
+    }
+
+    Value::Object(out)
 }
 
 impl ProtocolAdapter for OpenAiAdapter {
@@ -100,20 +159,19 @@ impl ProtocolAdapter for OpenAiAdapter {
     }
 
     fn transform_request(&self, body: &mut Value, actual_model: &str) {
-        // OpenAI-compatible reasoning/THINK extensions are passthrough only: preserve, never synthesize.
-        // Cross-protocol residual fields from Responses/Gemini/Claude intermediates are removed here.
-        if let Some(obj) = body.as_object_mut() {
-            filter_openai_chat_request_fields(obj);
-            obj.insert("model".to_string(), Value::String(actual_model.to_string()));
-        }
+        // 白名单构建：只保留 OpenAI 标准字段 + 扩展字段，其余丢弃
+        let Some(src) = body.as_object() else {
+            return;
+        };
+        *body = build_openai_request_output(src, actual_model);
     }
 
     fn transform_response(&self, body: &mut Value) {
-        // Passthrough preserves non-standard OpenAI-compatible reasoning fields,
-        // while dropping obvious foreign-protocol response fields.
-        if let Some(obj) = body.as_object_mut() {
-            filter_openai_chat_response_fields(obj);
-        }
+        // 白名单构建：只保留 OpenAI 标准字段 + 扩展字段，其余丢弃
+        let Some(src) = body.as_object() else {
+            return;
+        };
+        *body = build_openai_response_output(src);
     }
 
     fn needs_sse_transform(&self) -> bool {

@@ -28,14 +28,17 @@ fn has_custom_api_path(base_url: &str) -> bool {
 /// OpenAI Chat Completions 请求体标准字段白名单（基于官方文档）
 /// 参考：https://platform.openai.com/docs/api-reference/chat/create
 /// 注意：model 字段由 build_openai_request_output 单独处理，不在此列表中
+/// 原则：只要是标准/扩展/可转换的字段，输入端有就必须保留
 const OPENAI_REQUEST_ALLOWED_FIELDS: &[&str] = &[
     "messages",
     "temperature",
     "top_p",
     "n",
     "stream",
+    "stream_options",
     "stop",
     "max_tokens",
+    "max_completion_tokens",
     "presence_penalty",
     "frequency_penalty",
     "logit_bias",
@@ -44,9 +47,11 @@ const OPENAI_REQUEST_ALLOWED_FIELDS: &[&str] = &[
     "user",
     "tools",
     "tool_choice",
+    "parallel_tool_calls",
     "response_format",
     "seed",
     "service_tier",
+    "metadata",
     "store",
     "prompt_cache_key",
     "prompt_cache_retention",
@@ -55,6 +60,7 @@ const OPENAI_REQUEST_ALLOWED_FIELDS: &[&str] = &[
 
 /// OpenAI Chat Completions 响应体标准字段白名单（基于官方文档）
 /// 参考：https://platform.openai.com/docs/api-reference/chat/object
+/// 原则：标准字段全部保留
 const OPENAI_RESPONSE_ALLOWED_FIELDS: &[&str] = &[
     "id",
     "object",
@@ -64,6 +70,7 @@ const OPENAI_RESPONSE_ALLOWED_FIELDS: &[&str] = &[
     "usage",
     "system_fingerprint",
     "service_tier",
+    "metadata",
 ];
 
 /// OpenAI 扩展字段白名单（reasoning/thinking 等兼容扩展）
@@ -74,6 +81,7 @@ const OPENAI_EXTENSION_FIELDS: &[&str] = &[
     "reasoning_text",
     "reasoning_details",
     "provider_specific",
+    "extra_body",
 ];
 
 // ─── 白名单构建器函数 ───────────────────────────────────────────
@@ -290,8 +298,8 @@ mod tests {
 
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(body["temperature"], 0.3);
-        // metadata 不是 OpenAI Chat Completions 标准请求字段，应被过滤
-        assert!(body.get("metadata").is_none());
+        // metadata 是标准字段，中转层应保留
+        assert_eq!(body["metadata"]["k"], "v");
         assert_eq!(body["store"], true);
         assert_eq!(body["prompt_cache_key"], "cache-key");
         assert_eq!(body["safety_identifier"], "safe-user");

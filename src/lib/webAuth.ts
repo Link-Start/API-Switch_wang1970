@@ -104,10 +104,14 @@ export async function logout(): Promise<LogoutResult> {
 
   let confirmed = true;
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
     const response = await fetch(`${ADMIN_PREFIX}/logout`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
     confirmed = response.ok;
   } catch {
     confirmed = false;

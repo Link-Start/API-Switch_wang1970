@@ -16,6 +16,6 @@ pub async fn execute(
     Path(id): Path<String>,
 ) -> Result<Json<AppConfigResult>, AdminError> {
     Ok(Json(
-        execute_connection_app_from_parts(&state.db, &state.settings, &id, false).await?,
+        execute_connection_app_from_parts(&state.db, &state.settings, &id, true).await?,
     ))
 }

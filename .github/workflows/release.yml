@@ -68,9 +68,12 @@ jobs:
           # Add arm64 architecture
           sudo dpkg --add-architecture arm64
           
-          # Completely rewrite sources.list with proper architecture pinning
-          # Ubuntu 24.04 (noble): amd64 from archive.ubuntu.com, arm64 from ports.ubuntu.com
-          sudo tee /etc/apt/sources.list > /dev/null << 'EOF'
+          # Remove all existing source files to prevent arm64 fetching from wrong mirrors
+          sudo rm -f /etc/apt/sources.list.d/*
+          
+          # Write clean sources.list with architecture pinning
+          # amd64 from standard mirrors, arm64 from ports.ubuntu.com
+          cat << 'EOF' | sudo tee /etc/apt/sources.list
           deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse
           deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse
           deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse

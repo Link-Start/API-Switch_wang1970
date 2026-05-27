@@ -29,6 +29,10 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact: api-switch
             asset: api-switch-${{ github.ref_name }}-linux-x64
+          - platform: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact: api-switch
+            asset: api-switch-${{ github.ref_name }}-linux-arm64
 
     runs-on: ${{ matrix.platform }}
 
@@ -51,11 +55,20 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      - name: Linux dependencies
-        if: matrix.platform == 'ubuntu-latest'
+      - name: Linux x64 dependencies
+        if: matrix.platform == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Linux ARM64 dependencies
+        if: matrix.platform == 'ubuntu-latest' && matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install -y libwebkit2gtk-4.1-dev:arm64 libappindicator3-dev:arm64 librsvg2-dev:arm64
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
       - name: Install pnpm and dependencies
         run: |
@@ -115,7 +128,8 @@ jobs:
             - `api-switch-windows-x64.exe` — Windows
             - `api-switch-macos-x64` — macOS Intel
             - `api-switch-macos-arm64` — macOS Apple Silicon
-            - `api-switch-linux-x64` — Linux
+            - `api-switch-linux-x64` — Linux x64
+            - `api-switch-linux-arm64` — Linux ARM64
 
             **Installers** (system integration):
             - `*.msi` / `*.exe` — Windows installer

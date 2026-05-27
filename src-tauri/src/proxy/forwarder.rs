@@ -17,7 +17,7 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::task::Poll;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 use tokio::time::sleep;
 
@@ -1600,11 +1600,21 @@ fn stream_chunk_has_tool_calls(value: &Value) -> bool {
 }
 
 fn model_info_delta(model: &str) -> Vec<u8> {
+    let created = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
     let payload = serde_json::json!({
+        "id": format!("chatcmpl-api-switch-model-info-{created}"),
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
         "choices": [{
+            "index": 0,
             "delta": {
                 "content": format!("\n\nmodel: {model}")
-            }
+            },
+            "finish_reason": null
         }]
     });
     format!("data: {payload}\n\n").into_bytes()
@@ -1781,10 +1791,18 @@ fn append_and_parse_sse(
 
     done_state.appended_model_info = true;
 
-    let mut output = Vec::with_capacity(chunk.len() + 64 + model.len());
-    output.extend_from_slice(&chunk[..pos]);
+    let mut output = Vec::with_capacity(chunk.len() + 66 + model.len());
+    let prefix = &chunk[..pos];
+    output.extend_from_slice(prefix);
+    if !prefix.is_empty() && !prefix.ends_with(b"\n\n") {
+        if prefix.ends_with(b"\n") {
+            output.extend_from_slice(b"\n");
+        } else {
+            output.extend_from_slice(b"\n\n");
+        }
+    }
     output.extend_from_slice(&model_info_delta(model));
-    output.extend_from_slice(&chunk[pos..]);
+    output.extend_from_slice(b"data: [DONE]\n\n");
     Some(Bytes::from(output))
 }
 
@@ -2171,6 +2189,67 @@ data: [DONE]\n"
         assert!(output.contains("\n\n"));
         assert!(output.ends_with("data: [DONE]\n\n"));
         assert!(!output.contains("data: [DONE]\n\ndata: [DONE]"));
+    }
+
+    #[test]
+    fn model_info_delta_uses_openai_chat_completion_chunk_shape() {
+        let frame = String::from_utf8(model_info_delta("gpt-test")).expect("valid utf8");
+        let payload = frame
+            .strip_prefix("data: ")
+            .and_then(|s| s.strip_suffix("\n\n"))
+            .expect("standard SSE data frame");
+        let value: Value = serde_json::from_str(payload).expect("valid json");
+
+        assert!(value["id"].as_str().unwrap_or_default().starts_with("chatcmpl-"));
+        assert_eq!(value["object"], "chat.completion.chunk");
+        assert!(value["created"].as_u64().is_some());
+        assert_eq!(value["model"], "gpt-test");
+        assert_eq!(value["choices"][0]["index"], 0);
+        assert_eq!(value["choices"][0]["delta"]["content"], "\n\nmodel: gpt-test");
+        assert!(value["choices"][0]["finish_reason"].is_null());
+    }
+
+    #[test]
+    fn appended_model_info_frame_is_openai_compatible_before_done() {
+        let mut buffer = String::new();
+        let chunk = Bytes::from_static(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\
+data: [DONE]\n",
+        );
+        let prompt_tokens = Arc::new(AtomicI64::new(0));
+        let completion_tokens = Arc::new(AtomicI64::new(0));
+        let has_sse_error = Arc::new(AtomicBool::new(false));
+        let has_text_delta = Arc::new(AtomicBool::new(false));
+        let has_tool_calls = Arc::new(AtomicBool::new(false));
+        let mut done_state = SseDoneState::default();
+        let mut remainder = Vec::new();
+
+        let output = append_and_parse_sse(
+            &mut buffer,
+            &mut remainder,
+            &chunk,
+            &prompt_tokens,
+            &completion_tokens,
+            &has_sse_error,
+            &has_text_delta,
+            &has_tool_calls,
+            Some("gpt-test"),
+            &mut done_state,
+        )
+        .expect("model info should be appended");
+        let output = String::from_utf8(output.to_vec()).expect("valid utf8");
+        let model_frame = output
+            .split("\n\n")
+            .find(|frame| frame.contains("model: gpt-test"))
+            .expect("model info frame exists");
+        let payload = model_frame.strip_prefix("data: ").expect("data frame");
+        let value: Value = serde_json::from_str(payload).expect("valid json");
+
+        assert_eq!(value["object"], "chat.completion.chunk");
+        assert_eq!(value["model"], "gpt-test");
+        assert_eq!(value["choices"][0]["index"], 0);
+        assert!(value["choices"][0]["finish_reason"].is_null());
+        assert!(output.ends_with("data: [DONE]\n\n"));
     }
 
     #[test]

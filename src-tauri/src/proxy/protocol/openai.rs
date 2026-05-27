@@ -58,6 +58,7 @@ const OPENAI_REQUEST_ALLOWED_FIELDS: &[&str] = &[
     "safety_identifier",
     "modalities",
     "audio",
+    "prediction",
 ];
 
 /// OpenAI Chat Completions 响应体标准字段白名单（基于官方文档）
@@ -73,6 +74,9 @@ const OPENAI_RESPONSE_ALLOWED_FIELDS: &[&str] = &[
     "system_fingerprint",
     "service_tier",
     "metadata",
+    "refusal",
+    "annotations",
+    "seed",
 ];
 
 /// OpenAI 扩展字段白名单（reasoning/thinking 等兼容扩展）

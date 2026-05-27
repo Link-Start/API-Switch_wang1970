@@ -69,20 +69,21 @@ jobs:
           sudo dpkg --add-architecture arm64
           
           # Remove all existing source files to prevent arm64 fetching from wrong mirrors
-          sudo rm -f /etc/apt/sources.list.d/*
+          sudo rm -rf /etc/apt/sources.list.d/*
           
-          # Write clean sources.list with architecture pinning
+          # Write clean sources.list with architecture pinning using printf
           # amd64 from standard mirrors, arm64 from ports.ubuntu.com
-          cat << 'EOF' | sudo tee /etc/apt/sources.list
-          deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse
-          deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse
-          deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse
-          deb [arch=amd64] http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse
-          EOF
+          printf '%s\n' \
+            "deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble main restricted universe multiverse" \
+            "deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse" \
+            "deb [arch=amd64] http://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse" \
+            "deb [arch=amd64] http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse" \
+            "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse" \
+            "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse" \
+            "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse" \
+            | sudo tee /etc/apt/sources.list
           
+          sudo apt-get clean
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
           sudo apt-get install -y libwebkit2gtk-4.1-dev:arm64 libappindicator3-dev:arm64 librsvg2-dev:arm64 patchelf

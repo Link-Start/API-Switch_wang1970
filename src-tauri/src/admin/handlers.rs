@@ -7,7 +7,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const SESSION_TTL_HOURS: i64 = 24;
+const SESSION_TTL_MINUTES: i64 = 30;
 
 pub async fn version() -> axum::Json<serde_json::Value> {
     axum::Json(serde_json::json!({
@@ -145,7 +145,7 @@ pub async fn login(
         .remove(&settings.web_admin_username);
 
     let token = Uuid::new_v4().to_string();
-    let expires_at = chrono::Utc::now() + chrono::Duration::hours(SESSION_TTL_HOURS);
+    let expires_at = chrono::Utc::now() + chrono::Duration::minutes(SESSION_TTL_MINUTES);
     state.login_sessions.write().await.insert(
         token.clone(),
         SessionInfo {

@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { MainShell, type MainPage } from "@/features/shell/MainShell";
 import { useApiAdapter, isTauriRuntime } from "@/lib/useApiAdapter";
 import { LoginScreen } from "@/components/LoginScreen";
-import { AUTH_EXPIRED_EVENT, clearToken, getToken, logout, validateToken, type AuthExpiredDetail, TOKEN_KEY } from "@/lib/webAuth";
+import { AUTH_EXPIRED_EVENT, clearToken, getToken, validateToken, type AuthExpiredDetail, TOKEN_KEY } from "@/lib/webAuth";
 import { checkUpdate, type UpdateInfo } from "@/lib/api";
 
 const ApiPoolPage = lazy(() => import("@/pages/ApiPoolPage").then((m) => ({ default: m.ApiPoolPage })));
@@ -195,13 +195,20 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    const token = getToken();
     invalidateWebTokenCheck();
-    logout().then((result) => {
-      invalidateWebTokenCheck();
-      setWebAuth({ state: "login" });
-      if (result.confirmed) toast.success("已退出登录");
-      else toast.warning("已清除本地登录状态，服务器登出未确认");
-    });
+    clearToken();
+    setWebAuth({ state: "login" });
+    toast.success("已退出登录");
+
+    // fire-and-forget，不等后端响应
+    if (token) {
+      fetch("/admin/logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        keepalive: true,
+      }).catch(() => {});
+    }
   };
 
   // Validate existing token on mount (web only)

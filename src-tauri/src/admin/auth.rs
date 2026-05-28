@@ -18,7 +18,7 @@ pub async fn require_auth(
     #[cfg(not(debug_assertions))]
     {
         use axum::http::header::AUTHORIZATION;
-        const SESSION_TTL_HOURS: i64 = 24;
+        const SESSION_TTL_MINUTES: i64 = 30;
 
         let token = request
             .headers()
@@ -36,7 +36,7 @@ pub async fn require_auth(
 
         let session_valid = match sessions.get_mut(&token) {
             Some(session) if session.username == current_username => {
-                session.expires_at = now + chrono::Duration::hours(SESSION_TTL_HOURS);
+                session.expires_at = now + chrono::Duration::minutes(SESSION_TTL_MINUTES);
                 true
             }
             _ => false,

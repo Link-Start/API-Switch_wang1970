@@ -466,7 +466,7 @@ pub async fn forward_with_retry(
     state: &ProxyState,
     entries: &[ApiEntry],
     body: &Value,
-    _original_headers: &HeaderMap,
+    original_headers: &HeaderMap,
     requested_model: &str,
     access_key: Option<&AccessKey>,
     is_stream: bool,
@@ -499,6 +499,7 @@ pub async fn forward_with_retry(
             attempts.clone(),
             middleware,
             &caller_kind,
+            original_headers,
         )
         .await
         {
@@ -644,6 +645,7 @@ async fn forward_single(
     prior_attempts: Vec<AttemptInfo>,
     middleware: &[Arc<dyn super::middleware::ForwarderMiddleware>],
     caller_kind: &CallerKind,
+    original_headers: &HeaderMap,
 ) -> Result<ForwardResult, ForwardError> {
     let channel = state
         .db
@@ -716,6 +718,34 @@ async fn forward_single(
             primary_api_key(&channel.api_key),
         )
         .json(&upstream_body);
+
+    // 同协议直通：透传客户端(真实 Claude Code CLI)的身份/能力头，使上游能识别
+    // CLI 身份（认证层）并开启对应能力（如 anthropic-beta 里的
+    // mid-conversation-system）。否则上游回退旧行为，拒收 messages 数组中的
+    // role:"system" → 400。注意：不透传 authorization（鉴权用渠道自己的 api_key），
+    // 也不透传 host/content-length/connection 等逐跳/长度相关头。
+    if is_claude_passthrough {
+        const PASSTHROUGH_HEADER_PREFIXES: &[&str] = &["x-stainless-", "x-claude-code-"];
+        // 注意：不含 anthropic-version —— apply_auth 已设置（reqwest 的 header() 是
+        // 追加而非覆盖，重复透传会产生重复头）。仅透传 apply_auth 未设置的身份/能力头。
+        const PASSTHROUGH_HEADER_EXACT: &[&str] = &[
+            "anthropic-beta",
+            "user-agent",
+            "x-app",
+        ];
+        for (name, value) in original_headers.iter() {
+            let n = name.as_str().to_ascii_lowercase();
+            let allow = PASSTHROUGH_HEADER_EXACT.contains(&n.as_str())
+                || PASSTHROUGH_HEADER_PREFIXES
+                    .iter()
+                    .any(|p| n.starts_with(p));
+            if allow {
+                if let Ok(v) = value.to_str() {
+                    request = request.header(name.as_str(), v);
+                }
+            }
+        }
+    }
 
     if is_stream {
         request = request.header("Accept", "text/event-stream");

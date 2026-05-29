@@ -634,7 +634,6 @@ fn apply_disable_reasoning(body: &mut Value) {
         }
     }
 }
-
 async fn forward_single(
     state: &ProxyState,
     entry: &ApiEntry,

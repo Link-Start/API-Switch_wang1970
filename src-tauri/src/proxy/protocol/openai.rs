@@ -23,116 +23,89 @@ fn has_custom_api_path(base_url: &str) -> bool {
     false
 }
 
-// ─── 白名单常量：OpenAI 请求/响应/扩展字段 ───────────────────────
+// ─── 黑名单常量 + 构建器：见下方 OPENAI_FOREIGN_DROP ──────────────
 
-/// OpenAI Chat Completions 请求体标准字段白名单（基于官方文档）
-/// 参考：https://platform.openai.com/docs/api-reference/chat/create
-/// 注意：model 字段由 build_openai_request_output 单独处理，不在此列表中
-/// 原则：只要是标准/扩展/可转换的字段，输入端有就必须保留
-const OPENAI_REQUEST_ALLOWED_FIELDS: &[&str] = &[
-    "messages",
-    "temperature",
-    "top_p",
-    "n",
-    "stream",
-    "stream_options",
-    "stop",
-    "max_tokens",
-    "max_completion_tokens",
-    "presence_penalty",
-    "frequency_penalty",
-    "logit_bias",
-    "logprobs",
-    "top_logprobs",
-    "user",
-    "tools",
-    "tool_choice",
-    "parallel_tool_calls",
-    "response_format",
-    "seed",
-    "service_tier",
-    "metadata",
-    "store",
-    "prompt_cache_key",
-    "prompt_cache_retention",
-    "safety_identifier",
-    "modalities",
-    "audio",
-    "prediction",
+
+/// 已知的"外来协议专有"字段——这些字段 OpenAI Chat Completions 不认，
+/// 且明确属于 Anthropic / Gemini native / OpenAI Responses，必须在出口剔除，
+/// 避免泄漏到 OpenAI 上游。
+///
+/// 黑名单决策（见 docs/protocol-passthrough-fix-plan.md §3.4）：出口由白名单
+/// 改黑名单——保留未知/未来字段（上游多忽略未知字段），仅丢弃已知外来字段
+/// （白名单会误删目标协议新增的合法字段，"漏删"比"漏放"更易致故障）。
+const OPENAI_FOREIGN_DROP: &[&str] = &[
+    // OpenAI Responses API 专有
+    "input",
+    "instructions",
+    "include",
+    "prompt",
+    "max_output_tokens",
+    "text",
+    "truncation",
+    "previous_response_id",
+    "max_tool_calls",
+    // Anthropic 专有
+    "anthropic_version",
+    "anthropic_beta",
+    "betas",
+    "system",
+    "max_tokens_to_sample",
+    "top_k",
+    // Gemini native 专有
+    "contents",
+    "generationConfig",
+    "safetySettings",
+    "systemInstruction",
+    "cachedContent",
+    // 内部暂存字段
+    "__as_raw_claude_req",
+    "__as_raw_responses_req",
+    "__as_raw_gemini_req",
 ];
 
-/// OpenAI Chat Completions 响应体标准字段白名单（基于官方文档）
-/// 参考：https://platform.openai.com/docs/api-reference/chat/object
-/// 原则：标准字段全部保留
-const OPENAI_RESPONSE_ALLOWED_FIELDS: &[&str] = &[
-    "id",
-    "object",
-    "created",
-    "model",
-    "choices",
-    "usage",
-    "system_fingerprint",
-    "service_tier",
-    "metadata",
-    "refusal",
-    "annotations",
-    "seed",
-];
+// ─── 黑名单构建器函数 ───────────────────────────────────────────
 
-/// OpenAI 扩展字段白名单（reasoning/thinking 等兼容扩展）
-const OPENAI_EXTENSION_FIELDS: &[&str] = &[
-    "reasoning_effort",
-    "thinking",
-    "reasoning_content",
-    "reasoning_text",
-    "reasoning_details",
-    "provider_specific",
-    "extra_body",
-];
-
-// ─── 白名单构建器函数 ───────────────────────────────────────────
-
-/// 从中间协议构建 OpenAI 请求输出对象（只保留白名单字段）
+/// 从中间协议构建 OpenAI 请求输出对象（黑名单：保留全部，仅剔除外来字段）
 fn build_openai_request_output(
     src: &serde_json::Map<String, Value>,
     actual_model: &str,
 ) -> Value {
-    let mut out = serde_json::Map::new();
+    let mut out = src.clone();
+    for key in OPENAI_FOREIGN_DROP {
+        out.remove(*key);
+    }
     out.insert("model".to_string(), Value::String(actual_model.to_string()));
-
-    for key in OPENAI_REQUEST_ALLOWED_FIELDS {
-        if let Some(value) = src.get(*key) {
-            out.insert((*key).to_string(), value.clone());
-        }
-    }
-
-    for key in OPENAI_EXTENSION_FIELDS {
-        if let Some(value) = src.get(*key) {
-            out.insert((*key).to_string(), value.clone());
-        }
-    }
-
     Value::Object(out)
 }
 
-/// 从中间协议构建 OpenAI 响应输出对象（只保留白名单字段）
+/// 从中间协议构建 OpenAI 响应输出对象（黑名单：保留全部，仅剔除外来字段）
 fn build_openai_response_output(src: &serde_json::Map<String, Value>) -> Value {
-    let mut out = serde_json::Map::new();
-
-    for key in OPENAI_RESPONSE_ALLOWED_FIELDS {
-        if let Some(value) = src.get(*key) {
-            out.insert((*key).to_string(), value.clone());
-        }
+    let mut out = src.clone();
+    for key in OPENAI_RESPONSE_FOREIGN_DROP {
+        out.remove(*key);
     }
-
-    for key in OPENAI_EXTENSION_FIELDS {
-        if let Some(value) = src.get(*key) {
-            out.insert((*key).to_string(), value.clone());
-        }
-    }
-
     Value::Object(out)
 }
+
+/// 响应方向的外来协议专有字段（Gemini/Responses/Anthropic 响应结构）
+const OPENAI_RESPONSE_FOREIGN_DROP: &[&str] = &[
+    // OpenAI Responses API 响应专有
+    "output",
+    "output_text",
+    "instructions",
+    // Gemini native 响应专有
+    "candidates",
+    "usageMetadata",
+    "promptFeedback",
+    "modelVersion",
+    // Anthropic 响应专有
+    "stop_reason",
+    "stop_sequence",
+    // 内部暂存字段
+    "__as_raw_claude_req",
+    "__as_raw_responses_req",
+    "__as_raw_gemini_req",
+];
 
 impl ProtocolAdapter for OpenAiAdapter {
     fn build_chat_url(&self, base_url: &str, _model: &str) -> String {
@@ -263,8 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn transform_request_drops_responses_only_fields() {
-        let adapter = OpenAiAdapter;
+    fn transform_request_drops_responses_only_fields() {        let adapter = OpenAiAdapter;
         let mut body = json!({
             "model": "auto",
             "messages": [{"role": "user", "content": "hi"}],
@@ -311,6 +283,24 @@ mod tests {
         assert_eq!(body["safety_identifier"], "safe-user");
         assert_eq!(body["reasoning_effort"], "medium");
         assert_eq!(body["thinking"]["type"], "enabled");
+    }
+
+    /// 黑名单决策：未知/未来字段必须穿透（不再被白名单误删）。
+    #[test]
+    fn transform_request_passes_through_unknown_fields() {
+        let adapter = OpenAiAdapter;
+        let mut body = json!({
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hi"}],
+            "x_future_openai_field": {"nested": "value"},
+            "some_new_param": 42
+        });
+
+        adapter.transform_request(&mut body, "gpt-4o");
+
+        assert_eq!(body["model"], "gpt-4o");
+        assert_eq!(body["x_future_openai_field"]["nested"], "value");
+        assert_eq!(body["some_new_param"], 42);
     }
 
     #[test]

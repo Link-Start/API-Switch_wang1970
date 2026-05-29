@@ -177,32 +177,48 @@ jobs:
         with:
           path: artifacts
 
+      - name: Prepare release notes
+        run: |
+          cat > RELEASE_NOTES.md <<'EOF'
+          ## API Switch ${{ github.ref_name }}
+
+          ### Downloads
+
+          **Portable binaries** (no install needed, just run):
+          - `api-switch-windows-x64.exe` — Windows
+          - `api-switch-macos-x64` — macOS Intel
+          - `api-switch-macos-arm64` — macOS Apple Silicon
+          - `api-switch-linux-x64` — Linux x64
+          - `api-switch-linux-arm64` — Linux ARM64
+          - `api-switch-linux-x64-headless` — Linux x64 (无 GUI，体积更小，适合服务器/Termux)
+          - `api-switch-linux-arm64-headless` — Linux ARM64 (无 GUI，适合服务器/Termux)
+
+          **Installers** (system integration):
+          - `*.msi` / `*.exe` — Windows installer
+          - `*.dmg` — macOS disk image
+          - `*.AppImage` — Linux AppImage
+
+          ### Usage
+          1. Download and run (or install via installer)
+          2. Database is auto-created in the same directory
+          3. Point your client to `http://127.0.0.1:9090`
+          EOF
+
       - name: Create release
+        id: create_release
+        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
           draft: true
           name: ${{ github.ref_name }}
-          body: |
-            ## API Switch ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
 
-            ### Downloads
-
-            **Portable binaries** (no install needed, just run):
-            - `api-switch-windows-x64.exe` — Windows
-            - `api-switch-macos-x64` — macOS Intel
-            - `api-switch-macos-arm64` — macOS Apple Silicon
-            - `api-switch-linux-x64` — Linux x64
-            - `api-switch-linux-arm64` — Linux ARM64
-            - `api-switch-linux-x64-headless` — Linux x64 (无 GUI，体积更小，适合服务器/Termux)
-            - `api-switch-linux-arm64-headless` — Linux ARM64 (无 GUI，适合服务器/Termux)
-
-            **Installers** (system integration):
-            - `*.msi` / `*.exe` — Windows installer
-            - `*.dmg` — macOS disk image
-            - `*.AppImage` — Linux AppImage
-
-            ### Usage
-            1. Download and run (or install via installer)
-            2. Database is auto-created in the same directory
-            3. Point your client to `http://127.0.0.1:9090`
+      - name: Create release (retry)
+        if: steps.create_release.outcome == 'failure'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          draft: true
+          name: ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md

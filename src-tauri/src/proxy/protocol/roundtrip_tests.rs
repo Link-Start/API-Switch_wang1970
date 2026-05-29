@@ -690,10 +690,12 @@ mod openai_roundtrip {
         assert_eq!(body["model"], "gpt-4o");
         assert_eq!(body["messages"], original_messages);
         assert_eq!(body["temperature"], 0.5);
-        // 白名单模式：x_custom 不在 OpenAI 扩展字段白名单中，应被过滤
-        assert!(
-            body.get("x_custom").is_none(),
-            "OpenAI 白名单模式应过滤非白名单字段 x_custom"
+        // 黑名单模式（见 docs/protocol-passthrough-fix-plan.md §3.4）：未知字段穿透，
+        // 不再被白名单误删。
+        assert_eq!(
+            body.get("x_custom"),
+            Some(&original_custom),
+            "OpenAI 黑名单模式应穿透未知字段 x_custom"
         );
     }
 
@@ -710,10 +712,10 @@ mod openai_roundtrip {
         adapter.transform_request(&mut body, "deepseek-chat");
 
         assert_eq!(body["model"], "deepseek-chat");
-        // 白名单模式：x_deepseek_specific 不在 OpenAI 扩展字段白名单中，应被过滤
-        assert!(
-            body.get("x_deepseek_specific").is_none(),
-            "Custom adapter 白名单模式应过滤非白名单字段 x_deepseek_specific"
+        // 黑名单模式：未知/厂商专有字段穿透（DeepSeek 等兼容上游可消费）
+        assert_eq!(
+            body["x_deepseek_specific"], "value",
+            "Custom adapter 黑名单模式应穿透未知字段 x_deepseek_specific"
         );
     }
 
@@ -742,10 +744,10 @@ mod openai_roundtrip {
         assert!(body.get("text").is_none());
 
         assert_eq!(body["messages"][0]["role"], "user");
-        // 白名单模式：x_deepseek_specific 不在 OpenAI 扩展字段白名单中，应被过滤
-        assert!(
-            body.get("x_deepseek_specific").is_none(),
-            "Custom adapter 白名单模式应过滤非白名单字段 x_deepseek_specific"
+        // 黑名单模式：已知 Responses 专有字段被剔除（上方断言），未知/厂商字段穿透
+        assert_eq!(
+            body["x_deepseek_specific"], "value",
+            "Custom adapter 黑名单模式应穿透未知字段 x_deepseek_specific"
         );
         assert_eq!(body["reasoning_effort"], "high");
     }

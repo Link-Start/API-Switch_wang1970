@@ -893,9 +893,12 @@ async fn forward_single(
 }
 
 fn extract_usage_tokens(body: &Value) -> (i64, i64, i64) {
+    // 兼容三种位置：OpenAI 顶层 usage、Responses 的 /response/usage、
+    // Anthropic message_start 的 /message/usage。
     let usage = body
         .get("usage")
-        .or_else(|| body.pointer("/response/usage"));
+        .or_else(|| body.pointer("/response/usage"))
+        .or_else(|| body.pointer("/message/usage"));
     let prompt_tokens = usage
         .and_then(|v| v.get("prompt_tokens"))
         .or_else(|| usage.and_then(|v| v.get("input_tokens")))
@@ -1283,6 +1286,8 @@ log_usage(
                             &chunk,
                             &has_text_delta,
                             &has_tool_calls,
+                            &prompt_tokens,
+                            &completion_tokens,
                         );
                         let should_inject = append_model_info
                             && saw_stop
@@ -1787,12 +1792,15 @@ fn anthropic_model_info_events(model: &str) -> Vec<u8> {
     .into_bytes()
 }
 
-/// 直通流字节里查找 Anthropic 事件，判断是否含工具调用 / 已含文本 / 到达 message_stop。
-/// 仅用于决定"是否在 message_stop 前注入模型名"，不解析全部内容。
+/// 直通流字节里查找 Anthropic 事件：判断是否含工具调用 / 已含文本 / 到达
+/// message_stop，并提取 usage token（Anthropic 把 input_tokens 放在
+/// message_start 的 /message/usage，output_tokens 放在 message_delta 顶层 usage）。
 fn scan_anthropic_passthrough_chunk(
     chunk: &Bytes,
     has_text: &Arc<AtomicBool>,
     has_tool: &Arc<AtomicBool>,
+    prompt_tokens: &Arc<AtomicI64>,
+    completion_tokens: &Arc<AtomicI64>,
 ) -> bool {
     let text = String::from_utf8_lossy(chunk);
     let mut saw_message_stop = false;
@@ -1804,6 +1812,25 @@ fn scan_anthropic_passthrough_chunk(
             continue;
         };
         match value.get("type").and_then(Value::as_str) {
+            Some("message_start") => {
+                // input_tokens 在 message.usage 里
+                if let Some(p) = value
+                    .pointer("/message/usage/input_tokens")
+                    .and_then(Value::as_i64)
+                {
+                    if p > 0 {
+                        prompt_tokens.store(p, Ordering::Relaxed);
+                    }
+                }
+                if let Some(c) = value
+                    .pointer("/message/usage/output_tokens")
+                    .and_then(Value::as_i64)
+                {
+                    if c > 0 {
+                        completion_tokens.store(c, Ordering::Relaxed);
+                    }
+                }
+            }
             Some("content_block_start") => {
                 if value
                     .get("content_block")
@@ -1818,6 +1845,17 @@ fn scan_anthropic_passthrough_chunk(
                 if let Some(dt) = value.get("delta").and_then(|d| d.get("type")).and_then(Value::as_str) {
                     if dt == "text_delta" {
                         has_text.store(true, Ordering::Relaxed);
+                    }
+                }
+            }
+            Some("message_delta") => {
+                // output_tokens 在 message_delta 顶层 usage
+                if let Some(c) = value
+                    .pointer("/usage/output_tokens")
+                    .and_then(Value::as_i64)
+                {
+                    if c > 0 {
+                        completion_tokens.store(c, Ordering::Relaxed);
                     }
                 }
             }
@@ -2385,31 +2423,48 @@ mod tests {
         }
     }
 
-    /// 扫描函数应正确识别 text_delta(有文本)、tool_use(工具调用)、message_stop。
+    /// 扫描函数应正确识别 text_delta(有文本)、tool_use(工具调用)、message_stop，
+    /// 并从 message_start / message_delta 提取 usage token。
     #[test]
     fn scan_anthropic_passthrough_detects_signals() {
         let has_text = Arc::new(AtomicBool::new(false));
         let has_tool = Arc::new(AtomicBool::new(false));
+        let pt = Arc::new(AtomicI64::new(0));
+        let ct = Arc::new(AtomicI64::new(0));
+
+        // message_start 带 input_tokens（在 /message/usage）
+        let start_chunk = Bytes::from_static(
+            b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"model\":\"claude-opus-4-8\",\"usage\":{\"input_tokens\":123,\"output_tokens\":1}}}\n\n",
+        );
+        scan_anthropic_passthrough_chunk(&start_chunk, &has_text, &has_tool, &pt, &ct);
+        assert_eq!(pt.load(Ordering::Relaxed), 123, "应从 message_start 取 input_tokens");
 
         let text_chunk = Bytes::from_static(
             b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n",
         );
-        let stop = scan_anthropic_passthrough_chunk(&text_chunk, &has_text, &has_tool);
+        let stop = scan_anthropic_passthrough_chunk(&text_chunk, &has_text, &has_tool, &pt, &ct);
         assert!(!stop);
         assert!(has_text.load(Ordering::Relaxed));
         assert!(!has_tool.load(Ordering::Relaxed));
 
+        // message_delta 带 output_tokens
+        let delta_chunk = Bytes::from_static(
+            b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"output_tokens\":70}}\n\n",
+        );
+        scan_anthropic_passthrough_chunk(&delta_chunk, &has_text, &has_tool, &pt, &ct);
+        assert_eq!(ct.load(Ordering::Relaxed), 70, "应从 message_delta 取 output_tokens");
+
         let tool_chunk = Bytes::from_static(
             b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"x\"}}\n\n",
         );
-        scan_anthropic_passthrough_chunk(&tool_chunk, &has_text, &has_tool);
+        scan_anthropic_passthrough_chunk(&tool_chunk, &has_text, &has_tool, &pt, &ct);
         assert!(has_tool.load(Ordering::Relaxed), "应检测到 tool_use");
 
         let stop_chunk = Bytes::from_static(
             b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
         );
         assert!(
-            scan_anthropic_passthrough_chunk(&stop_chunk, &has_text, &has_tool),
+            scan_anthropic_passthrough_chunk(&stop_chunk, &has_text, &has_tool, &pt, &ct),
             "应检测到 message_stop"
         );
     }

@@ -325,6 +325,12 @@ pub async fn handle_messages(
     // Convert Claude format to OpenAI format for internal routing
     let mut openai_body = claude_to_openai_request(&body);
 
+    // 同协议直通：保留原始 Claude 请求体，供 forwarder 在上游同为 Claude/Anthropic 时
+    // 原样直送，避免 Claude→OpenAI→Claude 双重翻译损耗（含 mid-conversation system 位置）。
+    if let Some(obj) = openai_body.as_object_mut() {
+        obj.insert("__as_raw_claude_req".to_string(), body.clone());
+    }
+
 
     let requested_model =
         normalize_requested_model(openai_body.get("model").and_then(|m| m.as_str()));
@@ -368,6 +374,15 @@ pub async fn handle_messages(
         caller_kind,
     )
     .await?;
+
+    // 同协议直通：响应已是 Claude 原生格式（forwarder 跳过了转换），直接回传，
+    // 不能再做 OpenAI→Claude 二次转换。
+    if response
+        .headers()
+        .contains_key("x-api-switch-claude-passthrough")
+    {
+        return Ok(response);
+    }
 
     // Convert the response from OpenAI format back to Claude format
     if is_stream {

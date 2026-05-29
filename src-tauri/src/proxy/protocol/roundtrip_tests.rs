@@ -211,14 +211,59 @@ mod claude_roundtrip {
         let mut back_to_claude = openai_intermediate.clone();
         adapter.transform_request(&mut back_to_claude, TEST_MODEL);
 
-        // 白名单模式：只保留 Claude 扩展字段（x_anthropic_future_field），其他自定义字段被过滤
-        assert!(
-            back_to_claude.get("x_api_switch_tracking_id").is_none(),
-            "ClaudeAdapter 白名单模式应过滤非白名单字段 x_api_switch_tracking_id"
+        // 黑名单模式（决策见 docs/protocol-passthrough-fix-plan.md §3.4/§5.2）：
+        // 未知/未来字段穿透，只丢弃已知 OpenAI 专有字段。自定义字段必须保留，
+        // 以兑现"未知字段穿透"公理、避免误删目标协议的新增原生字段。
+        assert_eq!(
+            back_to_claude
+                .get("x_api_switch_tracking_id")
+                .and_then(|v| v.as_str()),
+            Some("abc-123"),
+            "ClaudeAdapter 黑名单模式应穿透未知字段 x_api_switch_tracking_id"
+        );
+        assert_eq!(
+            back_to_claude["x_future_anthropic_field"]["nested"], "value",
+            "ClaudeAdapter 黑名单模式应穿透未知嵌套字段 x_future_anthropic_field"
+        );
+    }
+
+    /// mid-conversation system（Opus 4.8 + Claude Code v2.1.154）：
+    /// messages 数组中间的 `role:"system"` 在 Claude→OpenAI 方向必须**保留在原位**
+    /// （作为 OpenAI system 消息），不被抽到顶层 system。
+    /// 注：Claude→Claude 方向由 forwarder 的同协议直通（is_claude_passthrough）原样
+    /// 转发处理，不经此函数——见 forwarder.rs 与 docs/protocol-passthrough-fix-plan.md。
+    #[test]
+    fn request_mid_conversation_system_preserved_to_openai() {
+        let claude = json!({
+            "model": TEST_MODEL,
+            "max_tokens": 64,
+            "messages": [
+                {"role": "user", "content": "write code"},
+                {"role": "assistant", "content": "ok"},
+                {"role": "system", "content": "NEW RULE: from here, extra permissions"},
+                {"role": "user", "content": "continue"}
+            ]
+        });
+
+        let openai = claude_to_openai_request(&claude);
+        let msgs = openai["messages"].as_array().expect("messages array");
+
+        let sys_idx = msgs
+            .iter()
+            .position(|m| m["role"] == "system")
+            .expect("mid-conversation system 消息不应丢失");
+        assert_eq!(
+            msgs[sys_idx]["content"], "NEW RULE: from here, extra permissions",
+            "mid system 内容应保留"
+        );
+        // 位置语义：前面紧随 assistant，后面仍有 user 轮次（未被抽到顶层/错位）
+        assert_eq!(
+            msgs[sys_idx - 1]["role"], "assistant",
+            "mid system 应紧随 assistant 之后"
         );
         assert!(
-            back_to_claude.get("x_future_anthropic_field").is_none(),
-            "ClaudeAdapter 白名单模式应过滤非白名单字段 x_future_anthropic_field"
+            msgs[sys_idx + 1..].iter().any(|m| m["role"] == "user"),
+            "mid system 之后应仍有 user 轮次"
         );
     }
 
@@ -645,10 +690,12 @@ mod openai_roundtrip {
         assert_eq!(body["model"], "gpt-4o");
         assert_eq!(body["messages"], original_messages);
         assert_eq!(body["temperature"], 0.5);
-        // 白名单模式：x_custom 不在 OpenAI 扩展字段白名单中，应被过滤
-        assert!(
-            body.get("x_custom").is_none(),
-            "OpenAI 白名单模式应过滤非白名单字段 x_custom"
+        // 黑名单模式（见 docs/protocol-passthrough-fix-plan.md §3.4）：未知字段穿透，
+        // 不再被白名单误删。
+        assert_eq!(
+            body.get("x_custom"),
+            Some(&original_custom),
+            "OpenAI 黑名单模式应穿透未知字段 x_custom"
         );
     }
 
@@ -665,10 +712,10 @@ mod openai_roundtrip {
         adapter.transform_request(&mut body, "deepseek-chat");
 
         assert_eq!(body["model"], "deepseek-chat");
-        // 白名单模式：x_deepseek_specific 不在 OpenAI 扩展字段白名单中，应被过滤
-        assert!(
-            body.get("x_deepseek_specific").is_none(),
-            "Custom adapter 白名单模式应过滤非白名单字段 x_deepseek_specific"
+        // 黑名单模式：未知/厂商专有字段穿透（DeepSeek 等兼容上游可消费）
+        assert_eq!(
+            body["x_deepseek_specific"], "value",
+            "Custom adapter 黑名单模式应穿透未知字段 x_deepseek_specific"
         );
     }
 
@@ -697,10 +744,10 @@ mod openai_roundtrip {
         assert!(body.get("text").is_none());
 
         assert_eq!(body["messages"][0]["role"], "user");
-        // 白名单模式：x_deepseek_specific 不在 OpenAI 扩展字段白名单中，应被过滤
-        assert!(
-            body.get("x_deepseek_specific").is_none(),
-            "Custom adapter 白名单模式应过滤非白名单字段 x_deepseek_specific"
+        // 黑名单模式：已知 Responses 专有字段被剔除（上方断言），未知/厂商字段穿透
+        assert_eq!(
+            body["x_deepseek_specific"], "value",
+            "Custom adapter 黑名单模式应穿透未知字段 x_deepseek_specific"
         );
         assert_eq!(body["reasoning_effort"], "high");
     }

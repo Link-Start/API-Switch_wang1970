@@ -19,104 +19,77 @@ use serde_json::{json, Value};
 /// Default API version for Azure OpenAI.
 const AZURE_API_VERSION: &str = "2024-02-01";
 
-// ─── 白名单常量：Azure 请求/响应/扩展字段 ───────────────────────
+// ─── 黑名单常量 + 构建器 ───────────────────────────────────────
 
-/// Azure Chat Completions 请求体标准字段白名单（不含 model，Azure 通过 URL 传递）
-/// 参考：https://learn.microsoft.com/en-us/azure/ai-services/openai/reference#chat-completions
-/// 原则：只要是标准/扩展/可转换的字段，输入端有就必须保留
-const AZURE_REQUEST_ALLOWED_FIELDS: &[&str] = &[
-    "messages",
-    "temperature",
-    "top_p",
-    "n",
-    "stream",
-    "stream_options",
-    "stop",
-    "max_tokens",
-    "max_completion_tokens",
-    "presence_penalty",
-    "frequency_penalty",
-    "logit_bias",
-    "logprobs",
-    "top_logprobs",
-    "user",
-    "tools",
-    "tool_choice",
-    "parallel_tool_calls",
-    "response_format",
-    "seed",
-    "service_tier",
-    "metadata",
-    "store",
-    "prompt_cache_key",
-    "prompt_cache_retention",
-    "safety_identifier",
-    "modalities",
-    "audio",
-];
-
-/// Azure Chat Completions 响应体标准字段白名单
-/// 参考：https://learn.microsoft.com/en-us/azure/ai-services/openai/reference#chat-completions
-const AZURE_RESPONSE_ALLOWED_FIELDS: &[&str] = &[
-    "id",
-    "object",
-    "created",
+/// Azure 请求出口要剔除的字段。
+///
+/// 黑名单决策（见 docs/protocol-passthrough-fix-plan.md §3.4）：保留未知/未来
+/// 字段，仅丢弃外来协议（Anthropic / Gemini native / OpenAI Responses）专有
+/// 字段，外加 `model`（Azure 通过 URL 的 deployment 传递，body 不带 model）。
+/// Azure≈OpenAI，支持 logit_bias / service_tier / store 等，故不剔除这些。
+const AZURE_REQUEST_FOREIGN_DROP: &[&str] = &[
+    // Azure 特有：model 走 URL，不进 body
     "model",
-    "choices",
-    "usage",
-    "system_fingerprint",
-    "service_tier",
-    "metadata",
+    // OpenAI Responses API 专有
+    "input",
+    "instructions",
+    "include",
+    "prompt",
+    "max_output_tokens",
+    "text",
+    "truncation",
+    "previous_response_id",
+    "max_tool_calls",
+    // Anthropic 专有
+    "anthropic_version",
+    "anthropic_beta",
+    "betas",
+    "system",
+    "max_tokens_to_sample",
+    "top_k",
+    // Gemini native 专有
+    "contents",
+    "generationConfig",
+    "safetySettings",
+    "systemInstruction",
+    "cachedContent",
+    // 内部暂存字段
+    "__as_raw_claude_req",
+    "__as_raw_responses_req",
+    "__as_raw_gemini_req",
 ];
 
-/// Azure 扩展字段白名单（reasoning/thinking 等兼容扩展）
-const AZURE_EXTENSION_FIELDS: &[&str] = &[
-    "reasoning_effort",
-    "thinking",
-    "reasoning_content",
-    "reasoning_text",
-    "reasoning_details",
-    "provider_specific",
-    "extra_body",
+/// Azure 响应出口要剔除的外来协议专有字段
+const AZURE_RESPONSE_FOREIGN_DROP: &[&str] = &[
+    "output",
+    "output_text",
+    "instructions",
+    "candidates",
+    "usageMetadata",
+    "promptFeedback",
+    "modelVersion",
+    "stop_reason",
+    "stop_sequence",
+    "__as_raw_claude_req",
+    "__as_raw_responses_req",
+    "__as_raw_gemini_req",
 ];
 
-// ─── 白名单构建器函数 ───────────────────────────────────────────
-
-/// 从中间协议构建 Azure 请求输出对象（只保留白名单字段，不含 model）
+/// 从中间协议构建 Azure 请求输出对象（黑名单：保留全部，剔除外来字段与 model）
 fn build_azure_request_output(src: &serde_json::Map<String, Value>) -> Value {
-    let mut out = serde_json::Map::new();
-
-    for key in AZURE_REQUEST_ALLOWED_FIELDS {
-        if let Some(value) = src.get(*key) {
-            out.insert((*key).to_string(), value.clone());
-        }
+    let mut out = src.clone();
+    for key in AZURE_REQUEST_FOREIGN_DROP {
+        out.remove(*key);
     }
-
-    for key in AZURE_EXTENSION_FIELDS {
-        if let Some(value) = src.get(*key) {
-            out.insert((*key).to_string(), value.clone());
-        }
-    }
-
     Value::Object(out)
 }
 
-/// 从中间协议构建 Azure 响应输出对象（只保留白名单字段）
+/// 从中间协议构建 Azure 响应输出对象（黑名单：保留全部，仅剔除外来字段）
 fn build_azure_response_output(src: &serde_json::Map<String, Value>) -> Value {
-    let mut out = serde_json::Map::new();
-
-    for key in AZURE_RESPONSE_ALLOWED_FIELDS {
-        if let Some(value) = src.get(*key) {
-            out.insert((*key).to_string(), value.clone());
-        }
+    let mut out = src.clone();
+    for key in AZURE_RESPONSE_FOREIGN_DROP {
+        out.remove(*key);
     }
-
-    for key in AZURE_EXTENSION_FIELDS {
-        if let Some(value) = src.get(*key) {
-            out.insert((*key).to_string(), value.clone());
-        }
-    }
-
     Value::Object(out)
 }
 
@@ -364,6 +337,35 @@ mod tests {
 
         assert!(body.get("messages").is_some());
         assert_eq!(body["temperature"], 0.2);
+    }
+
+    /// 黑名单决策：Azure builder 应穿透未知/未来字段，仅剔除外来协议字段与 model。
+    /// Azure≈OpenAI，logit_bias/service_tier/store 等标准字段应保留。
+    #[test]
+    fn azure_transform_request_passes_through_unknown_keeps_standard() {
+        let adapter = AzureAdapter;
+        let mut body = json!({
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hi"}],
+            "logit_bias": {"1": 1},
+            "service_tier": "auto",
+            "store": true,
+            "x_future_azure_field": {"nested": "value"},
+            "anthropic_version": "2023-06-01"
+        });
+
+        adapter.transform_request(&mut body, "deployment-name");
+
+        // model 走 URL，body 不带
+        assert!(body.get("model").is_none());
+        // Azure 标准字段保留
+        assert_eq!(body["logit_bias"]["1"], 1);
+        assert_eq!(body["service_tier"], "auto");
+        assert_eq!(body["store"], true);
+        // 未知字段穿透
+        assert_eq!(body["x_future_azure_field"]["nested"], "value");
+        // 外来协议字段剔除
+        assert!(body.get("anthropic_version").is_none());
     }
 
     #[test]

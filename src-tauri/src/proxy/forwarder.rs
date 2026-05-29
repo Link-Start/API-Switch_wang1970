@@ -24,6 +24,11 @@ const STREAMING_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 const STREAMING_PING_INTERVAL: Duration = Duration::from_secs(10);
 const RAW_RESPONSES_REQUEST_FIELD: &str = "__as_raw_responses_req";
 const RESPONSES_PASSTHROUGH_HEADER: &str = "x-api-switch-responses-passthrough";
+/// 同协议直通：入口把原始 Claude 请求体存进此字段，forwarder 在上游同为
+/// Claude/Anthropic 时还原直送，避免 Claude→OpenAI→Claude 双重翻译损耗
+/// （含 mid-conversation system 的位置语义）。
+const RAW_CLAUDE_REQUEST_FIELD: &str = "__as_raw_claude_req";
+const CLAUDE_PASSTHROUGH_HEADER: &str = "x-api-switch-claude-passthrough";
 
 
 #[derive(Debug, Default)]
@@ -461,7 +466,7 @@ pub async fn forward_with_retry(
     state: &ProxyState,
     entries: &[ApiEntry],
     body: &Value,
-    _original_headers: &HeaderMap,
+    original_headers: &HeaderMap,
     requested_model: &str,
     access_key: Option<&AccessKey>,
     is_stream: bool,
@@ -494,6 +499,7 @@ pub async fn forward_with_retry(
             attempts.clone(),
             middleware,
             &caller_kind,
+            original_headers,
         )
         .await
         {
@@ -639,6 +645,7 @@ async fn forward_single(
     prior_attempts: Vec<AttemptInfo>,
     middleware: &[Arc<dyn super::middleware::ForwarderMiddleware>],
     caller_kind: &CallerKind,
+    original_headers: &HeaderMap,
 ) -> Result<ForwardResult, ForwardError> {
     let channel = state
         .db
@@ -650,6 +657,12 @@ async fn forward_single(
     let is_responses_passthrough = matches!(caller_kind, CallerKind::Responses)
         && channel.api_type == "responses"
         && body.get(RAW_RESPONSES_REQUEST_FIELD).is_some();
+    // 同协议直通：客户端说 Claude、上游也是 Claude/Anthropic 时，原样转发原始体，
+    // 跳过有损的 Claude→OpenAI→Claude 双重翻译。能力不匹配（如老模型拒收 mid-system）
+    // 由 forward_with_retry 的失败转移自然兜底。
+    let is_claude_passthrough = matches!(caller_kind, CallerKind::ClaudeMessages)
+        && (channel.api_type == "claude" || channel.api_type == "anthropic")
+        && body.get(RAW_CLAUDE_REQUEST_FIELD).is_some();
 
     let mut upstream_body = if is_responses_passthrough {
         let mut raw = body
@@ -661,6 +674,16 @@ async fn forward_single(
             obj.remove(RAW_RESPONSES_REQUEST_FIELD);
         }
         raw
+    } else if is_claude_passthrough {
+        let mut raw = body
+            .get(RAW_CLAUDE_REQUEST_FIELD)
+            .cloned()
+            .unwrap_or_else(|| body.clone());
+        if let Some(obj) = raw.as_object_mut() {
+            obj.insert("model".to_string(), Value::String(entry.model.clone()));
+            obj.remove(RAW_CLAUDE_REQUEST_FIELD);
+        }
+        raw
     } else {
         let mut converted = body.clone();
         adapter.transform_request(&mut converted, &entry.model);
@@ -669,6 +692,7 @@ async fn forward_single(
 
     if let Some(obj) = upstream_body.as_object_mut() {
         obj.remove(RAW_RESPONSES_REQUEST_FIELD);
+        obj.remove(RAW_CLAUDE_REQUEST_FIELD);
     }
 
     if state.settings.read().await.disable_reasoning {
@@ -680,8 +704,12 @@ async fn forward_single(
         caller_kind: caller_kind.clone(),
         requested_model: Arc::<str>::from(requested_model.to_string()),
     };
-    for mw in middleware.iter() {
-        mw.on_request(&mut upstream_body, &ctx);
+    // 直通分支跳过中间件：StreamOptionsMiddleware 会注入 OpenAI 专有的
+    // stream_options，不能塞进原样的 Claude 请求体。
+    if !is_claude_passthrough {
+        for mw in middleware.iter() {
+            mw.on_request(&mut upstream_body, &ctx);
+        }
     }
 
     let mut request = adapter
@@ -690,6 +718,34 @@ async fn forward_single(
             primary_api_key(&channel.api_key),
         )
         .json(&upstream_body);
+
+    // 同协议直通：透传客户端(真实 Claude Code CLI)的身份/能力头，使上游能识别
+    // CLI 身份（认证层）并开启对应能力（如 anthropic-beta 里的
+    // mid-conversation-system）。否则上游回退旧行为，拒收 messages 数组中的
+    // role:"system" → 400。注意：不透传 authorization（鉴权用渠道自己的 api_key），
+    // 也不透传 host/content-length/connection 等逐跳/长度相关头。
+    if is_claude_passthrough {
+        const PASSTHROUGH_HEADER_PREFIXES: &[&str] = &["x-stainless-", "x-claude-code-"];
+        // 注意：不含 anthropic-version —— apply_auth 已设置（reqwest 的 header() 是
+        // 追加而非覆盖，重复透传会产生重复头）。仅透传 apply_auth 未设置的身份/能力头。
+        const PASSTHROUGH_HEADER_EXACT: &[&str] = &[
+            "anthropic-beta",
+            "user-agent",
+            "x-app",
+        ];
+        for (name, value) in original_headers.iter() {
+            let n = name.as_str().to_ascii_lowercase();
+            let allow = PASSTHROUGH_HEADER_EXACT.contains(&n.as_str())
+                || PASSTHROUGH_HEADER_PREFIXES
+                    .iter()
+                    .any(|p| n.starts_with(p));
+            if allow {
+                if let Ok(v) = value.to_str() {
+                    request = request.header(name.as_str(), v);
+                }
+            }
+        }
+    }
 
     if is_stream {
         request = request.header("Accept", "text/event-stream");
@@ -723,8 +779,13 @@ async fn forward_single(
     let status_code = status as i32;
 
     if is_stream {
-        let needs_transform = !is_responses_passthrough && adapter.needs_sse_transform();
-        let append_model_info = should_append_model_info(state, body, caller_kind);
+        let needs_transform =
+            !is_responses_passthrough && !is_claude_passthrough && adapter.needs_sse_transform();
+        let append_model_info = if is_claude_passthrough {
+            false
+        } else {
+            should_append_model_info(state, body, caller_kind)
+        };
         let mut response = build_streaming_response(
             state,
             entry,
@@ -747,6 +808,12 @@ async fn forward_single(
                 HeaderValue::from_static("true"),
             );
         }
+        if is_claude_passthrough {
+            response.headers_mut().insert(
+                CLAUDE_PASSTHROUGH_HEADER,
+                HeaderValue::from_static("true"),
+            );
+        }
         Ok(ForwardResult {
             response,
             prompt_tokens: 0,
@@ -761,7 +828,7 @@ async fn forward_single(
             .await
             .map_err(|e| (format!("Failed to parse response: {e}"), 502))?;
 
-        if !is_responses_passthrough {
+        if !is_responses_passthrough && !is_claude_passthrough {
             adapter.transform_response(&mut response_body);
 
             // Normalize reasoning fields in response messages (reasoning_content ↔ reasoning_text)
@@ -784,6 +851,8 @@ async fn forward_single(
 
         let has_valid_output = if is_responses_passthrough {
             responses_response_has_valid_output(&response_body)
+        } else if is_claude_passthrough {
+            claude_response_has_valid_output(&response_body)
         } else {
             nonstream_response_has_valid_output(&response_body)
         };
@@ -798,6 +867,12 @@ async fn forward_single(
         if is_responses_passthrough {
             response.headers_mut().insert(
                 RESPONSES_PASSTHROUGH_HEADER,
+                HeaderValue::from_static("true"),
+            );
+        }
+        if is_claude_passthrough {
+            response.headers_mut().insert(
+                CLAUDE_PASSTHROUGH_HEADER,
                 HeaderValue::from_static("true"),
             );
         }
@@ -869,6 +944,29 @@ fn nonstream_response_has_valid_output(body: &Value) -> bool {
             });
 
             has_content || has_tool_calls || has_function_call || has_reasoning
+        })
+}
+
+/// 校验直通的 Claude 原生响应是否有有效输出。
+/// Claude 响应形如 `{"content":[{"type":"text"|"tool_use"|"thinking", ...}], ...}`，
+/// 与 OpenAI 的 `choices[]` 结构不同，需独立判断。
+fn claude_response_has_valid_output(body: &Value) -> bool {
+    body.get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|blocks| {
+            blocks.iter().any(|block| {
+                match block.get("type").and_then(Value::as_str) {
+                    Some("text") | Some("thinking") => block
+                        .get("text")
+                        .or_else(|| block.get("thinking"))
+                        .and_then(Value::as_str)
+                        .is_some_and(|s| !s.is_empty()),
+                    Some("tool_use") => true,
+                    // 未知/未来块类型：保守视为有效，避免误判直通响应无效
+                    Some(_) => true,
+                    None => false,
+                }
+            })
         })
 }
 

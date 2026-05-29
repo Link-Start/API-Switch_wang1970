@@ -282,32 +282,59 @@ fn transform_request_to_anthropic(body: &mut Value, actual_model: &str) {
         }
     }
 
-    // ─── 白名单：Claude 扩展字段 ───────────────────────────────
-    // 只允许显式声明的扩展字段穿透，其余一律丢弃
-    const CLAUDE_EXTENSION_FIELDS: &[&str] = &["x_anthropic_future_field"];
-
-    // Claude 标准字段白名单（基于官方文档）
-    // 参考：https://platform.claude.com/docs/en/api/messages
-    // 注意：model, messages, max_tokens, system, tools, stream, temperature, 
-    // top_p, top_k, stop_sequences, tool_choice, thinking 已在前面手动处理
-    const CLAUDE_STANDARD_FIELDS: &[&str] = &[
-        "metadata",
-        "betas",
+    // ─── 黑名单穿透：保留未知字段，仅丢弃已知 OpenAI 专有字段 ───────────
+    // 决策（见 docs/protocol-passthrough-fix-plan.md §3.4/§5.2）：跨协议出口由
+    // 硬白名单改为黑名单默认。白名单会误删目标协议新增的原生字段（如 Opus 4.8
+    // 的新字段），而上游通常忽略未知字段——"漏删"比"漏放"更易致故障。故保留
+    // 未知/未来字段穿透，仅剔除已知 OpenAI 专有字段（这些 Anthropic 不认）。
+    // 注意：model/messages/max_tokens/system/tools/stream/temperature/top_p/top_k/
+    // stop/tool_choice/thinking/reasoning_effort/parallel_tool_calls/user/
+    // max_completion_tokens 已在前面 remove 并映射，不在此处。
+    const OPENAI_SPECIFIC_DROP: &[&str] = &[
+        // OpenAI Chat Completions 专有
+        "frequency_penalty",
+        "presence_penalty",
+        "logit_bias",
+        "logprobs",
+        "top_logprobs",
+        "n",
+        "seed",
+        "response_format",
+        "stream_options",
+        "function_call",
+        "functions",
+        "store",
+        "modalities",
+        "prediction",
+        "audio",
+        "service_tier",
+        "reasoning",
+        // OpenAI Responses API 专有
+        "input",
+        "instructions",
+        "include",
+        "prompt",
+        "max_output_tokens",
+        "text",
+        "truncation",
+        "previous_response_id",
+        "max_tool_calls",
+        "prompt_cache_key",
+        "prompt_cache_retention",
+        "safety_identifier",
+        "client_metadata",
+        // 内部字段
+        "provider_specific",
+        "__as_raw_claude_req",
+        "__as_raw_responses_req",
     ];
-
-    // 将 obj 中剩余的 Claude 标准字段复制到 anthropic
     if let Value::Object(ref mut anthropic_obj) = anthropic {
-        for key in CLAUDE_STANDARD_FIELDS {
-            if let Some(value) = obj.remove(*key) {
-                anthropic_obj.insert((*key).to_string(), value);
+        for (key, value) in obj.iter() {
+            // 已显式映射的字段不覆盖；已知 OpenAI 专有字段丢弃；其余穿透。
+            if anthropic_obj.contains_key(key) || OPENAI_SPECIFIC_DROP.contains(&key.as_str()) {
+                continue;
             }
-        }
-
-        // 只穿透白名单中的扩展字段
-        for key in CLAUDE_EXTENSION_FIELDS {
-            if let Some(value) = obj.get(*key) {
-                anthropic_obj.insert((*key).to_string(), value.clone());
-            }
+            anthropic_obj.insert(key.clone(), value.clone());
         }
     }
 

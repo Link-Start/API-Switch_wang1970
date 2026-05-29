@@ -211,14 +211,19 @@ mod claude_roundtrip {
         let mut back_to_claude = openai_intermediate.clone();
         adapter.transform_request(&mut back_to_claude, TEST_MODEL);
 
-        // 白名单模式：只保留 Claude 扩展字段（x_anthropic_future_field），其他自定义字段被过滤
-        assert!(
-            back_to_claude.get("x_api_switch_tracking_id").is_none(),
-            "ClaudeAdapter 白名单模式应过滤非白名单字段 x_api_switch_tracking_id"
+        // 黑名单模式（决策见 docs/protocol-passthrough-fix-plan.md §3.4/§5.2）：
+        // 未知/未来字段穿透，只丢弃已知 OpenAI 专有字段。自定义字段必须保留，
+        // 以兑现"未知字段穿透"公理、避免误删目标协议的新增原生字段。
+        assert_eq!(
+            back_to_claude
+                .get("x_api_switch_tracking_id")
+                .and_then(|v| v.as_str()),
+            Some("abc-123"),
+            "ClaudeAdapter 黑名单模式应穿透未知字段 x_api_switch_tracking_id"
         );
-        assert!(
-            back_to_claude.get("x_future_anthropic_field").is_none(),
-            "ClaudeAdapter 白名单模式应过滤非白名单字段 x_future_anthropic_field"
+        assert_eq!(
+            back_to_claude["x_future_anthropic_field"]["nested"], "value",
+            "ClaudeAdapter 黑名单模式应穿透未知嵌套字段 x_future_anthropic_field"
         );
     }
 

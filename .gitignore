@@ -39,7 +39,7 @@ REFACTOR_PLAN.md
 BUG.MD
 log.md
 pool-for-group-test.md
-# docs/  <-- temporarily unignored to commit log-management.md
+docs/
 cli.json
 src-tauri/src/services/learnings_translation.md
 

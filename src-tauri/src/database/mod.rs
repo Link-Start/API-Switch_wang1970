@@ -56,7 +56,10 @@ impl Database {
         }
 
         let xor_key: u8 = 0xA5;
-        let decrypted: Vec<u8> = embedded_pool::POOL.iter().map(|&byte| byte ^ xor_key).collect();
+        let decrypted: Vec<u8> = embedded_pool::POOL
+            .iter()
+            .map(|&byte| byte ^ xor_key)
+            .collect();
         let Ok(text) = String::from_utf8(decrypted) else {
             return Ok(());
         };

@@ -30,4 +30,3 @@ mod tests {
         assert_eq!(primary_api_key("\n  \n\t"), "");
     }
 }
-

@@ -42,10 +42,7 @@ enum ModelsEndpointError {
 
 impl ModelsEndpointError {
     fn is_blocking(&self) -> bool {
-        matches!(
-            self,
-            Self::Network(_) | Self::Timeout(_)
-        )
+        matches!(self, Self::Network(_) | Self::Timeout(_))
     }
 
     fn code(&self) -> &'static str {
@@ -330,7 +327,8 @@ pub async fn probe_url(
     if let (Some(api_type), Some(api_key)) = (api_type.as_deref(), api_key.as_deref()) {
         if !api_key.trim().is_empty() {
             let api_key = primary_api_key(api_key);
-            let (primary_guess, all_available) = detect_endpoint_and_collect(api_type, url, api_key).await;
+            let (primary_guess, all_available) =
+                detect_endpoint_and_collect(api_type, url, api_key).await;
             if let Some(guess) = primary_guess {
                 return Ok(ProbeResult {
                     reachable: true,
@@ -436,9 +434,14 @@ pub async fn fetch_models_direct(
             auto_saved: false,
         });
     }
-    smart_fetch_models(&api_type, &base_url, primary_api_key(&api_key), verified.unwrap_or(false))
-        .await
-        .map_err(|e| AppError::Network(e.message))
+    smart_fetch_models(
+        &api_type,
+        &base_url,
+        primary_api_key(&api_key),
+        verified.unwrap_or(false),
+    )
+    .await
+    .map_err(|e| AppError::Network(e.message))
 }
 
 pub async fn fetch_models(
@@ -447,13 +450,12 @@ pub async fn fetch_models(
 ) -> Result<FetchModelsResult, AppError> {
     let channel = db.get_channel(&channel_id)?;
     let original_base_url = normalize_base_url(&channel.base_url);
-    let endpoint_guess =
-        detect_endpoint_guess(
-            &channel.api_type,
-            &channel.base_url,
-            primary_api_key(&channel.api_key),
-        )
-        .await;
+    let endpoint_guess = detect_endpoint_guess(
+        &channel.api_type,
+        &channel.base_url,
+        primary_api_key(&channel.api_key),
+    )
+    .await;
     let Some(guess) = endpoint_guess else {
         return Ok(FetchModelsResult {
             detected_type: channel.api_type,
@@ -654,7 +656,7 @@ async fn detect_type_with_base_url(
                     });
                 }
             }
-                        Err(ModelsEndpointError::Auth(status)) => {
+            Err(ModelsEndpointError::Auth(status)) => {
                 // Auth (401/403) means endpoint exists but key is invalid
                 let corrected_base_url = canonical_base_url_for_success(api_type, base_url, url);
                 let detected_type = if respect_selected_type {
@@ -742,7 +744,6 @@ async fn fetch_models_result_with_fallback(
     }))
 }
 
-
 async fn detect_endpoint_and_collect(
     api_type: &str,
     base_url: &str,
@@ -762,26 +763,41 @@ async fn detect_endpoint_and_collect(
     let mut all_found_types: Vec<String> = Vec::new();
     let mut primary_guess: Option<EndpointGuess> = None;
 
-    let phase1_base_url = if api_type == "custom" { &original_url } else { &base_site };
+    let phase1_base_url = if api_type == "custom" {
+        &original_url
+    } else {
+        &base_site
+    };
     match detect_type_with_base_url(&client, api_type, phase1_base_url, api_key, true).await {
         DetectionResult::Found(guess) => {
             let t = guess.detected_type.clone();
-            if !all_found_types.contains(&t) { all_found_types.push(t); }
+            if !all_found_types.contains(&t) {
+                all_found_types.push(t);
+            }
             primary_guess = Some(guess);
         }
         DetectionResult::Blocked(err) => {
-            log::warn!("[detect_endpoint] Stop after selected type failed with blocking error: {}", err.message());
+            log::warn!(
+                "[detect_endpoint] Stop after selected type failed with blocking error: {}",
+                err.message()
+            );
         }
         DetectionResult::NotFound => {}
     }
 
     for current_type in ["openai", "responses", "anthropic", "gemini", "azure"] {
-        if current_type == api_type { continue; }
+        if current_type == api_type {
+            continue;
+        }
         let candidate_base_url = &base_site;
-        match detect_type_with_base_url(&client, current_type, candidate_base_url, api_key, false).await {
+        match detect_type_with_base_url(&client, current_type, candidate_base_url, api_key, false)
+            .await
+        {
             DetectionResult::Found(guess) => {
                 let t = guess.detected_type.clone();
-                if !all_found_types.contains(&t) { all_found_types.push(t); }
+                if !all_found_types.contains(&t) {
+                    all_found_types.push(t);
+                }
                 if primary_guess.is_none() {
                     primary_guess = Some(guess);
                 }
@@ -807,7 +823,9 @@ fn normalize_api_type(api_type: &str) -> &'static str {
 
 fn is_authoritative_detection_success(api_type: &str, success_url: &str) -> bool {
     match api_type {
-        "gemini" => success_url.contains("/v1beta/openai/") || success_url.contains("/v1beta/models"),
+        "gemini" => {
+            success_url.contains("/v1beta/openai/") || success_url.contains("/v1beta/models")
+        }
         "azure" => success_url.contains("/openai/deployments"),
         _ => true,
     }
@@ -911,7 +929,7 @@ pub(crate) fn canonical_base_url_for_success(
 
     if api_type == "openai" {
         if let Some(idx) = success_lower.find("/v1/") {
-            let base = &success[..idx + 3];  // include "/v1"
+            let base = &success[..idx + 3]; // include "/v1"
             return base.trim_end_matches('/').to_string();
         }
     }
@@ -1340,5 +1358,3 @@ pub fn save_channel_with_models(
         warnings,
     })
 }
-
-

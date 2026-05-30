@@ -25,7 +25,6 @@ fn has_custom_api_path(base_url: &str) -> bool {
 
 // ─── 黑名单常量 + 构建器：见下方 OPENAI_FOREIGN_DROP ──────────────
 
-
 /// 已知的"外来协议专有"字段——这些字段 OpenAI Chat Completions 不认，
 /// 且明确属于 Anthropic / Gemini native / OpenAI Responses，必须在出口剔除，
 /// 避免泄漏到 OpenAI 上游。
@@ -70,10 +69,7 @@ const OPENAI_FOREIGN_DROP: &[&str] = &[
 // ─── 黑名单构建器函数 ───────────────────────────────────────────
 
 /// 从中间协议构建 OpenAI 请求输出对象（黑名单：保留全部，仅剔除外来字段）
-fn build_openai_request_output(
-    src: &serde_json::Map<String, Value>,
-    actual_model: &str,
-) -> Value {
+fn build_openai_request_output(src: &serde_json::Map<String, Value>, actual_model: &str) -> Value {
     let mut out = src.clone();
     for key in OPENAI_FOREIGN_DROP {
         out.remove(*key);
@@ -242,7 +238,8 @@ mod tests {
     }
 
     #[test]
-    fn transform_request_drops_responses_only_fields() {        let adapter = OpenAiAdapter;
+    fn transform_request_drops_responses_only_fields() {
+        let adapter = OpenAiAdapter;
         let mut body = json!({
             "model": "auto",
             "messages": [{"role": "user", "content": "hi"}],

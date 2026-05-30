@@ -35,9 +35,9 @@ pub fn run_backup() {
 /// Backup the database and its sidecar files
 fn backup_database(db_path: &Path) -> Result<(), AppError> {
     let today = Local::now().format("%Y-%m-%d").to_string();
-    let exe_dir = db_path.parent().ok_or_else(|| {
-        AppError::Database("Failed to get database parent directory".to_string())
-    })?;
+    let exe_dir = db_path
+        .parent()
+        .ok_or_else(|| AppError::Database("Failed to get database parent directory".to_string()))?;
 
     let backup_root = exe_dir.join("backups");
     let today_dir = backup_root.join(&today);
@@ -47,17 +47,18 @@ fn backup_database(db_path: &Path) -> Result<(), AppError> {
         return Ok(());
     }
 
-    fs::create_dir_all(&today_dir).map_err(|e| {
-        AppError::Database(format!("Failed to create backup directory: {e}"))
-    })?;
+    fs::create_dir_all(&today_dir)
+        .map_err(|e| AppError::Database(format!("Failed to create backup directory: {e}")))?;
 
-    let db_file_name = db_path.file_name().and_then(|n| n.to_str()).unwrap_or("api-switch.db");
+    let db_file_name = db_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("api-switch.db");
     let target_db_path = today_dir.join(db_file_name);
 
     // Copy main database file
-    fs::copy(db_path, &target_db_path).map_err(|e| {
-        AppError::Database(format!("Failed to copy database: {e}"))
-    })?;
+    fs::copy(db_path, &target_db_path)
+        .map_err(|e| AppError::Database(format!("Failed to copy database: {e}")))?;
 
     // Copy sidecar files if they exist
     for suffix in ["-wal", "-shm"] {
@@ -79,9 +80,8 @@ fn cleanup_old_backups(backups_dir: &Path, max_days: u64) -> Result<(), AppError
     }
 
     let now = Local::now().naive_local().date();
-    let entries = fs::read_dir(backups_dir).map_err(|e| {
-        AppError::Database(format!("Failed to read backups directory: {e}"))
-    })?;
+    let entries = fs::read_dir(backups_dir)
+        .map_err(|e| AppError::Database(format!("Failed to read backups directory: {e}")))?;
 
     for entry in entries.flatten() {
         let path = entry.path();

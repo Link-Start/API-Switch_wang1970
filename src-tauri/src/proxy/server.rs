@@ -109,21 +109,25 @@ impl ProxyServer {
             )
             .route("/v1/messages", post(handlers::handle_messages))
             .route("/v1/models", get(handlers::handle_list_models))
-            .route("/anthropic/v1/models", get(handlers::handle_list_models_claude))
+            .route(
+                "/anthropic/v1/models",
+                get(handlers::handle_list_models_claude),
+            )
             .route("/v1beta/models", get(handlers::handle_list_models_gemini))
             .route("/v1beta/openai/models", get(handlers::handle_list_models))
             .route(
                 "/openai/deployments",
-                get(
-                    |state, query: Query<AzureDeploymentsQuery>| async move {
-                        handlers::handle_list_models_azure(state, query).await
-                    },
-                ),
+                get(|state, query: Query<AzureDeploymentsQuery>| async move {
+                    handlers::handle_list_models_azure(state, query).await
+                }),
             )
             // Gemini native endpoint (generateContent + streamGenerateContent)
             .route("/v1beta/models/*rest", post(handlers::handle_gemini_native))
             // Gemini single model detail
-            .route("/v1beta/models/{model}", get(handlers::handle_gemini_model_detail))
+            .route(
+                "/v1beta/models/{model}",
+                get(handlers::handle_gemini_model_detail),
+            )
             // Azure native endpoint
             .route(
                 "/openai/deployments/*rest",

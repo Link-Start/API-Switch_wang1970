@@ -9,10 +9,9 @@ use super::auth;
 use super::forwarder;
 use super::handlers::ProxyError;
 use super::protocol::responses::{
-    build_responses_base_response, build_responses_sse_http_response,
-    responses_failed_response, responses_sse_done, responses_sse_line,
-    responses_to_openai_chat_request, transform_openai_sse_to_responses_stream,
-    wrap_openai_response_as_responses,
+    build_responses_base_response, build_responses_sse_http_response, responses_failed_response,
+    responses_sse_done, responses_sse_line, responses_to_openai_chat_request,
+    transform_openai_sse_to_responses_stream, wrap_openai_response_as_responses,
 };
 use super::router;
 use super::server::ProxyState;
@@ -97,17 +96,19 @@ pub async fn handle_responses(
     // 这样可以避免 Responses→Chat→Responses 中间转换损耗 reasoning.summary、
     // reasoning.encrypted_content 等原生字段。
     if let Some(obj) = chat_body.as_object_mut() {
-        obj.insert(
-            "__as_raw_responses_req".to_string(),
-            req_body.clone(),
-        );
+        obj.insert("__as_raw_responses_req".to_string(), req_body.clone());
     }
 
     // Strip Responses-specific fields that shouldn't leak to upstream Chat API
     let responses_fields = [
-        "include", "store", "client_metadata", "metadata",
-        "prompt_cache_key", "prompt_cache_retention",
-        "safety_identifier", "user"
+        "include",
+        "store",
+        "client_metadata",
+        "metadata",
+        "prompt_cache_key",
+        "prompt_cache_retention",
+        "safety_identifier",
+        "user",
     ];
     if let Some(obj) = chat_body.as_object_mut() {
         for field in &responses_fields {

@@ -220,7 +220,7 @@ pub async fn test_chat(
                     error_preview: None,
                 },
             );
-            
+
             return Err(AppError::Network(message));
         }
     };
@@ -251,7 +251,7 @@ pub async fn test_chat(
                 error_preview: Some(&body),
             },
         );
-        
+
         return Err(AppError::Proxy(error_message));
     }
 
@@ -280,7 +280,7 @@ pub async fn test_chat(
                     error_preview: None,
                 },
             );
-            
+
             return Err(AppError::Internal(message));
         }
     };
@@ -306,7 +306,7 @@ pub async fn test_chat(
                 error_preview: None,
             },
         );
-        
+
         return Err(AppError::Internal(message.to_string()));
     }
 
@@ -333,7 +333,7 @@ pub async fn test_chat(
                     error_preview: Some(&response_body),
                 },
             );
-            
+
             return Err(AppError::Internal(message));
         }
     };
@@ -366,7 +366,7 @@ pub async fn test_chat(
                 error_preview: Some(&response_body),
             },
         );
-        
+
         return Err(AppError::Internal(message.to_string()));
     }
 

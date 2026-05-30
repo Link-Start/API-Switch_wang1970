@@ -90,7 +90,10 @@ pub fn build_admin_router(state: AdminState) -> Router {
             post(pool_handlers::backfill_catalog_meta),
         )
         .route("/admin/pool/groups", get(pool_handlers::get_groups))
-        .route("/admin/pool/:id/display-name", put(pool_handlers::update_display_name))
+        .route(
+            "/admin/pool/:id/display-name",
+            put(pool_handlers::update_display_name),
+        )
         .route("/admin/pool/:id/group", put(pool_handlers::update_group))
         // Token API routes 鈥?all require auth
         .route(
@@ -140,7 +143,10 @@ pub fn build_admin_router(state: AdminState) -> Router {
         .route("/admin/proxy/start", post(proxy_handlers::start))
         .route("/admin/proxy/stop", post(proxy_handlers::stop))
         .route("/admin/test-chat", post(chat_handlers::test_chat))
-        .route("/admin/connection-apps", get(connection_apps_handlers::list))
+        .route(
+            "/admin/connection-apps",
+            get(connection_apps_handlers::list),
+        )
         .route(
             "/admin/connection-apps/:id/execute",
             post(connection_apps_handlers::execute),

@@ -30,7 +30,6 @@ const RESPONSES_PASSTHROUGH_HEADER: &str = "x-api-switch-responses-passthrough";
 const RAW_CLAUDE_REQUEST_FIELD: &str = "__as_raw_claude_req";
 const CLAUDE_PASSTHROUGH_HEADER: &str = "x-api-switch-claude-passthrough";
 
-
 #[derive(Debug, Default)]
 struct SseDoneState {
     seen_done: bool,
@@ -541,24 +540,24 @@ pub async fn forward_with_retry(
                 let attempt_path = attempt_path_json(&attempts);
 
                 // Step 1: Always write usage log for every failed attempt
-log_usage(
-                        &state.db,
-                        &state.app_handle,
-                        access_key,
-                        entry,
-                        requested_model,
-                        is_stream,
-                        0,
-                        0,
-                        0,
-                        0,
-                        latency_ms,
-                        log_status,
-                        false,
-                        Some(&e),
-                        Some(attempt_path.as_str()),
-                        None,
-                    );
+                log_usage(
+                    &state.db,
+                    &state.app_handle,
+                    access_key,
+                    entry,
+                    requested_model,
+                    is_stream,
+                    0,
+                    0,
+                    0,
+                    0,
+                    latency_ms,
+                    log_status,
+                    false,
+                    Some(&e),
+                    Some(attempt_path.as_str()),
+                    None,
+                );
 
                 // Step 2: disable unrecoverable status codes or error messages
                 // matching disable keywords; otherwise cool down briefly.
@@ -727,17 +726,11 @@ async fn forward_single(
         const PASSTHROUGH_HEADER_PREFIXES: &[&str] = &["x-stainless-", "x-claude-code-"];
         // 注意：不含 anthropic-version —— apply_auth 已设置（reqwest 的 header() 是
         // 追加而非覆盖，重复透传会产生重复头）。仅透传 apply_auth 未设置的身份/能力头。
-        const PASSTHROUGH_HEADER_EXACT: &[&str] = &[
-            "anthropic-beta",
-            "user-agent",
-            "x-app",
-        ];
+        const PASSTHROUGH_HEADER_EXACT: &[&str] = &["anthropic-beta", "user-agent", "x-app"];
         for (name, value) in original_headers.iter() {
             let n = name.as_str().to_ascii_lowercase();
             let allow = PASSTHROUGH_HEADER_EXACT.contains(&n.as_str())
-                || PASSTHROUGH_HEADER_PREFIXES
-                    .iter()
-                    .any(|p| n.starts_with(p));
+                || PASSTHROUGH_HEADER_PREFIXES.iter().any(|p| n.starts_with(p));
             if allow {
                 if let Ok(v) = value.to_str() {
                     request = request.header(name.as_str(), v);
@@ -813,10 +806,9 @@ async fn forward_single(
             );
         }
         if is_claude_passthrough {
-            response.headers_mut().insert(
-                CLAUDE_PASSTHROUGH_HEADER,
-                HeaderValue::from_static("true"),
-            );
+            response
+                .headers_mut()
+                .insert(CLAUDE_PASSTHROUGH_HEADER, HeaderValue::from_static("true"));
         }
         Ok(ForwardResult {
             response,
@@ -851,7 +843,8 @@ async fn forward_single(
         for mw in middleware.iter() {
             mw.on_response_complete(&mut response_body, &ctx);
         }
-        let (prompt_tokens, completion_tokens, reasoning_tokens) = extract_usage_tokens(&response_body);
+        let (prompt_tokens, completion_tokens, reasoning_tokens) =
+            extract_usage_tokens(&response_body);
 
         let has_valid_output = if is_responses_passthrough {
             responses_response_has_valid_output(&response_body)
@@ -875,10 +868,9 @@ async fn forward_single(
             );
         }
         if is_claude_passthrough {
-            response.headers_mut().insert(
-                CLAUDE_PASSTHROUGH_HEADER,
-                HeaderValue::from_static("true"),
-            );
+            response
+                .headers_mut()
+                .insert(CLAUDE_PASSTHROUGH_HEADER, HeaderValue::from_static("true"));
         }
 
         Ok(ForwardResult {
@@ -947,9 +939,17 @@ fn nonstream_response_has_valid_output(body: &Value) -> bool {
                 .is_some_and(|function_call| !function_call.is_null());
             // 推理模型可能返回 reasoning_content 而无 content
             let has_reasoning = message.is_some_and(|msg| {
-                msg.get("reasoning_content").and_then(Value::as_str).is_some_and(|v| !v.is_empty())
-                    || msg.get("reasoning_text").and_then(Value::as_str).is_some_and(|v| !v.is_empty())
-                    || msg.get("reasoning_details").and_then(Value::as_str).is_some_and(|v| !v.is_empty())
+                msg.get("reasoning_content")
+                    .and_then(Value::as_str)
+                    .is_some_and(|v| !v.is_empty())
+                    || msg
+                        .get("reasoning_text")
+                        .and_then(Value::as_str)
+                        .is_some_and(|v| !v.is_empty())
+                    || msg
+                        .get("reasoning_details")
+                        .and_then(Value::as_str)
+                        .is_some_and(|v| !v.is_empty())
             });
 
             has_content || has_tool_calls || has_function_call || has_reasoning
@@ -1223,24 +1223,24 @@ fn build_streaming_response(
                             let ft = first_token_ms.load(Ordering::SeqCst);
                             let lat = start.elapsed().as_millis() as i64;
                             tokio::spawn(async move {
-log_usage(
-                                &db2,
-                                &ah2,
-                                ak2.as_ref(),
-                                &e2,
-                                &rm2,
-                                true,
-                                pt,
-                                ct,
-                                0,
-                                ft,
-                                lat,
-                                413,
-                                false,
-                                Some("stream buffer exceeds 10MB limit"),
-                                Some(attempt_path.as_str()),
-                                Some(StreamEndReason::Dropped),
-                            );
+                                log_usage(
+                                    &db2,
+                                    &ah2,
+                                    ak2.as_ref(),
+                                    &e2,
+                                    &rm2,
+                                    true,
+                                    pt,
+                                    ct,
+                                    0,
+                                    ft,
+                                    lat,
+                                    413,
+                                    false,
+                                    Some("stream buffer exceeds 10MB limit"),
+                                    Some(attempt_path.as_str()),
+                                    Some(StreamEndReason::Dropped),
+                                );
                             });
                             spawn_cool_down_entry(
                                 circuit_breakers.clone(),
@@ -1301,9 +1301,7 @@ log_usage(
                             done_state.appended_model_info = true;
                             // 在 message_stop 事件之前插入模型名 block
                             let marker = b"event: message_stop";
-                            if let Some(pos) = chunk
-                                .windows(marker.len())
-                                .position(|w| w == marker)
+                            if let Some(pos) = chunk.windows(marker.len()).position(|w| w == marker)
                             {
                                 let mut out = Vec::with_capacity(chunk.len() + 256);
                                 out.extend_from_slice(&chunk[..pos]);
@@ -1314,8 +1312,7 @@ log_usage(
                                 return Poll::Ready(Some(Ok(Bytes::from(out))));
                             }
                             // 没找到 message_stop 文本边界：注入放到 chunk 前
-                            let mut out =
-                                anthropic_model_info_events(entry.model.as_str());
+                            let mut out = anthropic_model_info_events(entry.model.as_str());
                             out.extend_from_slice(&chunk);
                             return Poll::Ready(Some(Ok(Bytes::from(out))));
                         }
@@ -1702,7 +1699,8 @@ fn stream_chunk_has_tool_calls(value: &Value) -> bool {
     let has_responses_tool = matches!(
         value.get("type").and_then(Value::as_str),
         Some("response.function_call_arguments.delta")
-    ) || (value.get("type").and_then(Value::as_str) == Some("response.output_item.added")
+    ) || (value.get("type").and_then(Value::as_str)
+        == Some("response.output_item.added")
         && value
             .get("item")
             .and_then(|item| item.get("type"))
@@ -1851,7 +1849,11 @@ fn scan_anthropic_passthrough_chunk(
                 }
             }
             Some("content_block_delta") => {
-                if let Some(dt) = value.get("delta").and_then(|d| d.get("type")).and_then(Value::as_str) {
+                if let Some(dt) = value
+                    .get("delta")
+                    .and_then(|d| d.get("type"))
+                    .and_then(Value::as_str)
+                {
                     if dt == "text_delta" {
                         has_text.store(true, Ordering::Relaxed);
                     }
@@ -2451,7 +2453,11 @@ mod tests {
             b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"model\":\"claude-opus-4-8\",\"usage\":{\"input_tokens\":123,\"output_tokens\":1}}}\n\n",
         );
         scan_anthropic_passthrough_chunk(&start_chunk, &has_text, &has_tool, &pt, &ct);
-        assert_eq!(pt.load(Ordering::Relaxed), 123, "应从 message_start 取 input_tokens");
+        assert_eq!(
+            pt.load(Ordering::Relaxed),
+            123,
+            "应从 message_start 取 input_tokens"
+        );
 
         // 高缓存命中：input_tokens=0 但 cache token 很大，prompt 应计入缓存
         let pt2 = Arc::new(AtomicI64::new(0));
@@ -2478,7 +2484,11 @@ mod tests {
             b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"output_tokens\":70}}\n\n",
         );
         scan_anthropic_passthrough_chunk(&delta_chunk, &has_text, &has_tool, &pt, &ct);
-        assert_eq!(ct.load(Ordering::Relaxed), 70, "应从 message_delta 取 output_tokens");
+        assert_eq!(
+            ct.load(Ordering::Relaxed),
+            70,
+            "应从 message_delta 取 output_tokens"
+        );
 
         let tool_chunk = Bytes::from_static(
             b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"x\"}}\n\n",
@@ -2486,9 +2496,8 @@ mod tests {
         scan_anthropic_passthrough_chunk(&tool_chunk, &has_text, &has_tool, &pt, &ct);
         assert!(has_tool.load(Ordering::Relaxed), "应检测到 tool_use");
 
-        let stop_chunk = Bytes::from_static(
-            b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
-        );
+        let stop_chunk =
+            Bytes::from_static(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n");
         assert!(
             scan_anthropic_passthrough_chunk(&stop_chunk, &has_text, &has_tool, &pt, &ct),
             "应检测到 message_stop"
@@ -2536,12 +2545,18 @@ data: [DONE]\n"
             .expect("standard SSE data frame");
         let value: Value = serde_json::from_str(payload).expect("valid json");
 
-        assert!(value["id"].as_str().unwrap_or_default().starts_with("chatcmpl-"));
+        assert!(value["id"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("chatcmpl-"));
         assert_eq!(value["object"], "chat.completion.chunk");
         assert!(value["created"].as_u64().is_some());
         assert_eq!(value["model"], "gpt-test");
         assert_eq!(value["choices"][0]["index"], 0);
-        assert_eq!(value["choices"][0]["delta"]["content"], "\n\nmodel: gpt-test");
+        assert_eq!(
+            value["choices"][0]["delta"]["content"],
+            "\n\nmodel: gpt-test"
+        );
         assert!(value["choices"][0]["finish_reason"].is_null());
     }
 
@@ -3525,16 +3540,24 @@ data: [DONE]\n"
             assert!(!obj.contains_key("reasoning_details"));
             assert!(!obj.contains_key("reasoning_effort"));
 
-            let messages = body.get("messages").and_then(Value::as_array).expect("必须保留消息数组");
-            let assistant = messages.get(1).and_then(Value::as_object).expect("必须保留助手消息");
+            let messages = body
+                .get("messages")
+                .and_then(Value::as_array)
+                .expect("必须保留消息数组");
+            let assistant = messages
+                .get(1)
+                .and_then(Value::as_object)
+                .expect("必须保留助手消息");
             assert!(!assistant.contains_key("thinking"));
             assert!(!assistant.contains_key("reasoning"));
             assert!(!assistant.contains_key("reasoning_content"));
             assert!(!assistant.contains_key("reasoning_text"));
             assert!(!assistant.contains_key("reasoning_details"));
             assert!(!assistant.contains_key("reasoning_effort"));
-            assert_eq!(assistant.get("content"), Some(&Value::String("历史回答".to_string())));
+            assert_eq!(
+                assistant.get("content"),
+                Some(&Value::String("历史回答".to_string()))
+            );
         }
     }
 }
-

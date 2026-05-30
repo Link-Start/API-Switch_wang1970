@@ -45,5 +45,3 @@ pub struct StatVersionsResponse {
     pub channel: u64,
     pub token: u64,
 }
-
-

@@ -367,4 +367,3 @@ mod tests {
         assert_eq!(params.api_key.as_deref(), Some("sk-test"));
     }
 }
-

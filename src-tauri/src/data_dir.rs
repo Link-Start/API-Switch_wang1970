@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 const APP_BINARY_NAMES: &[&str] = &["api-switch", "api-switch.exe"];
 
 pub(crate) fn resolve_data_dir() -> Result<PathBuf, AppError> {
-    resolve_data_dir_from(std::env::args_os().map(PathBuf::from), std::env::current_exe)
+    resolve_data_dir_from(
+        std::env::args_os().map(PathBuf::from),
+        std::env::current_exe,
+    )
 }
 
 pub(crate) fn database_path() -> Result<PathBuf, AppError> {
@@ -23,8 +26,8 @@ where
         return Ok(dir);
     }
 
-    let exe = current_exe()
-        .map_err(|e| AppError::Database(format!("Failed to get exe path: {e}")))?;
+    let exe =
+        current_exe().map_err(|e| AppError::Database(format!("Failed to get exe path: {e}")))?;
     exe.parent()
         .map(Path::to_path_buf)
         .ok_or_else(|| AppError::Database("Failed to get executable parent directory".to_string()))
@@ -52,13 +55,19 @@ mod tests {
     fn loader_invocation_uses_api_switch_argument_parent() {
         let dir = resolve_data_dir_from(
             [
-                PathBuf::from("/data/data/com.termux/files/home/as-libs/combined/ld-linux-aarch64.so.1"),
+                PathBuf::from(
+                    "/data/data/com.termux/files/home/as-libs/combined/ld-linux-aarch64.so.1",
+                ),
                 PathBuf::from("--library-path"),
                 PathBuf::from("/data/data/com.termux/files/home/as-libs/combined"),
                 PathBuf::from("/data/data/com.termux/files/home/work/as/api-switch"),
                 PathBuf::from("--nodisktop"),
             ],
-            || Ok(PathBuf::from("/data/data/com.termux/files/home/as-libs/combined/ld-linux-aarch64.so.1")),
+            || {
+                Ok(PathBuf::from(
+                    "/data/data/com.termux/files/home/as-libs/combined/ld-linux-aarch64.so.1",
+                ))
+            },
         )
         .unwrap();
 

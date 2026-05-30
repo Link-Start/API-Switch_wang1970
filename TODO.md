@@ -6,25 +6,6 @@
 
 ## P0
 
-### 🔄 mid-conversation system 故障修复（Claude 中转中断）
-
-**来源：** 2026-05-28 Claude Opus 4.8 发布、2026-05-29 Claude Code v2.1.154 启用 **mid-conversation system messages**（`role:"system"` 置于 `messages` 数组中间，紧跟 user turn）。中间层 `transform_request_to_anthropic`（`claude.rs:135-154`）把**所有** system 角色无差别抽进顶层 `system`，摧毁其位置语义，导致 **Claude→Claude 与 Claude→OpenAI 中转不可用**。
-
-**状态：** ✅ P0 实现完成（分支 `fix/claude-midconv-system`，289 proxy 测试通过），**待真实 Claude Code v2.1.154 经代理端到端回归**（合成 curl 过不了上游 nzbrr 身份挡板）。
-- P0-A 同协议直通：commit `809e040`。
-- 跨协议出口黑名单默认：commit `cd99509`。
-- mid-system 保位测试：commit `86a0902`。
-- P0-C：经核实无需改代码（Claude→OpenAI 的 `_` 兜底已保位；OpenAI→Claude 的 hoisting 故意保留以免老模型回归）。
-- 详见 `docs/protocol-passthrough-fix-plan.md`（两轮自审 + 实测记录）。
-
-**对症方案：**
-- **P0-A 同协议直通**（Claude→Claude）：仿 Responses 的 `__as_raw_responses_req` + `RESPONSES_PASSTHROUGH_HEADER`，原始体直送上游，由 Opus 4.8 自行处理 mid-system。必须同时处理：响应方向跨两层（`forward_single:765` + `handle_messages:385`）、直通后 `apply_disable_reasoning`/`StreamOptionsMiddleware` 的 OpenAI 结构假定、暂存字段转发前剥离。
-- **P0-C mid-system 角色映射**（Claude→OpenAI）：区分"开场 system"与"对话中 system"，后者保留数组位置；不写模型名分支（见 [[feedback_no_model_specific_fixes]]）。
-- 储备（本病因无效，留作 §3.1 类问题）：P0-B 顶层黑名单 / P0-0 关 `ENABLE_UNKNOWN_FIELD_PASSTHROUGH`。
-- 根治：P1 来源分桶（对齐 `docs/PROTOCOL_ENVELOPE_DESIGN.md`）。
-
-**关联：** `docs/protocol-passthrough-fix-plan.md`、`src-tauri/src/proxy/protocol/claude.rs`、`forwarder.rs`、`handlers.rs`、`responses_handler.rs`（范本）。**与本节 P1「消息角色兼容性」高度重叠，建议合并为一处 messages 角色归一化逻辑。**
-
 ### ⏳ 依赖膨胀分析落地
 
 **来源：** `docs/dependency_analysis.md` 分析显示，在 Termux 上运行 `api-switch` 时，需搬运 ~678 个 `.so`（约 708MB）的 GUI 依赖库（GTK、WebKit2GTK、ICU 等）。即使只用 headless 模式，这些库也会因 ELF NEEDED 被强制载入。
@@ -71,19 +52,13 @@
 
 ### ⏳ 对话中显示的模型名来源不明 — model info 注入数据追踪
 
-**来源：** 用户在对话（OpenCode/CLI）中看到的模型标签如 `deepseek-v4-singapore`、`deepseek-v4-flash`、`gpt-5.5` 等，部分名称在当前 AUTO 分组的 api_entries 中并不存在。这些显示名疑似来自：
+**来源：** 用户在对话（OpenCode/CLI）中看到的模型标签如 `deepseek-v4-singapore`、`deepseek-v4-flash`、`gpt-5.5` 等，部分名称在当前 AUTO 分组的 api_entries 中并不存在。
 
-1. **流式响应尾部注入**（`forwarder.rs` 的 `model_info_delta()`）：路由选中的 `entry.model` 被写为 SSE chunk 注入到正文，客户端将其解析为对话内容显示。
-2. **上游透传**：上游返回的响应 `model` 字段（如 OpenAI 原始模型名）未被过滤，直接穿透到客户端。
+**状态（2026-05-30）：** ✅ 主因已查明并修复（见文末「✅ 已完成」区「模型名显示统一」）。结论：唯一会让用户看到模型名的是 AS 的 `model_info_delta` 注入（显示的就是命中的 `entry.model`，正确）；上游响应顶层 `model` 字段是 JSON 元数据，客户端不渲染。原"来源不明"是因为 Claude 直通路径此前不注入，AUTO 命中不同协议时显示时有时无。
 
-**问题：**
-- `model_info_delta()` 注入的 `"\n\nmodel: {name}"` 被客户端当作正文内容渲染，而不是独立的元数据
-- 如果路由选中的模型名与上游响应中的 `model` 字段不同，两者都会被显示，造成混淆
-- 部分模型名（`deepseek-v4-singapore`）既不在 api_entries 也不在任何渠道中，可能来自上游响应的 `model` 字段
-
-**关联文件：**
-- `src-tauri/src/proxy/forwarder.rs` — `model_info_delta()` 注入逻辑（L1605-L1624）、`stream_chunk_has_model_info_delta()` 检测上游已有模型信息（L1534-L1550）
-- `src-tauri/src/proxy/forwarder.rs` — 非流式响应 `resolved_model` 日志字段（L243、L2113）
+**剩余可选项：**
+- 上游响应顶层 `model` 字段是否需要改写成 `entry.model`（目前透传上游真实名，仅元数据、不显示，影响小）。
+- 非流式响应路径的注入与流式口径核对（流式已统一）。
 
 ---
 
@@ -91,7 +66,7 @@
 
 ### ⏳ 消息角色兼容性
 
-> **关联：** 与 P0「mid-conversation system 故障修复」的 P0-C 同属 messages 角色归一化，建议合并实现（见 `docs/protocol-passthrough-fix-plan.md` §9 开放项 4）。
+> **关联：** mid-conversation system 故障（已完成，见文末）走的是「同协议直通」绕开了 messages 角色翻译；本条针对的是**跨协议**转换时 messages 内部 role 的归一化，仍待做。
 
 **来源：** 部分上游拒绝 `messages[]` 中非常规 role 的消息，返回 400 error。
 
@@ -107,6 +82,29 @@
 **方案：** 在 forwarder 或 protocol adapter 的 `transform_request` 中，对 messages 内部 role 做归一化（`developer` → `system`，部分上游 `system` → `user`）。按渠道（api_type）差异处理。
 
 **关联：** `src-tauri/src/proxy/forwarder.rs`、`src-tauri/src/proxy/protocol/*.rs` 各 adapter 的 `transform_request`
+
+---
+
+### ⏳ Responses→Chat 转换层两个参数缺陷（2026-05-30 分析）
+
+**来源：** DB 错误日志分析，CODEX 来源今日 48 个错误中大部分由这两个缺陷引起，扇出到所有上游渠道产生倍增效应。
+
+**缺陷 1：	ools: [] 空数组未被清理**
+
+- **表现：** litellm.BadRequestError: [] is too short - 'tools'
+- **根因：** convert_tools([]) 正确返回 None（跳过空数组），但 esponses_to_openai_chat_request() L543-548 的「透传未知字段」循环把原始请求的 	ools: [] 又写回 chat_body，覆盖了 convert_tools 的判断。
+- **修复：** passthrough 循环应跳过已被显式处理的字段（	ools、esponse_format、messages 等），或在循环结束后再次删除空 tools。
+
+**缺陷 2：esponse_format 缺少 json_schema 子字段**
+
+- **表现：** 'response_format.json_schema' is required when 'response_format.type' is 'json_schema'
+- **根因：** esponses_to_openai_chat_request() L506-510 做 	ext.format → response_format 映射时原样 clone，不校验 json_schema 是否存在。Codex 发了 {type: "json_schema"} 但没带 schema 内容，直接透传到上游。
+- **修复：** 映射后校验：	ype == "json_schema" 时若无 json_schema 字段，删除整个 esponse_format 或降级为 {type: "text"}。
+
+**影响渠道：** aigc-llm.mgtv.com、nvidia、魔塔社区、linlong.xyz、sensenova 等全线报错。
+
+**关联文件：**
+- src-tauri/src/proxy/protocol/responses.rs — esponses_to_openai_chat_request()、convert_tools()
 
 ---
 
@@ -140,6 +138,32 @@
 ### ⏳ 全局错误语义统一
 
 - 统一 IPC 与 HTTP 错误结构、UI 反馈一致性
+
+---
+
+## ✅ 已完成（2026-05-30，本地 master 未推送）
+
+> 本次会话围绕 Claude Opus 4.8 / Claude Code v2.1.154 的协议变化做的一系列修复，均已 `cargo test` 通过 + 真实 Claude CLI 经代理实战验证。详见 `docs/protocol-passthrough-fix-plan.md`。
+
+### Claude 同协议直通 + CLI 身份头透传
+mid-conversation system（`role:"system"` 置于 messages 中间）导致 Claude→Claude 中转失效。解法：上游同为 claude/anthropic 时**字节级原样直通**原始请求体（仿 Responses 的 `__as_raw_responses_req`），由上游自行处理 mid-system；并透传真实 Claude CLI 的身份/能力头（`anthropic-beta` 含 `mid-conversation-system-2026-04-07`、`user-agent`、`x-app`、`x-stainless-*`）。设计天然抗 CLI 升级（原样转发，无需跟改）。
+- commits: `809e040`(直通) `34b21c1`(头透传) `455e8db`(直通流模型名)
+
+### 入口全穿透 / 出口黑名单过滤（分层规则落地）
+确立规则：**入口（A→OpenAI 中间）不过滤、全穿透；出口（中间→目标 B）才按「标准/扩展/语义对应」三类保留、其余抛弃，且不为老旧形态做向后兼容**。修复 Claude CLI→OpenAI 类上游的 `400 UnsupportedParamsError`（`thinking`/`context_management` 等 Anthropic 专有字段泄漏）。OpenAI/Gemini/Azure 出口由白名单改黑名单（保留未知/未来字段，只丢已知外来字段）。
+- commits: `cd99509` `fe553b3` `e51b76e` `5b63c70` `1d861ba`
+
+### 模型名显示统一（AUTO 知道在跟谁对话）
+此前只有 OpenAI/Gemini/Azure 渠道注入 `model: xxx`，Claude 直通不注入 → AUTO 命中不同协议时显示时有时无。补：Claude 直通流用 Anthropic 原生 `content_block`（start/text_delta/stop）在 `message_stop` 前注入实际命中模型名；复用既有防刷屏闸（每流一次、有 tool_use 则跳过）；受全局 `show_conversation_model` 开关控制。
+- commit: `455e8db`
+
+### IN TOKEN 0 修复（缓存 token 计入 prompt）
+实测发现 nzbrr 回传 `input_tokens:0` 但真实 prompt 在 `cache_read_input_tokens`（如 429758）+ `cache_creation_input_tokens`。新增 `anthropic_prompt_tokens()` = input + cache_read + cache_creation，流式（message_start/message_delta）与非流式路径统一。实战验证：prompt 从 0 → 439881。
+- commits: `e86d672` `3e4222e`
+
+### CI release 重试
+`softprops/action-gh-release` 偶发 `other side closed`，加一次重试容错。
+- commit: `cd13fc4`
 
 ---
 

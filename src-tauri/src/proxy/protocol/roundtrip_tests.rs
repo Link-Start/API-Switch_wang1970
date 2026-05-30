@@ -258,7 +258,8 @@ mod claude_roundtrip {
         );
         // 位置语义：前面紧随 assistant，后面仍有 user 轮次（未被抽到顶层/错位）
         assert_eq!(
-            msgs[sys_idx - 1]["role"], "assistant",
+            msgs[sys_idx - 1]["role"],
+            "assistant",
             "mid system 应紧随 assistant 之后"
         );
         assert!(

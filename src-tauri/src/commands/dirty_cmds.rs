@@ -14,6 +14,9 @@ pub async fn take_dirty(params: TakeDirtyParams) -> Result<u64, crate::AppError>
         "pool" => Ok(state_version::current("pool")),
         "channel" => Ok(state_version::current("channel")),
         "token" => Ok(state_version::current("token")),
-        _ => Err(crate::AppError::Validation(format!("Unknown module: {}", params.module))),
+        _ => Err(crate::AppError::Validation(format!(
+            "Unknown module: {}",
+            params.module
+        ))),
     }
 }

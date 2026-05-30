@@ -108,6 +108,6 @@ fn parse_filter(
 
 #[cfg(feature = "gui")]
 #[tauri::command]
-pub fn clear_log_details(state: State<'_, AppState>, filter: Option<UsageLogFilter>) -> Result<u64, AppError> {
-    log_service::clear_log_details(&state.db, filter.as_ref())
+pub fn clear_log_details(state: State<'_, AppState>) -> Result<u64, AppError> {
+    log_service::clear_log_details(&state.db)
 }

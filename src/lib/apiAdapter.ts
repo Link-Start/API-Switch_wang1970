@@ -21,7 +21,7 @@ export interface ApiAdapter {
     getCallTrend(filter?: DashboardFilter): Promise<ChartDataPoint[]>;
     getModelDistribution(filter?: DashboardFilter): Promise<ModelRanking[]>;
     getUserTrend(filter?: DashboardFilter): Promise<ChartDataPoint[]>;
-    clearLogDetails(filter?: UsageLogFilter): Promise<number>;
+    clearLogDetails(): Promise<number>;
   };
   pool: {
     list(): Promise<ApiEntry[]>;

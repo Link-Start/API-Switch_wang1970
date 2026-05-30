@@ -577,54 +577,12 @@ impl Database {
         Ok(data)
     }
 
-    pub fn clear_log_details(&self, filter: Option<&UsageLogFilter>) -> Result<u64, AppError> {
+    pub fn clear_log_details(&self) -> Result<u64, AppError> {
         let conn = lock_conn!(self.conn);
-
-        let mut where_clauses = Vec::new();
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-        if let Some(f) = filter {
-            if let Some(start) = f.start_time {
-                where_clauses.push(format!("created_at >= ?{}", params.len() + 1));
-                params.push(Box::new(start));
-            }
-            if let Some(end) = f.end_time {
-                where_clauses.push(format!("created_at <= ?{}", params.len() + 1));
-                params.push(Box::new(end));
-            }
-            if let Some(ref model) = f.model {
-                where_clauses.push(format!(
-                    "(model LIKE ?{} OR requested_model LIKE ?{})",
-                    params.len() + 1,
-                    params.len() + 2
-                ));
-                params.push(Box::new(format!("%{model}%")));
-                params.push(Box::new(format!("%{model}%")));
-            }
-            if let Some(ref channel_id) = f.channel_id {
-                where_clauses.push(format!("channel_id = ?{}", params.len() + 1));
-                params.push(Box::new(channel_id.clone()));
-            }
-            if let Some(ref access_key_id) = f.access_key_id {
-                where_clauses.push(format!("access_key_id = ?{}", params.len() + 1));
-                params.push(Box::new(access_key_id.clone()));
-            }
-            if let Some(success) = f.success {
-                where_clauses.push(format!("success = ?{}", params.len() + 1));
-                params.push(Box::new(success as i32));
-            }
-        }
-
-        let where_str = if where_clauses.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", where_clauses.join(" AND "))
-        };
-
-        let sql = format!(
-            "UPDATE usage_logs SET other = '', content = '', error_message = NULL {where_str}"
-        );
-        let updated = conn.execute(&sql, params_from_iter(params.iter()))?;
+        let updated = conn.execute(
+            "UPDATE usage_logs SET other = '', content = '', error_message = NULL              WHERE other != '' OR content != '' OR error_message IS NOT NULL",
+            [],
+        )?;
         conn.execute_batch("VACUUM")?;
         Ok(updated as u64)
     }

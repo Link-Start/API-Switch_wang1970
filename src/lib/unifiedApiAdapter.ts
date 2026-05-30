@@ -304,10 +304,10 @@ export const apiAdapter: ApiAdapter = {
         ? tauriCmd<ChartDataPoint[]>('get_user_trend', { filter })
         : webRequest<ChartDataPoint[]>('GET', '/dashboard/user-trend', undefined, filter as Record<string, unknown>),
 
-    clearLogDetails: (filter?: UsageLogFilter) =>
+    clearLogDetails: () =>
       useTauri()
-        ? tauriCmd<number>('clear_log_details', { filter })
-        : webRequest<number>('POST', '/logs/clear-details', filter),
+        ? tauriCmd<number>('clear_log_details')
+        : webRequest<number>('POST', '/logs/clear-details'),
   },
 
   pool: {

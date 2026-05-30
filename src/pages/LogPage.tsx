@@ -150,7 +150,7 @@ export function LogPage() {
   const handleClearDetails = async () => {
     if (!window.confirm(t("log.clearConfirm"))) return;
     try {
-      const count = await api.usage.clearLogDetails(filter);
+      const count = await api.usage.clearLogDetails();
       toast.success(t("log.clearDone", { count }));
     } catch (e) {
       console.error("clearLogDetails failed:", e);

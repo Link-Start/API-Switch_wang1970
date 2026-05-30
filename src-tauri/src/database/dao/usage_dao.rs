@@ -580,7 +580,7 @@ impl Database {
     pub fn clear_log_details(&self) -> Result<u64, AppError> {
         let conn = lock_conn!(self.conn);
         let updated = conn.execute(
-            "UPDATE usage_logs SET other = '', content = '', error_message = NULL              WHERE other != '' OR content != '' OR error_message IS NOT NULL",
+            "UPDATE usage_logs SET other = '', content = '', error_message = NULL WHERE other != '' OR content != '' OR error_message IS NOT NULL",
             [],
         )?;
         conn.execute_batch("VACUUM")?;

@@ -93,9 +93,15 @@ fn execute_connection_app_with_context(
     }
 
     let content = render_connection_content(id, port, access_key)?;
-    let file_path = app.config.file.as_deref().map(expand_home_path).transpose()?;
+    let file_path = app
+        .config
+        .file
+        .as_deref()
+        .map(expand_home_path)
+        .transpose()?;
 
-    let (action, file_path_result, backup_path_result) = if should_write_file(app, allow_file_write) {
+    let (action, file_path_result, backup_path_result) = if should_write_file(app, allow_file_write)
+    {
         let target_path = file_path
             .as_ref()
             .ok_or_else(|| AppError::Validation("缺少目标配置文件路径".to_string()))?;
@@ -106,7 +112,11 @@ fn execute_connection_app_with_context(
             backup_path.map(|path| path.display().to_string()),
         )
     } else {
-        ("clipboard".to_string(), file_path.as_ref().map(|path| path.display().to_string()), None)
+        (
+            "clipboard".to_string(),
+            file_path.as_ref().map(|path| path.display().to_string()),
+            None,
+        )
     };
 
     let env_configured = configure_connection_app_environment(id, access_key, allow_file_write)?;
@@ -312,7 +322,8 @@ fn set_unix_environment_variable(name: &str, value: &str) -> Result<(), AppError
     let block_name = format!("{}{}", MANAGED_ENV_BLOCK_PREFIX, name);
     let block_end = format!("{}{}", MANAGED_ENV_BLOCK_SUFFIX, name);
     let managed_block = build_managed_env_block(&shell, name, value)?;
-    let new_content = replace_managed_block(&config_content, &block_name, &block_end, &managed_block);
+    let new_content =
+        replace_managed_block(&config_content, &block_name, &block_end, &managed_block);
 
     std::fs::write(&shell_config, new_content)
         .map_err(|e| AppError::Internal(format!("写入shell配置文件失败: {e}")))?;
@@ -354,7 +365,9 @@ fn build_managed_env_block(shell: &str, name: &str, value: &str) -> Result<Strin
 
 fn escape_shell_value(value: &str) -> Result<String, AppError> {
     if value.contains(['\n', '\r', '\0']) {
-        return Err(AppError::Validation("环境变量值包含非法控制字符".to_string()));
+        return Err(AppError::Validation(
+            "环境变量值包含非法控制字符".to_string(),
+        ));
     }
 
     Ok(value.split('\'').collect::<Vec<_>>().join("'\"'\"'"))
@@ -397,9 +410,13 @@ fn build_instructions(
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| {
                 #[cfg(target_os = "windows")]
-                { "%APPDATA%\\Zed\\settings.json".to_string() }
+                {
+                    "%APPDATA%\\Zed\\settings.json".to_string()
+                }
                 #[cfg(not(target_os = "windows"))]
-                { "~/.config/zed/settings.json".to_string() }
+                {
+                    "~/.config/zed/settings.json".to_string()
+                }
             });
         let key_instruction = if env_configured {
             "已自动设置用户环境变量 API_SWITCH_API_KEY；请完全退出并重新打开 Zed，让新环境变量生效。".to_string()
@@ -469,7 +486,8 @@ fn replace_config_file(path: &Path, content: &str) -> Result<Option<PathBuf>, Ap
     }
 
     let temp_path = temporary_config_path(path)?;
-    std::fs::write(&temp_path, content).map_err(|e| AppError::Internal(format!("写入临时配置失败: {e}")))?;
+    std::fs::write(&temp_path, content)
+        .map_err(|e| AppError::Internal(format!("写入临时配置失败: {e}")))?;
 
     let backup_path = if path.exists() {
         let backup_path = backup_path_for(path)?;
@@ -524,7 +542,8 @@ mod tests {
 
     #[test]
     fn render_connection_content_uses_exact_app_templates() {
-        let opencode = render_connection_content("opencode", 19090, "sk-test").expect("OpenCode 应生成配置");
+        let opencode =
+            render_connection_content("opencode", 19090, "sk-test").expect("OpenCode 应生成配置");
         assert!(opencode.contains("\"19090\":"));
         assert!(opencode.contains("\"baseURL\": \"http://127.0.0.1:19090/v1\""));
         assert!(opencode.contains("\"apiKey\": \"sk-test\""));
@@ -538,7 +557,8 @@ mod tests {
         assert!(!codex.contains("sandbox_mode"));
         assert!(!codex.contains("wire_api"));
 
-        let claude = render_connection_content("claude-code", 19090, "sk-test").expect("Claude Code 应生成配置");
+        let claude = render_connection_content("claude-code", 19090, "sk-test")
+            .expect("Claude Code 应生成配置");
         assert!(claude.contains("\"ANTHROPIC_AUTH_TOKEN\": \"sk-test\""));
         assert!(claude.contains("\"ANTHROPIC_BASE_URL\": \"http://127.0.0.1:19090\""));
         assert!(claude.contains("\"ANTHROPIC_MODEL\": \"auto\""));
@@ -572,7 +592,8 @@ mod tests {
             access_key("new-disabled", "AUTO", "sk-new-disabled", false, 3),
         ];
 
-        let selected = select_disabled_auto_access_key(&keys).expect("应选择最新禁用 AUTO access key");
+        let selected =
+            select_disabled_auto_access_key(&keys).expect("应选择最新禁用 AUTO access key");
         assert_eq!(selected.key, "sk-new-disabled");
     }
 
@@ -580,7 +601,7 @@ mod tests {
     fn should_write_file_requires_explicit_write_permission() {
         let app = ConnectionAppItem {
             id: "opencode".to_string(),
-            name: "OpenCode CLI".to_string(),
+            name: "OpenCode CLI APP".to_string(),
             description: String::new(),
             icon: "ExternalLink".to_string(),
             config_mode: "write".to_string(),

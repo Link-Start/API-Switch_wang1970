@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from 'sonner';
 import { useApiAdapter } from "@/lib/useApiAdapter";
 import { useDirtyPolling } from "../lib/useDirtyPolling";
@@ -49,6 +50,8 @@ export function LogPage() {
   const [filter, setFilter] = useState<UsageLogFilter>({ page: 1, page_size: 100 });
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [showClearDialog, setShowClearDialog] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
 
   useDirtyPolling('log');
 
@@ -104,7 +107,7 @@ export function LogPage() {
               <col className="w-28" />
               <col className="w-16" />
               <col className="w-16" />
-              <col className="w-20" />
+            <col className="w-10" />
             </colgroup>
             <thead>
               <tr className="border-b bg-muted/50">
@@ -148,13 +151,16 @@ export function LogPage() {
   };
 
   const handleClearDetails = async () => {
-    if (!window.confirm(t("log.clearConfirm"))) return;
+    setIsClearing(true);
     try {
       const count = await api.usage.clearLogDetails();
       toast.success(t("log.clearDone", { count }));
+      setShowClearDialog(false);
     } catch (e) {
       console.error("clearLogDetails failed:", e);
       toast.error(t("log.clearFailed"));
+    } finally {
+      setIsClearing(false);
     }
   };
 
@@ -162,7 +168,7 @@ export function LogPage() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold">{t("log.title")}</h1>
-        <Button variant="destructive" onClick={handleClearDetails}>{t("log.clearData")}</Button>
+        <Button variant="outline" onClick={() => setShowClearDialog(true)}>{t("log.clearData")}</Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4 mb-4">
@@ -213,7 +219,7 @@ export function LogPage() {
               <th className="px-3 py-2 text-left font-medium whitespace-nowrap">{t("log.duration")}</th>
               <th className="px-3 py-2 text-right font-medium">{t("log.promptTokens")}</th>
               <th className="px-3 py-2 text-right font-medium">{t("log.completionTokens")}</th>
-              <th className="px-3 py-2 text-left font-medium whitespace-nowrap"><Switch checked={errorsOnly} onCheckedChange={toggleErrorsOnly} /></th>
+              <th className="px-1 py-1 text-left font-medium whitespace-nowrap"><Switch checked={errorsOnly} onCheckedChange={toggleErrorsOnly} /></th>
             </tr>
           </thead>
           <tbody>
@@ -279,6 +285,19 @@ export function LogPage() {
       {!logs.length && !isLoading && (
         <div className="flex h-32 items-center justify-center text-muted-foreground">{t("common.noData")}</div>
       )}
+
+      <Dialog open={showClearDialog} onOpenChange={setShowClearDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("log.clearConfirmTitle")}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">{t("log.clearConfirm")}</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowClearDialog(false)}>{t("common.cancel")}</Button>
+            <Button variant="destructive" disabled={isClearing} onClick={handleClearDetails}>{t("log.clearData")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

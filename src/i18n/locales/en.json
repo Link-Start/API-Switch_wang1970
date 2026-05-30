@@ -293,6 +293,7 @@
       "thirtyDays": "30 Days"
     },
     "clearData": "Clear Data",
+    "clearConfirmTitle": "Confirm Clear",
     "clearConfirm": "Confirm clearing uncleaned log details (other/content/error_message) and vacuum database? This action cannot be undone.",
     "clearDone": "Cleared details from {{count}} log entries",
     "clearFailed": "Clear failed"

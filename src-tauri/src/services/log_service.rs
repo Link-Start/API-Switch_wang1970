@@ -173,6 +173,6 @@ pub fn get_user_trend(
 }
 
 /// Clear log details (other, content, error_message) and vacuum
-pub fn clear_log_details(db: &Database) -> Result<u64, AppError> {
-    db.clear_log_details()
+pub fn clear_log_details(db: &Database, filter: Option<&UsageLogFilter>) -> Result<u64, AppError> {
+    db.clear_log_details(filter)
 }

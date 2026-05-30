@@ -150,7 +150,7 @@ export function LogPage() {
   const handleClearDetails = async () => {
     if (!window.confirm(t("log.clearConfirm"))) return;
     try {
-      const count = await api.usage.clearLogDetails();
+      const count = await api.usage.clearLogDetails(filter);
       toast.success(t("log.clearDone", { count }));
     } catch (e) {
       console.error("clearLogDetails failed:", e);
@@ -213,7 +213,7 @@ export function LogPage() {
               <th className="px-3 py-2 text-left font-medium whitespace-nowrap">{t("log.duration")}</th>
               <th className="px-3 py-2 text-right font-medium">{t("log.promptTokens")}</th>
               <th className="px-3 py-2 text-right font-medium">{t("log.completionTokens")}</th>
-              <th className="px-3 py-2 text-left font-medium whitespace-nowrap"><div className="flex items-center gap-1"><span>{t("log.all")}</span><Switch checked={errorsOnly} onCheckedChange={toggleErrorsOnly} /><span>{t("log.failed")}</span></div></th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap"><Switch checked={errorsOnly} onCheckedChange={toggleErrorsOnly} /></th>
             </tr>
           </thead>
           <tbody>

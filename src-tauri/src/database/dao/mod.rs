@@ -4,6 +4,7 @@ mod audit_dao;
 mod audit_query_dao;
 mod channel_dao;
 mod config_dao;
+mod import_export_dao;
 mod usage_dao;
 
 pub use access_key_dao::*;

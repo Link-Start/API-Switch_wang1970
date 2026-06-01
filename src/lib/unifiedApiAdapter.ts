@@ -30,6 +30,8 @@ import type {
   TranslationRelayRequest,
   ConnectionAppItem,
   AppConfigResult,
+  ChannelModelImportPreview,
+  ChannelModelImportResult,
 } from '../types';
 import { ADMIN_API_PREFIX } from './adminApiConfig';
 import { clearToken, emitAuthExpired, TOKEN_KEY } from './webAuth';
@@ -453,6 +455,23 @@ export const apiAdapter: ApiAdapter = {
       useTauri()
         ? tauriCmd<AppConfigResult>('execute_connection_app', { id })
         : webRequest<AppConfigResult>('POST', `/connection-apps/${id}/execute`),
+  },
+
+  importExport: {
+    exportChannelModel: () =>
+      useTauri()
+        ? tauriCmd<string>('export_channel_model_transfer')
+        : webRequest<{ payload: string }>('GET', '/import-export/channel-model/export').then((r) => r.payload),
+
+    previewChannelModel: (payload) =>
+      useTauri()
+        ? tauriCmd<ChannelModelImportPreview>('preview_channel_model_transfer', { payload })
+        : webRequest<ChannelModelImportPreview>('POST', '/import-export/channel-model/preview', { payload }),
+
+    importChannelModel: (payload) =>
+      useTauri()
+        ? tauriCmd<ChannelModelImportResult>('import_channel_model_transfer', { payload })
+        : webRequest<ChannelModelImportResult>('POST', '/import-export/channel-model/import', { payload }),
   },
 
   settings: {

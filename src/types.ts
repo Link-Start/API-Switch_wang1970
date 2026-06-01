@@ -244,6 +244,23 @@ export interface VersionedAppSettings extends AppSettings {
   _version: number;
 }
 
+export interface ChannelModelImportPreview {
+  incomingChannels: number;
+  incomingModels: number;
+  currentChannels: number;
+  currentModels: number;
+  containsApiKeys: boolean;
+  hasEmptyModelChannel: boolean;
+  warnings: string[];
+}
+
+export interface ChannelModelImportResult {
+  success: boolean;
+  message: string;
+  channelCount: number;
+  modelCount: number;
+}
+
 export const DEFAULT_SETTINGS: VersionedAppSettings = {
   proxy_enabled: false,
   listen_port: 9090,

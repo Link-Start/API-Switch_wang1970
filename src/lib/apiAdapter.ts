@@ -48,6 +48,11 @@ export interface ApiAdapter {
     list(): Promise<ConnectionAppItem[]>;
     execute(id: string): Promise<AppConfigResult>;
   };
+  importExport: {
+    exportChannelModel(): Promise<string>;
+    previewChannelModel(payload: string): Promise<ChannelModelImportPreview>;
+    importChannelModel(payload: string): Promise<ChannelModelImportResult>;
+  };
 settings: {
     get(): Promise<AppSettings>;
     update(settings: AppSettings): Promise<void>;
@@ -78,7 +83,7 @@ settings: {
 
 
 import type { Channel, CreateChannelParams, UpdateChannelParams, FetchModelsResult, ProbeResult, TestChannelResult, TestChannelDirectParams, ModelInfo, ModelCatalogMetaUpdate, SaveChannelWithModelsParams, SaveChannelWithModelsResult } from '../features/channels/types';
-import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, ProxyStatus, AdminStatus, TestChatResponse, TranslationRelayPayload, TranslationRelayRequest, ConnectionAppItem, AppConfigResult } from '../types';
+import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, ProxyStatus, AdminStatus, TestChatResponse, TranslationRelayPayload, TranslationRelayRequest, ConnectionAppItem, AppConfigResult, ChannelModelImportPreview, ChannelModelImportResult } from '../types';
 
 
 

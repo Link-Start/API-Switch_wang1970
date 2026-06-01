@@ -259,6 +259,7 @@
     "resolvedModel": "Resolved Model",
     "attemptPath": "Attempt Path",
     "streamEndReason": "Stream End Reason",
+    "rawProtocol": "Raw Protocol Data",
     "latency": "Latency(ms)",
     "duration": "Duration / First",
     "firstToken": "First Token(ms)",
@@ -471,6 +472,8 @@
       "showConversationModelDesc": "Append the resolved model name at the end of streamed replies",
       "disableReasoning": "Disable reasoning",
       "disableReasoningDesc": "When enabled, reasoning/thinking data is intercepted and not passed upstream (default: on)",
+      "recordRawProtocolData": "Record raw protocol data",
+      "recordRawProtocolDataDesc": "When enabled, write raw request and upstream response data into database logs for debugging; uses more database space (default: off)",
       "currentVersion": "Version"
     },
     "guide": {

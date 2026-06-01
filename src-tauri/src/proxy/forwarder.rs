@@ -212,11 +212,174 @@ fn sanitize_url_for_log(url: &str) -> String {
     sanitized
 }
 
+fn caller_kind_label(caller_kind: &CallerKind) -> &'static str {
+    match caller_kind {
+        CallerKind::OpenAiChat => "openai_chat",
+        CallerKind::ClaudeMessages => "claude_messages",
+        CallerKind::GeminiNative => "gemini_native",
+        CallerKind::AzureChat => "azure_chat",
+        CallerKind::Responses => "responses",
+    }
+}
+
 fn response_header_value(headers: &reqwest::header::HeaderMap, name: &str) -> Option<String> {
     headers
         .get(name)
         .and_then(|value| value.to_str().ok())
         .map(|value| value.to_string())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_raw_protocol_request_log(
+    caller_kind: &CallerKind,
+    requested_model: &str,
+    entry: &ApiEntry,
+    channel_api_type: &str,
+    url: &str,
+    is_stream: bool,
+    is_responses_passthrough: bool,
+    is_claude_passthrough: bool,
+    gateway_body: &Value,
+    upstream_body: &Value,
+) -> Value {
+    serde_json::json!({
+        "event": "upstream_request",
+        "timestamp_ms": chrono::Utc::now().timestamp_millis(),
+        "caller_kind": caller_kind_label(caller_kind),
+        "requested_model": requested_model,
+        "entry_id": &entry.id,
+        "entry_model": &entry.model,
+        "channel_id": &entry.channel_id,
+        "channel_name": entry.channel_name.as_deref().unwrap_or("unknown"),
+        "channel_api_type": channel_api_type,
+        "url": url,
+        "is_stream": is_stream,
+        "is_responses_passthrough": is_responses_passthrough,
+        "is_claude_passthrough": is_claude_passthrough,
+        "gateway_body": gateway_body,
+        "upstream_body": upstream_body,
+    })
+}
+
+fn with_raw_protocol_response(
+    mut raw_protocol: Value,
+    status_code: u16,
+    response_headers: &reqwest::header::HeaderMap,
+    upstream_response_body: Value,
+) -> Value {
+    if let Some(obj) = raw_protocol.as_object_mut() {
+        obj.insert(
+            "event".to_string(),
+            Value::String("upstream_response".to_string()),
+        );
+        obj.insert(
+            "response_timestamp_ms".to_string(),
+            Value::Number(chrono::Utc::now().timestamp_millis().into()),
+        );
+        obj.insert(
+            "status_code".to_string(),
+            Value::Number(serde_json::Number::from(status_code)),
+        );
+        obj.insert(
+            "content_type".to_string(),
+            response_header_value(response_headers, "content-type")
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+        obj.insert(
+            "x_request_id".to_string(),
+            response_header_value(response_headers, "x-request-id")
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+        obj.insert("upstream_response_body".to_string(), upstream_response_body);
+    }
+    raw_protocol
+}
+
+fn with_raw_protocol_error(
+    mut raw_protocol: Value,
+    status_code: u16,
+    response_headers: Option<&reqwest::header::HeaderMap>,
+    error_body: Value,
+) -> Value {
+    if let Some(obj) = raw_protocol.as_object_mut() {
+        obj.insert(
+            "event".to_string(),
+            Value::String("upstream_error".to_string()),
+        );
+        obj.insert(
+            "response_timestamp_ms".to_string(),
+            Value::Number(chrono::Utc::now().timestamp_millis().into()),
+        );
+        obj.insert(
+            "status_code".to_string(),
+            Value::Number(serde_json::Number::from(status_code)),
+        );
+        if let Some(headers) = response_headers {
+            obj.insert(
+                "content_type".to_string(),
+                response_header_value(headers, "content-type")
+                    .map(Value::String)
+                    .unwrap_or(Value::Null),
+            );
+            obj.insert(
+                "x_request_id".to_string(),
+                response_header_value(headers, "x-request-id")
+                    .map(Value::String)
+                    .unwrap_or(Value::Null),
+            );
+        }
+        obj.insert("error_body".to_string(), error_body);
+    }
+    raw_protocol
+}
+
+fn with_raw_protocol_stream_capture(
+    mut raw_protocol: Value,
+    status_code: i32,
+    response_headers: &reqwest::header::HeaderMap,
+    stream_phase: &str,
+    stream_end_reason: Option<StreamEndReason>,
+    stream_summary: &str,
+    raw_sse: Option<&str>,
+) -> Value {
+    if let Some(obj) = raw_protocol.as_object_mut() {
+        obj.insert(
+            "event".to_string(),
+            Value::String("upstream_stream".to_string()),
+        );
+        obj.insert(
+            "response_timestamp_ms".to_string(),
+            Value::Number(chrono::Utc::now().timestamp_millis().into()),
+        );
+        obj.insert(
+            "status_code".to_string(),
+            Value::Number(serde_json::Number::from(status_code)),
+        );
+        obj.insert(
+            "content_type".to_string(),
+            response_header_value(response_headers, "content-type")
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+        obj.insert(
+            "x_request_id".to_string(),
+            response_header_value(response_headers, "x-request-id")
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+        obj.insert(
+            "upstream_response_body".to_string(),
+            serde_json::json!({
+                "stream_phase": stream_phase,
+                "stream_end_reason": stream_end_reason.map(StreamEndReason::as_str),
+                "stream_summary": stream_summary,
+                "raw_sse": raw_sse,
+            }),
+        );
+    }
+    raw_protocol
 }
 
 fn build_stream_diagnostic(
@@ -327,7 +490,21 @@ fn format_reqwest_error(stage: &str, url: &str, err: reqwest::Error) -> String {
 }
 
 /// Forward error with upstream status code (0 = connection failure).
-type ForwardError = (String, u16);
+struct ForwardError {
+    message: String,
+    status: u16,
+    raw_protocol: Option<Value>,
+}
+
+impl ForwardError {
+    fn new(message: impl Into<String>, status: u16, raw_protocol: Option<Value>) -> Self {
+        Self {
+            message: message.into(),
+            status,
+            raw_protocol,
+        }
+    }
+}
 
 struct ForwardResult {
     response: axum::response::Response,
@@ -358,6 +535,7 @@ struct StreamLogGuard {
     prior_attempts: Vec<AttemptInfo>,
     upstream_url: String,
     response_headers: reqwest::header::HeaderMap,
+    raw_protocol: Option<Value>,
     /// 空流检测冷却时长（秒），取自 settings.circuit_recovery_secs
     empty_stream_cooldown_secs: i64,
 }
@@ -406,6 +584,7 @@ impl Drop for StreamLogGuard {
             let requested_model = self.requested_model.clone();
             let status_code = self.status_code;
             let empty_stream_cooldown_secs = self.empty_stream_cooldown_secs;
+            let raw_protocol = self.raw_protocol.clone();
             tokio::spawn(async move {
                 log_usage(
                     &db,
@@ -424,6 +603,7 @@ impl Drop for StreamLogGuard {
                     Some(stream_summary.as_str()),
                     Some(attempt_path.as_str()),
                     Some(StreamEndReason::Dropped),
+                    raw_protocol.as_ref(),
                 );
 
                 // 空流检测：上游返回 200 但 SSE 流中无实际输出数据。
@@ -527,11 +707,15 @@ pub async fn forward_with_retry(
                         None,
                         Some(attempt_path.as_str()),
                         None,
+                        None,
                     );
                 }
                 return Ok(result.response);
             }
-            Err((e, status)) => {
+            Err(err) => {
+                let e = err.message;
+                let status = err.status;
+                let raw_protocol = err.raw_protocol;
                 let elapsed = start.elapsed();
                 let latency_ms = elapsed.as_millis() as i64;
                 let log_status = if status > 0 { status as i32 } else { 502 };
@@ -557,6 +741,7 @@ pub async fn forward_with_retry(
                     Some(&e),
                     Some(attempt_path.as_str()),
                     None,
+                    raw_protocol.as_ref(),
                 );
 
                 // Step 2: disable unrecoverable status codes or error messages
@@ -645,10 +830,11 @@ async fn forward_single(
     caller_kind: &CallerKind,
     original_headers: &HeaderMap,
 ) -> Result<ForwardResult, ForwardError> {
+    let settings = state.settings.read().await.clone();
     let channel = state
         .db
         .get_channel(&entry.channel_id)
-        .map_err(|e| (format!("DB error: {e}"), 502))?;
+        .map_err(|e| ForwardError::new(format!("DB error: {e}"), 502, None))?;
 
     let adapter = get_adapter(&channel.api_type);
     let url = adapter.build_chat_url(&channel.base_url, &entry.model);
@@ -693,7 +879,7 @@ async fn forward_single(
         obj.remove(RAW_CLAUDE_REQUEST_FIELD);
     }
 
-    if state.settings.read().await.disable_reasoning {
+    if settings.disable_reasoning {
         apply_disable_reasoning(&mut upstream_body);
     }
 
@@ -744,15 +930,34 @@ async fn forward_single(
         request = request.header("Accept-Encoding", "identity");
     }
 
+    let raw_protocol_request = settings.record_raw_protocol_data.then(|| {
+        build_raw_protocol_request_log(
+            caller_kind,
+            requested_model,
+            entry,
+            &channel.api_type,
+            &url,
+            is_stream,
+            is_responses_passthrough,
+            is_claude_passthrough,
+            body,
+            &upstream_body,
+        )
+    });
+
     // Start timer BEFORE sending request — this measures true TTFB
     let request_start = std::time::Instant::now();
 
-    let response = request
-        .send()
-        .await
-        .map_err(|e| (format_reqwest_error("send", &url, e), 0))?;
+    let response = request.send().await.map_err(|e| {
+        let message = format_reqwest_error("send", &url, e);
+        let raw_protocol = raw_protocol_request
+            .clone()
+            .map(|raw| with_raw_protocol_error(raw, 0, None, Value::String(message.clone())));
+        ForwardError::new(message, 0, raw_protocol)
+    })?;
 
     let status = response.status().as_u16();
+    let response_headers = response.headers().clone();
 
     if !response.status().is_success() {
         // Read full error body for debugging
@@ -765,7 +970,15 @@ async fn forward_single(
         } else {
             format!("Upstream error {status}: {error_body}")
         };
-        return Err((error_msg, status));
+        let raw_protocol = raw_protocol_request.clone().map(|raw| {
+            with_raw_protocol_error(
+                raw,
+                status,
+                Some(&response_headers),
+                Value::String(error_body.to_string()),
+            )
+        });
+        return Err(ForwardError::new(error_msg, status, raw_protocol));
     }
 
     let status_code = status as i32;
@@ -796,6 +1009,7 @@ async fn forward_single(
             prior_attempts,
             append_model_info,
             is_claude_passthrough,
+            raw_protocol_request.clone(),
             middleware,
             &ctx,
         );
@@ -819,10 +1033,18 @@ async fn forward_single(
             status_code,
         })
     } else {
-        let mut response_body: Value = response
-            .json()
-            .await
-            .map_err(|e| (format!("Failed to parse response: {e}"), 502))?;
+        let mut response_body: Value = response.json().await.map_err(|e| {
+            let message = format!("Failed to parse response: {e}");
+            let raw_protocol = raw_protocol_request.clone().map(|raw| {
+                with_raw_protocol_error(
+                    raw,
+                    502,
+                    Some(&response_headers),
+                    Value::String(message.clone()),
+                )
+            });
+            ForwardError::new(message, 502, raw_protocol)
+        })?;
 
         if !is_responses_passthrough && !is_claude_passthrough {
             adapter.transform_response(&mut response_body);
@@ -854,10 +1076,11 @@ async fn forward_single(
             nonstream_response_has_valid_output(&response_body)
         };
         if !has_valid_output {
-            return Err((
-                "upstream HTTP 200 completed without valid output".to_string(),
-                502,
-            ));
+            let message = "upstream HTTP 200 completed without valid output".to_string();
+            let raw_protocol = raw_protocol_request.clone().map(|raw| {
+                with_raw_protocol_response(raw, status, &response_headers, response_body.clone())
+            });
+            return Err(ForwardError::new(message, 502, raw_protocol));
         }
 
         let mut response = axum::Json(response_body).into_response();
@@ -1021,10 +1244,13 @@ fn request_uses_tool_calling(body: &Value) -> bool {
 fn should_append_model_info(
     state: &ProxyState,
     body: &Value,
-    _caller_kind: &super::middleware::CallerKind,
+    caller_kind: &super::middleware::CallerKind,
 ) -> bool {
     // Responses 协议自带原生 `response.model` 字段，绝不能向 output_text 正文
     // 追加 `model: xxx`，否则会污染客户端的 output_text。P5 修复。
+    if matches!(caller_kind, super::middleware::CallerKind::Responses) {
+        return false;
+    }
 
     let setting_enabled = state
         .settings
@@ -1059,6 +1285,7 @@ fn build_streaming_response(
     prior_attempts: Vec<AttemptInfo>,
     append_model_info: bool,
     is_claude_passthrough: bool,
+    raw_protocol: Option<Value>,
     middleware: &[Arc<dyn super::middleware::ForwarderMiddleware>],
     ctx: &RequestContext,
 ) -> axum::response::Response {
@@ -1084,6 +1311,8 @@ fn build_streaming_response(
     let logged = Arc::new(AtomicBool::new(false));
     let mut sse_buffer = String::new();
     let mut sse_utf8_remainder: Vec<u8> = Vec::new();
+    let mut raw_stream_buffer = String::new();
+    let mut raw_stream_utf8_remainder: Vec<u8> = Vec::new();
     let mut done_state = SseDoneState::default();
     let mut upstream_stream = Box::pin(response.bytes_stream());
     let mut idle_timeout = Box::pin(sleep(STREAMING_IDLE_TIMEOUT));
@@ -1121,6 +1350,7 @@ fn build_streaming_response(
         prior_attempts: prior_attempts.clone(),
         upstream_url: upstream_url.clone(),
         response_headers: response_headers.clone(),
+        raw_protocol: raw_protocol.clone(),
         empty_stream_cooldown_secs,
     };
 
@@ -1154,6 +1384,19 @@ fn build_streaming_response(
                     let ct = completion_tokens.load(Ordering::SeqCst);
                     let ft = first_token_ms.load(Ordering::SeqCst);
                     let lat = start.elapsed().as_millis() as i64;
+                    let raw_stream_snapshot =
+                        raw_protocol.as_ref().map(|_| raw_stream_buffer.clone());
+                    let raw_protocol_log = raw_protocol.clone().map(|raw| {
+                        with_raw_protocol_stream_capture(
+                            raw,
+                            504,
+                            &response_headers,
+                            "stream_idle_timeout",
+                            Some(StreamEndReason::Timeout),
+                            "stream idle timeout",
+                            raw_stream_snapshot.as_deref(),
+                        )
+                    });
                     tokio::spawn(async move {
                         log_usage(
                             &db2,
@@ -1172,6 +1415,7 @@ fn build_streaming_response(
                             Some("stream idle timeout"),
                             Some(attempt_path.as_str()),
                             Some(StreamEndReason::Timeout),
+                            raw_protocol_log.as_ref(),
                         );
                     });
                     spawn_cool_down_entry(
@@ -1191,6 +1435,13 @@ fn build_streaming_response(
 
             match upstream_stream.as_mut().poll_next(cx) {
                 Poll::Ready(Some(Ok(chunk))) => {
+                    if raw_protocol.is_some() {
+                        super::sse::append_utf8_safe(
+                            &mut raw_stream_buffer,
+                            &mut raw_stream_utf8_remainder,
+                            &chunk,
+                        );
+                    }
                     idle_timeout
                         .as_mut()
                         .reset(tokio::time::Instant::now() + STREAMING_IDLE_TIMEOUT);
@@ -1222,6 +1473,19 @@ fn build_streaming_response(
                             let ct = completion_tokens.load(Ordering::SeqCst);
                             let ft = first_token_ms.load(Ordering::SeqCst);
                             let lat = start.elapsed().as_millis() as i64;
+                            let raw_stream_snapshot =
+                                raw_protocol.as_ref().map(|_| raw_stream_buffer.clone());
+                            let raw_protocol_log = raw_protocol.clone().map(|raw| {
+                                with_raw_protocol_stream_capture(
+                                    raw,
+                                    413,
+                                    &response_headers,
+                                    "stream_buffer_exceeded",
+                                    Some(StreamEndReason::Dropped),
+                                    "stream buffer exceeds 10MB limit",
+                                    raw_stream_snapshot.as_deref(),
+                                )
+                            });
                             tokio::spawn(async move {
                                 log_usage(
                                     &db2,
@@ -1240,6 +1504,7 @@ fn build_streaming_response(
                                     Some("stream buffer exceeds 10MB limit"),
                                     Some(attempt_path.as_str()),
                                     Some(StreamEndReason::Dropped),
+                                    raw_protocol_log.as_ref(),
                                 );
                             });
                             spawn_cool_down_entry(
@@ -1408,6 +1673,19 @@ fn build_streaming_response(
                         let ak2 = access_key.clone();
                         let e2 = entry.clone();
                         let rm2 = requested_model.clone();
+                        let raw_stream_snapshot =
+                            raw_protocol.as_ref().map(|_| raw_stream_buffer.clone());
+                        let raw_protocol_log = raw_protocol.clone().map(|raw| {
+                            with_raw_protocol_stream_capture(
+                                raw,
+                                502,
+                                &response_headers,
+                                "stream_read_error",
+                                Some(stream_end_reason),
+                                error_message.as_str(),
+                                raw_stream_snapshot.as_deref(),
+                            )
+                        });
                         tokio::spawn(async move {
                             log_usage(
                                 &db2,
@@ -1426,6 +1704,7 @@ fn build_streaming_response(
                                 Some(error_message.as_str()),
                                 Some(attempt_path.as_str()),
                                 Some(stream_end_reason),
+                                raw_protocol_log.as_ref(),
                             );
                         });
                         if !suppress_cooldown {
@@ -1512,6 +1791,23 @@ fn build_streaming_response(
                         let eid = entry_id.clone();
                         let sdb = settings_cache.clone();
                         let eah = entries_app_handle.clone();
+                        let raw_protocol_log = if success {
+                            None
+                        } else {
+                            let raw_stream_snapshot =
+                                raw_protocol.as_ref().map(|_| raw_stream_buffer.clone());
+                            raw_protocol.clone().map(|raw| {
+                                with_raw_protocol_stream_capture(
+                                    raw,
+                                    sc,
+                                    &response_headers,
+                                    "stream_complete",
+                                    Some(StreamEndReason::Done),
+                                    log_message.as_str(),
+                                    raw_stream_snapshot.as_deref(),
+                                )
+                            })
+                        };
                         tokio::spawn(async move {
                             log_usage(
                                 &db2,
@@ -1530,6 +1826,7 @@ fn build_streaming_response(
                                 Some(log_message.as_str()),
                                 Some(attempt_path.as_str()),
                                 Some(StreamEndReason::Done),
+                                raw_protocol_log.as_ref(),
                             );
                             if success {
                                 spawn_record_circuit_success(scb, sfc, sdb, db2.clone(), eah, eid);
@@ -2352,6 +2649,18 @@ fn spawn_cool_down_entry(
     });
 }
 
+fn append_raw_protocol_to_other(other: &mut Value, success: bool, raw_protocol: Option<&Value>) {
+    if success {
+        return;
+    }
+
+    if let Some(raw_protocol) = raw_protocol {
+        if let Some(obj) = other.as_object_mut() {
+            obj.insert("raw_protocol".to_string(), raw_protocol.clone());
+        }
+    }
+}
+
 fn log_usage(
     db: &Database,
     app_handle: &Option<crate::AppEventHandle>,
@@ -2369,12 +2678,13 @@ fn log_usage(
     error_message: Option<&str>,
     attempt_path: Option<&str>,
     stream_end_reason: Option<StreamEndReason>,
+    raw_protocol: Option<&Value>,
 ) {
     let log_type = if success { 2 } else { 5 };
     let content = error_message.unwrap_or("");
     let token_name = access_key.map(|ak| ak.name.as_str()).unwrap_or("NONE");
     let use_time = ((latency_ms as f64) / 1000.0).ceil() as i64;
-    let other = serde_json::json!({
+    let mut other = serde_json::json!({
         "requested_model": requested_model,
         "resolved_model": entry.model,
         "first_token_ms": first_token_ms,
@@ -2383,8 +2693,11 @@ fn log_usage(
         "reasoning_tokens": reasoning_tokens,
         "attempt_path": attempt_path.and_then(|path| serde_json::from_str::<Value>(path).ok()),
         "stream_end_reason": stream_end_reason.map(StreamEndReason::as_str),
-    })
-    .to_string();
+    });
+
+    append_raw_protocol_to_other(&mut other, success, raw_protocol);
+
+    let other = other.to_string();
 
     if db
         .insert_usage_log(
@@ -2428,6 +2741,23 @@ mod tests {
     use super::*;
     use crate::proxy::protocol::get_adapter;
 
+    fn test_proxy_state(show_conversation_model: bool) -> ProxyState {
+        ProxyState {
+            db: Arc::new(Database {
+                conn: std::sync::Mutex::new(rusqlite::Connection::open_in_memory().unwrap()),
+            }),
+            settings: Arc::new(tokio::sync::RwLock::new(AppSettings {
+                show_conversation_model,
+                ..AppSettings::default()
+            })),
+            circuit_breakers: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            failure_counts: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            app_handle: None,
+            http_client: reqwest::Client::new(),
+            response_store: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        }
+    }
+
     /// Claude 直通的模型名注入：生成的应是合法 Anthropic content_block 事件，
     /// 含 `model: xxx` 文本。
     #[test]
@@ -2444,6 +2774,72 @@ mod tests {
                 serde_json::from_str::<Value>(p).expect("data 行应为合法 JSON");
             }
         }
+    }
+
+    #[test]
+    fn append_raw_protocol_to_other_skips_success_logs() {
+        let raw_protocol = serde_json::json!({"event": "upstream_error"});
+
+        let mut success_other = serde_json::json!({});
+        append_raw_protocol_to_other(&mut success_other, true, Some(&raw_protocol));
+        assert!(success_other.get("raw_protocol").is_none());
+
+        let mut failure_other = serde_json::json!({});
+        append_raw_protocol_to_other(&mut failure_other, false, Some(&raw_protocol));
+        assert_eq!(failure_other["raw_protocol"], raw_protocol);
+    }
+
+    #[test]
+    fn raw_protocol_capture_keeps_original_request_and_response() {
+        let entry = ApiEntry {
+            id: "entry-1".to_string(),
+            channel_id: "channel-1".to_string(),
+            model: "gpt-4.1".to_string(),
+            display_name: "gpt-4.1".to_string(),
+            sort_index: 0,
+            enabled: true,
+            cooldown_until: None,
+            circuit_state: "closed".to_string(),
+            created_at: 0,
+            updated_at: 0,
+            channel_name: Some("OpenAI".to_string()),
+            channel_api_type: Some("responses".to_string()),
+            owned_by: None,
+            response_ms: None,
+            provider_logo: None,
+            release_date: None,
+            model_meta_zh: None,
+            model_meta_en: None,
+            group_name: None,
+            score: 0.0,
+        };
+        let gateway_body = serde_json::json!({"input": "hello"});
+        let upstream_body = serde_json::json!({"model": "gpt-4.1", "input": "hello"});
+        let response_body = serde_json::json!({"id": "resp_1", "output": [{"type": "message"}]});
+        let headers = reqwest::header::HeaderMap::new();
+
+        let request = build_raw_protocol_request_log(
+            &CallerKind::Responses,
+            "alias-model",
+            &entry,
+            "responses",
+            "https://example.com/v1/responses?api_key=raw",
+            false,
+            true,
+            false,
+            &gateway_body,
+            &upstream_body,
+        );
+        let capture = with_raw_protocol_response(request, 200, &headers, response_body.clone());
+
+        assert_eq!(capture["requested_model"], "alias-model");
+        assert_eq!(
+            capture["url"],
+            "https://example.com/v1/responses?api_key=raw"
+        );
+        assert_eq!(capture["gateway_body"], gateway_body);
+        assert_eq!(capture["upstream_body"], upstream_body);
+        assert_eq!(capture["upstream_response_body"], response_body);
     }
 
     /// 扫描函数应正确识别 text_delta(有文本)、tool_use(工具调用)、message_stop，
@@ -3311,6 +3707,26 @@ data: [DONE]\n",
         assert!(!request_uses_structured_output(&body_with_tools));
         // 次要断言：contains_tool_calling_field 仍识别 tools 定义（以备未来精细化判断）
         assert!(contains_tool_calling_field(&body_with_tools));
+    }
+
+    #[test]
+    fn should_append_model_info_disables_only_responses_caller() {
+        let state = test_proxy_state(true);
+        let body = serde_json::json!({
+            "model": "auto",
+            "messages": [{"role": "user", "content": "你好"}],
+        });
+
+        assert!(!should_append_model_info(
+            &state,
+            &body,
+            &CallerKind::Responses,
+        ));
+        assert!(should_append_model_info(
+            &state,
+            &body,
+            &CallerKind::OpenAiChat,
+        ));
     }
 
     #[test]

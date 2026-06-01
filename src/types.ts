@@ -233,6 +233,7 @@ export interface AppSettings {
   active_group: string;
   show_conversation_model: boolean;
   disable_reasoning: boolean;
+  record_raw_protocol_data: boolean;
   web_admin_enabled: boolean;
   web_admin_username: string;
   web_admin_password: string;
@@ -281,6 +282,7 @@ export const DEFAULT_SETTINGS: VersionedAppSettings = {
   active_group: "auto",
   show_conversation_model: false,
   disable_reasoning: true,
+  record_raw_protocol_data: false,
   web_admin_enabled: false,
   web_admin_username: "admin",
   web_admin_password: "admin",

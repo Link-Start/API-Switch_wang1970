@@ -538,7 +538,7 @@ mod tests {
     }
 
     #[test]
-    fn test_responses_hosted_tools_degradation_prompt_points_to_local_methods() {
+    fn test_responses_hosted_tools_degradation_prompt_declares_safe_capability_boundary() {
         let prompt = responses_hosted_tools_degradation_prompt(&[
             "web_search".to_string(),
             "file_search".to_string(),
@@ -547,12 +547,15 @@ mod tests {
 
         assert!(prompt.contains("web_search"));
         assert!(prompt.contains("file_search"));
-        assert!(prompt.contains("PowerShell"));
-        assert!(prompt.contains("curl"));
-        assert!(prompt.contains("Python"));
-        assert!(prompt.contains("Do not fabricate"));
-        assert!(!prompt.contains("切换到支持"));
-        assert!(!prompt.contains("粘贴文件内容"));
+        assert!(prompt.contains("server-side tool"));
+        assert!(prompt.contains("Do not claim"));
+        assert!(prompt.contains("Do not invent"));
+        assert!(prompt.contains("function tools"));
+        assert!(!prompt.contains("PowerShell"));
+        assert!(!prompt.contains("curl"));
+        assert!(!prompt.contains("browser"));
+        assert!(!prompt.contains("File system"));
+        assert!(!prompt.contains("Database"));
     }
 
     #[test]
@@ -573,7 +576,8 @@ mod tests {
         let content = messages[0]["content"].as_str().unwrap();
         assert!(content.contains("保持简洁。"));
         assert!(content.contains("web_search"));
-        assert!(content.contains("methods available in your runtime"));
+        assert!(content.contains("server-side tool"));
+        assert!(content.contains("Do not claim"));
 
         let tools = chat_body["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);

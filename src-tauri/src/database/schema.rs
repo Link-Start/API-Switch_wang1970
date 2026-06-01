@@ -181,6 +181,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
         ("web_admin_port", "9090"),
         ("show_conversation_model", "0"),
         ("disable_reasoning", "1"),
+        ("record_raw_protocol_data", "0"),
         ("app_version", "0.6.9"),
     ];
 

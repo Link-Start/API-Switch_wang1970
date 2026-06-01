@@ -466,6 +466,20 @@ export function SettingsEditor({
             />
           </div>
           <div className="flex items-center justify-between">
+            <div>
+              <Label>{t("settings.general.recordRawProtocolData")}</Label>
+              <p className="text-xs text-muted-foreground">
+                {t("settings.general.recordRawProtocolDataDesc")}
+              </p>
+            </div>
+            <Switch
+              checked={s.record_raw_protocol_data}
+              onCheckedChange={(value) =>
+                onChange("record_raw_protocol_data", value)
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between">
             <Label>{t("settings.tray.autostart")}</Label>
             {isWeb ? (
               <span className="text-sm text-muted-foreground">

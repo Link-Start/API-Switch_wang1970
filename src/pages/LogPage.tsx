@@ -22,6 +22,7 @@ interface UsageLogMeta {
     error?: string | null;
   }>;
   stream_end_reason?: string;
+  raw_protocol?: unknown;
 }
 
 function parseUsageLogMeta(other: string | null | undefined): UsageLogMeta | null {
@@ -42,6 +43,14 @@ function formatAttemptPath(meta: UsageLogMeta | null): string[] {
       return `${title || "unknown"}${status}`;
     })
     .filter(Boolean);
+}
+
+function formatJsonBlock(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 export function LogPage() {
@@ -229,6 +238,7 @@ export function LogPage() {
               const resolvedModel = meta?.resolved_model || log.model;
               const requestedModel = meta?.requested_model || log.requested_model;
               const attemptPath = formatAttemptPath(meta);
+              const rawProtocol = meta?.raw_protocol;
               return (
                 <Fragment key={log.id}>
                   <tr className="border-b hover:bg-muted/30 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : log.id)}>
@@ -256,6 +266,12 @@ export function LogPage() {
                             <div>
                               <div className="font-medium text-muted-foreground mb-1">Meta</div>
                               <pre className="whitespace-pre-wrap break-all text-muted-foreground">{log.other}</pre>
+                            </div>
+                          ) : null}
+                          {rawProtocol !== undefined ? (
+                            <div>
+                              <div className="font-medium text-muted-foreground mb-1">{t("log.rawProtocol")}</div>
+                              <pre className="whitespace-pre-wrap break-all">{formatJsonBlock(rawProtocol)}</pre>
                             </div>
                           ) : null}
                           {log.content ? (

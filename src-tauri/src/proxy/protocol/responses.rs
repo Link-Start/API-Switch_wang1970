@@ -99,7 +99,10 @@ fn chat_sse_error(error: Option<&Value>) -> String {
         .and_then(|e| e.get("type"))
         .and_then(Value::as_str)
         .unwrap_or("responses_error");
-    let code = error.and_then(|e| e.get("code")).cloned().unwrap_or(Value::Null);
+    let code = error
+        .and_then(|e| e.get("code"))
+        .cloned()
+        .unwrap_or(Value::Null);
 
     serde_json::to_string(&json!({
         "error": {
@@ -457,16 +460,11 @@ pub fn responses_hosted_tools_degradation_prompt(tool_types: &[String]) -> Optio
     }
 
     Some(format!(
-        "The current request contains Responses native tool(s): {}, which are unavailable in the current environment.\n\n\
-Instead, accomplish the task using methods available in your runtime, for example:\n\
-- Shell commands (PowerShell/cmd/bash)\n\
-- HTTP requests (curl/Invoke-WebRequest)\n\
-- Scripts (Python/Node.js)\n\
-- Web automation (Playwright/browser)\n\
-- File system search and read\n\
-- Database queries\n\
-- Any other registered local tools\n\n\
-All results must come from actual execution or verifiable information. Do not fabricate results of any kind.",
+        "The original Responses request included server-side tool(s): {}, but the current Chat upstream does not provide those hosted tools.\n\n\
+Do not claim that you used these server-side tools. Do not invent tool results.\n\
+If the task can be answered from the conversation and model knowledge, answer normally.\n\
+If the task requires live, external, private, or tool-only data, clearly state that the required hosted tool is unavailable in this route and ask the caller to provide the needed data or retry through a Responses-capable route.\n\
+You may only use function tools that are explicitly present in this Chat request.",
         tool_types.join(", ")
     ))
 }
@@ -1372,13 +1370,11 @@ const RESPONSES_REQUEST_STANDARD_FIELDS: &[&str] = &[
 ];
 
 /// Responses 请求方向扩展字段白名单
-const RESPONSES_REQUEST_EXTENSION_FIELDS: &[&str] = &[
-    "x_responses_future_field",
-];
+const RESPONSES_REQUEST_EXTENSION_FIELDS: &[&str] = &["x_responses_future_field"];
 
 /// Responses 响应方向标准字段白名单（基于官方文档）
 /// 参考：https://developers.openai.com/api/reference/resources/responses/
-/// 注意：id, object, created_at, model, output, usage, status, error, 
+/// 注意：id, object, created_at, model, output, usage, status, error,
 /// incomplete_details, metadata 已在 responses_completed_response 中手动构造
 /// 注意：max_output_tokens, max_tool_calls 仅是请求参数，不在响应中出现
 const RESPONSES_RESPONSE_STANDARD_FIELDS: &[&str] = &[
@@ -2810,7 +2806,6 @@ pub fn input_to_messages(input: &Value, instructions: Option<&str>) -> Vec<Value
                             continue;
                         }
 
-                        
                         // ── reasoning 跳过（思维链元数据，不是对话消息） ──
                         "reasoning" => {
                             i += 1;

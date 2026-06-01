@@ -259,6 +259,7 @@
     "resolvedModel": "实际模型",
     "attemptPath": "尝试路径",
     "streamEndReason": "流结束原因",
+    "rawProtocol": "原始协议数据",
     "latency": "耗时(ms)",
     "duration": "用时/首字",
     "firstToken": "首Token(ms)",
@@ -471,6 +472,8 @@
       "showConversationModelDesc": "流式回答结束时追加实际命中的模型名称",
       "disableReasoning": "关闭思维链",
       "disableReasoningDesc": "开启后会拦截思维链相关数据，不传递到上游（默认开启）",
+      "recordRawProtocolData": "记录原始协议数据",
+      "recordRawProtocolDataDesc": "开启后把请求和上游响应原始数据写入数据库日志，便于调试；会占用更多数据库空间（默认关闭）",
       "currentVersion": "当前版本"
     },
     "guide": {

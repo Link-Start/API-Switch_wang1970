@@ -697,6 +697,17 @@ Responses hosted tools 在 Chat fallback 中无法等价表示时，当前止血
 - 注入降级提示，引导模型说明运行环境无法直接调用 hosted tool
 - 避免把 hosted tool 不兼容误计为上游失败
 
+这里必须明确区分两类注入：
+
+- 能力降级注入：只用于 `下游 Responses -> 上游 Chat/non-Responses`，目的是告诉模型当前路由不具备 server-side hosted tools，要求其改用纯对话或显式 function tools 完成任务。
+- 模型名展示注入：`forwarder.rs` 在部分非 Responses 下游末尾追加 `model: xxx` 仅用于显示命中模型，不能进入 `Responses` 原生输出；`CallerKind::Responses` 必须禁用该注入，避免污染 `response.output_text`。
+
+为定位这条降级链路上的 high risk / 拒绝来源，系统新增 `record_raw_protocol_data` 调试设置：
+
+- 默认关闭。
+- 只在失败日志写入 `usage_logs.other.raw_protocol`，成功请求不记录，避免数据库持续膨胀。
+- 记录内容按原值保留 `caller_kind`、`channel_api_type`、`gateway_body`、`upstream_body`、`error_body`、`upstream_response_body`、`x_request_id` 等关键字段，供本地复现时对照同协议透传与 Chat fallback 的真实差异。
+
 对 Responses 输出边界，当前规则已不再允许“未知字段默认透传”。输出到 Responses 时，只允许：
 
 - Responses 标准字段

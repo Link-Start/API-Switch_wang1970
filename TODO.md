@@ -108,6 +108,35 @@
 
 ---
 
+### ⏳ Responses hosted tools 降级链路的 high risk 拒绝定位（2026-06-01）
+
+**来源：** 已确认必须区分两类注入：
+
+- `Responses -> Chat/non-Responses` 时，为 hosted tools 缺失做能力降级提示注入，避免下游继续假定 server-side tool 可用。
+- `forwarder` 里的 `model: xxx` 仅是模型名展示注入，和 server call / hosted tools 无关；本次已恢复 `CallerKind::Responses` 禁注入，避免污染 `response.output_text`。
+
+**当前结论：**
+
+- `Responses -> Responses` 同协议透传正常，不需要这条降级提示。
+- `OpenAI Chat -> Responses` 也不会触发 hosted-tools 降级注入。
+- 仍未彻底定位的是：`Responses -> Chat/non-Responses` fallback 失败时，究竟是哪个字段触发上游 high risk / 拒绝，需要失败现场原始协议数据来确认。
+
+**复现与排查要求：**
+
+- 仅在复现期临时开启设置项 `record_raw_protocol_data`。
+- 该设置默认关闭，且只在失败日志写入 `usage_logs.other.raw_protocol`，成功请求不记录。
+- 复现后重点比对：`caller_kind`、`channel_api_type`、`gateway_body`、`upstream_body`、`error_body`、`upstream_response_body`、`x_request_id`。
+- 对照同一请求在 `Responses -> Responses` 透传链路与 `Responses -> Chat` 降级链路的差异，确认触发 high risk 的具体字段或提示文本。
+
+**关联文件：**
+
+- `src-tauri/src/proxy/protocol/responses.rs`
+- `src-tauri/src/proxy/forwarder.rs`
+- `src/pages/LogPage.tsx`
+- `src/features/settings/SettingsEditor.tsx`
+
+---
+
 ## P2
 
 ### ⏳ 清理排序模式（fastest/latest）死代码

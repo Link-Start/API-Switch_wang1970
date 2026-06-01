@@ -337,4 +337,18 @@ mod tests {
         assert!(patched.web_admin_enabled);
         assert_eq!(patched.web_admin_port, 9456);
     }
+
+    #[test]
+    fn settings_patch_can_enable_raw_protocol_recording() {
+        let current = AppSettings::default();
+
+        let patched = merge_settings_patch(
+            &current,
+            &serde_json::json!({ "record_raw_protocol_data": true }),
+        )
+        .unwrap();
+
+        assert!(patched.record_raw_protocol_data);
+        assert!(patched.disable_reasoning);
+    }
 }

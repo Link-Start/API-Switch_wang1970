@@ -28,6 +28,7 @@ pub struct AppSettings {
     pub web_admin_port: i32,
     pub show_conversation_model: bool,
     pub disable_reasoning: bool,
+    pub record_raw_protocol_data: bool,
     pub app_version: String,
     #[serde(skip_serializing, skip_deserializing, default)]
     pub updated_at: i64,
@@ -57,6 +58,7 @@ impl Default for AppSettings {
             web_admin_port: 9099,
             show_conversation_model: false,
             disable_reasoning: true,
+            record_raw_protocol_data: false,
             app_version: "0.6.9".to_string(),
             locale: String::new(),
             theme: String::new(),
@@ -148,6 +150,9 @@ impl Database {
         if let Some(v) = kv.get("disable_reasoning") {
             settings.disable_reasoning = v == "1";
         }
+        if let Some(v) = kv.get("record_raw_protocol_data") {
+            settings.record_raw_protocol_data = v == "1";
+        }
         if let Some(v) = kv.get("app_version") {
             settings.app_version = v.clone();
         }
@@ -220,6 +225,14 @@ impl Database {
             (
                 "disable_reasoning",
                 if updates.disable_reasoning { "1" } else { "0" },
+            ),
+            (
+                "record_raw_protocol_data",
+                if updates.record_raw_protocol_data {
+                    "1"
+                } else {
+                    "0"
+                },
             ),
             ("app_version", &updates.app_version),
             ("updated_at", &updated_at.to_string()),

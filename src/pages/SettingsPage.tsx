@@ -4,6 +4,7 @@ import { useApiAdapter, isTauriRuntime } from "@/lib/useApiAdapter";
 import { toast } from "sonner";
 import { DEFAULT_SETTINGS, type AppSettings } from "@/types";
 import { SettingsEditor } from "@/features/settings/SettingsEditor";
+import { DataImportExportPanel } from "@/features/settings/DataImportExportPanel";
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
@@ -68,7 +69,7 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="p-6 max-w-2xl">
+    <div className="p-6 max-w-2xl space-y-6">
       <h1 className="text-xl font-semibold mb-6">{t("settings.title")}</h1>
       <SettingsEditor
         settings={s}
@@ -79,6 +80,7 @@ export function SettingsPage() {
         onChange={update}
         onProxyToggle={toggleProxy}
       />
+      <DataImportExportPanel />
     </div>
   );
 }

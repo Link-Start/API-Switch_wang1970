@@ -1,6 +1,6 @@
 {
   "name": "api-switch",
-  "version": "0.7.28",
+  "version": "0.7.29",
   "description": "Personal API Management & Forwarding Center",
   "private": true,
   "type": "module",

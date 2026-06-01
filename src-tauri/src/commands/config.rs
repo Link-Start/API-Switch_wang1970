@@ -165,6 +165,32 @@ pub async fn refresh_settings_l1(state: &AppState) -> Result<AppSettings, AppErr
     Ok(settings)
 }
 
+pub(crate) fn merge_settings_patch(
+    current: &AppSettings,
+    patch: &serde_json::Value,
+) -> Result<AppSettings, AppError> {
+    let patch_obj = patch
+        .as_object()
+        .ok_or_else(|| AppError::Validation("settings patch must be a JSON object".to_string()))?;
+    let mut settings_value = serde_json::to_value(current)
+        .map_err(|e| AppError::Internal(format!("serialize settings failed: {e}")))?;
+
+    let Some(settings_obj) = settings_value.as_object_mut() else {
+        return Err(AppError::Internal(
+            "settings did not serialize to a JSON object".to_string(),
+        ));
+    };
+
+    for (key, value) in patch_obj {
+        if key != "_version" {
+            settings_obj.insert(key.clone(), value.clone());
+        }
+    }
+
+    serde_json::from_value(settings_value)
+        .map_err(|e| AppError::Validation(format!("invalid settings patch: {e}")))
+}
+
 pub async fn apply_settings_update(
     app: crate::AppEventHandle,
     state: &AppState,
@@ -267,4 +293,48 @@ pub async fn update_settings(
     settings: AppSettings,
 ) -> Result<(), AppError> {
     apply_settings_update(app, &state, settings, false).await
+}
+
+#[cfg(feature = "gui")]
+#[tauri::command]
+pub async fn patch_settings(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    patch: serde_json::Value,
+) -> Result<AppSettings, AppError> {
+    let current = state.settings.read().await.clone();
+    let mut merged = merge_settings_patch(&current, &patch)?;
+    if merged.web_admin_password.is_empty() {
+        merged.web_admin_password = current.web_admin_password;
+    }
+
+    apply_settings_update(app, &state, merged, false).await?;
+    Ok(state.settings.read().await.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_patch_changes_only_requested_field() {
+        let current = AppSettings {
+            access_key_required: false,
+            listen_port: 8123,
+            web_admin_enabled: true,
+            web_admin_port: 9456,
+            ..AppSettings::default()
+        };
+
+        let patched = merge_settings_patch(
+            &current,
+            &serde_json::json!({ "access_key_required": true }),
+        )
+        .unwrap();
+
+        assert!(patched.access_key_required);
+        assert_eq!(patched.listen_port, 8123);
+        assert!(patched.web_admin_enabled);
+        assert_eq!(patched.web_admin_port, 9456);
+    }
 }

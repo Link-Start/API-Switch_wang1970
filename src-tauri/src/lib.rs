@@ -284,6 +284,7 @@ fn run_gui(runtime_mode: RuntimeMode) {
         commands::config::get_settings,
         commands::channel::save_channel_with_models,
         commands::config::update_settings,
+        commands::config::patch_settings,
         commands::config::check_update,
         commands::connection_apps::list_connection_apps,
         commands::connection_apps::execute_connection_app,

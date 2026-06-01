@@ -491,9 +491,7 @@ export const apiAdapter: ApiAdapter = {
 
     patchSettings: async (patch) => {
       if (useTauri()) {
-        const current = await tauriCmd<AppSettings>('get_settings');
-        await tauriCmd<void>('update_settings', { settings: { ...current, ...patch } });
-        return { ...current, ...patch };
+        return tauriCmd<AppSettings>('patch_settings', { patch });
       }
       const r = await webRequest<{ data: AppSettings; _version: number }>('PATCH', '/settings', patch);
       lastSettingsVersion = r._version;

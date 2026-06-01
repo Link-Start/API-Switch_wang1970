@@ -93,7 +93,7 @@ function MainApp({ onLogout }: { onLogout?: () => void }) {
   }, [settings?.show_guide, isDesktop]);
 
   const handleGuideDismiss = (dontShowAgain: boolean) => {
-    if (dontShowAgain && settings) api.settings.update({ ...settings, show_guide: false });
+    if (dontShowAgain && settings) api.settings.patchSettings({ show_guide: false });
   };
 
   useEffect(() => {

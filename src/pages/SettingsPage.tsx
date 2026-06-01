@@ -26,7 +26,7 @@ export function SettingsPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: adapter.settings.update,
+    mutationFn: adapter.settings.patchSettings,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
       queryClient.invalidateQueries({ queryKey: ["pool-groups"] });
@@ -48,7 +48,7 @@ export function SettingsPage() {
       // Persist the remembered default group for the API Management page locally for faster UI restoration.
       localStorage.setItem("api-switch-default-group", value as string);
     }
-    updateMutation.mutate({ ...s, [key]: value });
+    updateMutation.mutate({ [key]: value } as Partial<AppSettings>);
   };
 
   const toggleProxy = async (enabled: boolean) => {

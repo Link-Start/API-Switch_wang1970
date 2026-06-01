@@ -69,6 +69,27 @@ export function SettingsEditor({
       setEditPassword(s.web_admin_password);
     }
   }, [s.web_admin_password]);
+  useEffect(() => {
+    if (!portEditing.current) setEditPort(s.listen_port);
+  }, [s.listen_port]);
+  useEffect(() => {
+    if (!thresholdEditing.current) {
+      setEditThreshold(s.circuit_failure_threshold);
+    }
+  }, [s.circuit_failure_threshold]);
+  useEffect(() => {
+    if (!timeoutEditing.current) {
+      setEditTimeout(s.proxy_connect_timeout_secs);
+    }
+  }, [s.proxy_connect_timeout_secs]);
+  useEffect(() => {
+    if (!disableCodesEditing.current) {
+      setEditDisableCodes(s.circuit_disable_codes);
+    }
+  }, [s.circuit_disable_codes]);
+  useEffect(() => {
+    if (!adminPortEditing.current) setEditAdminPort(s.web_admin_port);
+  }, [s.web_admin_port]);
 
   return (
     <div className="space-y-6">

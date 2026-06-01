@@ -219,36 +219,28 @@ pub async fn patch_settings(
     State(state): State<AdminState>,
     Json(patch): Json<serde_json::Value>,
 ) -> Result<Json<SettingsResponse>, AdminError> {
-    // 1. 读取当前 settings
     let current = state.settings.read().await.clone();
-
-    // 2. 将当前 settings 序列化为 serde_json::Value
-    let mut settings_value =
-        serde_json::to_value(&current).map_err(|e| AdminError::Internal(e.to_string()))?;
-
-    // 3. 合并 patch 字段到 settings_value
-    if let (Some(obj), Some(patch_obj)) = (settings_value.as_object_mut(), patch.as_object()) {
-        for (key, value) in patch_obj {
-            // 跳过 _version 字段，PATCH 不做版本号检查
-            if key != "_version" {
-                obj.insert(key.clone(), value.clone());
-            }
-        }
+    let mut merged = crate::commands::config::merge_settings_patch(&current, &patch)?;
+    if merged.web_admin_password.is_empty() {
+        merged.web_admin_password = current.web_admin_password;
     }
 
-    // 4. 反序列化为 AppSettings
-    let merged: AppSettings = serde_json::from_value(settings_value)
-        .map_err(|e| AdminError::BadRequest(e.to_string()))?;
+    if let (Some(runtime), Some(app_handle)) = (state.runtime.clone(), state.app_handle.clone()) {
+        crate::commands::config::apply_settings_update_with_restart(
+            app_handle,
+            &runtime,
+            merged,
+            true,
+        )
+        .await?;
+    } else {
+        state.db.update_settings(&merged)?;
+        let refreshed = state.db.get_settings()?;
+        *state.settings.write().await = refreshed;
+    }
 
-    // 5. 保存到数据库
-    state.db.update_settings(&merged)?;
-
-    // 6. 更新 L1 缓存
-    *state.settings.write().await = merged.clone();
-
-    // 7. 返回新 settings + 版本号
-    let version = merged.updated_at;
-    let mut response_settings = merged.clone();
+    let mut response_settings = state.settings.read().await.clone();
+    let version = response_settings.updated_at;
     response_settings.web_admin_password.clear();
     Ok(Json(SettingsResponse {
         _version: version,

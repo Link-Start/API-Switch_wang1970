@@ -161,12 +161,6 @@ pub fn validate_transfer(transfer: &ChannelModelTransfer) -> Result<(), AppError
                 "第 {channel_no} 个渠道 Base URL 格式无效"
             )));
         }
-        if channel.api_key.trim().is_empty() {
-            return Err(AppError::Validation(format!(
-                "第 {channel_no} 个渠道 API Key 不能为空"
-            )));
-        }
-
         let mut seen_models = HashSet::new();
         for (model_index, model) in channel.models.iter().enumerate() {
             let model_no = model_index + 1;
@@ -371,6 +365,17 @@ mod tests {
         assert_eq!(transfer.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(transfer.data.channels.len(), 1);
         assert_eq!(transfer.data.channels[0].models[0].sort_index, 7);
+    }
+
+    #[test]
+    fn validate_accepts_empty_api_key_channel() {
+        let payload = valid_payload().replace("\"api_key\": \"sk-test\"", "\"api_key\": \"\"");
+
+        let transfer = validate_transfer_payload(&payload).expect("空 API Key 渠道也应允许导入");
+
+        assert_eq!(transfer.data.channels[0].api_key, "");
+        let preview = build_import_preview(&transfer, 0, 0);
+        assert!(!preview.contains_api_keys);
     }
 
     #[test]

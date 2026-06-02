@@ -162,6 +162,31 @@ fn attempt_path_json(attempts: &[AttemptInfo]) -> String {
     .unwrap_or_else(|_| "[]".to_string())
 }
 
+/// 把 attempt_path JSON 渲染成短文本，便于直接展示在 content 头部。
+/// 输出形如 `api.beyfish/gpt-5.5[200] -> other/x[502]`，
+/// 多个失败重试用 `->` 连接；解析失败时回退原文。
+fn format_attempt_path_short(attempt_path: Option<&str>) -> String {
+    let Some(json_str) = attempt_path else {
+        return String::new();
+    };
+    if json_str.trim().is_empty() {
+        return String::new();
+    }
+    let arr: Vec<serde_json::Value> = match serde_json::from_str(json_str) {
+        Ok(v) => v,
+        Err(_) => return json_str.to_string(),
+    };
+    arr.iter()
+        .filter_map(|v| {
+            let channel = v.get("channel")?.as_str()?;
+            let model = v.get("model")?.as_str()?;
+            let status = v.get("status_code")?.as_i64()?;
+            Some(format!("{}/{}[{}]", channel, model, status))
+        })
+        .collect::<Vec<_>>()
+        .join(" -> ")
+}
+
 fn push_attempt(
     attempts: &mut Vec<AttemptInfo>,
     entry: &ApiEntry,
@@ -2732,9 +2757,28 @@ fn log_usage(
     raw_protocol: Option<&Value>,
 ) {
     let log_type = if success { 2 } else { 5 };
-    let (content, mut other_raw) = split_raw_protocol_for_usage_log(raw_protocol);
+    let (content_out, mut other_raw) = split_raw_protocol_for_usage_log(raw_protocol);
     let token_name = access_key.map(|ak| ak.name.as_str()).unwrap_or("NONE");
     let use_time = ((latency_ms as f64) / 1000.0).ceil() as i64;
+
+    // 诊断前缀：abcc714 升级 IN/OUT 分离后，元数据写入 other 字段，
+    // 但前端 LogPage.tsx 仅展示 log.content，导致请求/实际模型、尝试路径、
+    // 流结束原因等关键信息在前端无法直接看到（历史 regression）。
+    // 在此处把诊断信息前置到 content 头部，前端零改动即可恢复可见性。
+    let mut content = String::new();
+    content.push_str(&format!("请求模型:{}\n", requested_model));
+    content.push_str(&format!("实际模型:{}\n", entry.model));
+    let path_short = format_attempt_path_short(attempt_path);
+    if !path_short.is_empty() {
+        content.push_str(&format!("尝试路径:{}\n", path_short));
+    }
+    if let Some(reason) = stream_end_reason {
+        content.push_str(&format!("流结束原因:{}\n", reason.as_str()));
+    }
+    if !content_out.is_empty() {
+        content.push('\n');
+        content.push_str(&content_out);
+    }
     let mut other = if other_raw.trim().is_empty() {
         serde_json::json!({
             "event": "upstream_request",

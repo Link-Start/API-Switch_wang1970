@@ -227,10 +227,7 @@ pub async fn patch_settings(
 
     if let (Some(runtime), Some(app_handle)) = (state.runtime.clone(), state.app_handle.clone()) {
         crate::commands::config::apply_settings_update_with_restart(
-            app_handle,
-            &runtime,
-            merged,
-            true,
+            app_handle, &runtime, merged, true,
         )
         .await?;
     } else {

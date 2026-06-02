@@ -10,49 +10,6 @@ import { useApiAdapter } from "@/lib/useApiAdapter";
 import { useDirtyPolling } from "../lib/useDirtyPolling";
 import type { UsageLogFilter } from "@/types";
 
-interface UsageLogMeta {
-  requested_model?: string;
-  resolved_model?: string;
-  attempt_path?: Array<{
-    entry_id?: string;
-    channel?: string;
-    model?: string;
-    status_code?: number;
-    success?: boolean;
-    error?: string | null;
-  }>;
-  stream_end_reason?: string;
-  raw_protocol?: unknown;
-}
-
-function parseUsageLogMeta(other: string | null | undefined): UsageLogMeta | null {
-  if (!other) return null;
-  try {
-    const parsed = JSON.parse(other);
-    return parsed && typeof parsed === "object" ? parsed as UsageLogMeta : null;
-  } catch {
-    return null;
-  }
-}
-
-function formatAttemptPath(meta: UsageLogMeta | null): string[] {
-  return (meta?.attempt_path || [])
-    .map((attempt) => {
-      const title = [attempt.channel, attempt.model].filter(Boolean).join(" / ");
-      const status = attempt.status_code ? ` [${attempt.status_code}]` : "";
-      return `${title || "unknown"}${status}`;
-    })
-    .filter(Boolean);
-}
-
-function formatJsonBlock(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
 export function LogPage() {
   const { t } = useTranslation();
   const api = useApiAdapter();
@@ -234,11 +191,7 @@ export function LogPage() {
           <tbody>
             {logs.map((log) => {
               const isExpanded = expandedId === log.id;
-              const meta = parseUsageLogMeta(log.other);
-              const resolvedModel = meta?.resolved_model || log.model;
-              const requestedModel = meta?.requested_model || log.requested_model;
-              const attemptPath = formatAttemptPath(meta);
-              const rawProtocol = meta?.raw_protocol;
+              const resolvedModel = log.model;
               return (
                 <Fragment key={log.id}>
                   <tr className="border-b hover:bg-muted/30 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : log.id)}>
@@ -255,25 +208,6 @@ export function LogPage() {
                     <tr className="border-b bg-muted/20">
                       <td colSpan={8} className="px-4 py-3">
                         <div className="space-y-2 text-xs max-w-3xl">
-                          {meta ? (
-                            <div className="grid gap-1 rounded bg-background/60 p-2 text-muted-foreground">
-                              <div><span className="font-medium">{t("log.requestedModel")}:</span> {requestedModel || "-"}</div>
-                              <div><span className="font-medium">{t("log.resolvedModel")}:</span> {resolvedModel || "-"}</div>
-                              {attemptPath.length ? <div><span className="font-medium">{t("log.attemptPath")}:</span> {attemptPath.join(" → ")}</div> : null}
-                              {meta.stream_end_reason ? <div><span className="font-medium">{t("log.streamEndReason")}:</span> {meta.stream_end_reason}</div> : null}
-                            </div>
-                          ) : log.other ? (
-                            <div>
-                              <div className="font-medium text-muted-foreground mb-1">Meta</div>
-                              <pre className="whitespace-pre-wrap break-all text-muted-foreground">{log.other}</pre>
-                            </div>
-                          ) : null}
-                          {rawProtocol !== undefined ? (
-                            <div>
-                              <div className="font-medium text-muted-foreground mb-1">{t("log.rawProtocol")}</div>
-                              <pre className="whitespace-pre-wrap break-all">{formatJsonBlock(rawProtocol)}</pre>
-                            </div>
-                          ) : null}
                           {log.content ? (
                             <div>
                               <div className="font-medium text-muted-foreground mb-1">{t("log.details")}</div>
@@ -286,7 +220,7 @@ export function LogPage() {
                               <pre className="whitespace-pre-wrap break-all text-red-500">{log.error_message}</pre>
                             </div>
                           ) : null}
-                          {!log.content && !log.error_message && !log.other ? <span className="text-muted-foreground">{t("log.noError")}</span> : null}
+                          {!log.content && !log.error_message ? <span className="text-muted-foreground">{t("log.noError")}</span> : null}
                         </div>
                       </td>
                     </tr>

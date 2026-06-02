@@ -594,4 +594,3 @@ fn time_bucket_expr(granularity: Option<&str>) -> &'static str {
         _ => "date(created_at, 'unixepoch', 'localtime')",
     }
 }
-

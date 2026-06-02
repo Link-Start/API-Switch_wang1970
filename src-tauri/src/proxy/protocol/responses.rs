@@ -2630,6 +2630,30 @@ mod tests {
         assert_eq!(value["error"]["type"], "server_error");
         assert_eq!(value["error"]["code"], "boom");
     }
+
+    #[test]
+    fn responses_sse_non_failed_response_events_do_not_leak_to_openai_clients() {
+        let a = ResponsesAdapter;
+
+        // 这些 response.* 事件不应该被透传给 OpenAI 兼容客户端
+        for event in [
+            // response.output_item.added - 输出项添加事件
+            json!({"type": "response.output_item.added", "response_id": "resp_1", "output_index": 0, "item": {"type": "message"}}),
+            // response.output_item.done - 输出项完成事件
+            json!({"type": "response.output_item.done", "response_id": "resp_1", "output_index": 0, "item": {"type": "message"}}),
+            // response.function_call_arguments.done - 函数调用参数完成事件
+            json!({"type": "response.function_call_arguments.done", "response_id": "resp_1", "item_id": "call_1", "output_index": 0, "arguments": "{}"}),
+            // response.output_text.done - 输出文本完成事件
+            json!({"type": "response.output_text.done", "response_id": "resp_1", "item_id": "msg_1", "text": "done"}),
+            // response.reasoning_summary_text.delta - reasoning 摘要增量（非 error）
+            json!({"type": "response.reasoning_summary_text.delta", "response_id": "resp_1", "item_id": "rsn_1", "output_index": 0, "summary_index": 0, "delta": "thinking"}),
+        ] {
+            let line = serde_json::to_string(&event).unwrap();
+            let result = a.transform_sse_line(&line);
+            // 非失败的事件不应泄漏给 Chat 下游
+            assert_eq!(result, None, "Event {} should be filtered", event["type"]);
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════

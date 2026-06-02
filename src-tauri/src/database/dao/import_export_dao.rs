@@ -8,11 +8,15 @@ impl Database {
         &self,
         transfer: &ChannelModelTransfer,
     ) -> Result<(usize, usize), AppError> {
-        let conn = lock_conn!(self.conn);
+        let mut conn = lock_conn!(self.conn);
         let now = chrono::Utc::now().timestamp();
 
-        conn.execute("DELETE FROM api_entries", [])?;
-        conn.execute("DELETE FROM channels", [])?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+
+        tx.execute("DELETE FROM api_entries", [])?;
+        tx.execute("DELETE FROM channels", [])?;
 
         let mut channel_count = 0;
         let mut model_count = 0;
@@ -24,7 +28,7 @@ impl Database {
             let selected_models = serde_json::to_string(&channel.selected_models)
                 .map_err(|e| AppError::Internal(format!("渠道已选模型序列化失败：{e}")))?;
 
-            conn.execute(
+            tx.execute(
                 "INSERT INTO channels (
                     id, name, api_type, base_url, api_key, available_models, selected_models,
                     enabled, last_fetch_at, notes, response_ms, created_at, updated_at
@@ -46,7 +50,7 @@ impl Database {
 
             for model in &channel.models {
                 let entry_id = Uuid::new_v4().to_string();
-                conn.execute(
+                tx.execute(
                     "INSERT INTO api_entries (
                         id, channel_id, model, display_name, sort_index, enabled, cooldown_until,
                         response_ms, provider_logo, release_date, model_meta_zh, model_meta_en,
@@ -71,6 +75,8 @@ impl Database {
                 model_count += 1;
             }
         }
+
+        tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok((channel_count, model_count))
     }
@@ -185,5 +191,96 @@ mod tests {
         assert_eq!(entries[0].cooldown_until, None);
         assert_ne!(entries[0].id, "source-entry-id");
         assert_eq!(entries[0].channel_id, channels[0].id);
+    }
+
+    #[test]
+    fn replace_channels_and_models_rolls_back_when_insert_fails() {
+        let db = test_db();
+        let old_channel = db
+            .create_channel(
+                "旧渠道",
+                "openai",
+                "https://old.example.com",
+                "old-key-12345",
+                None,
+            )
+            .unwrap();
+        db.create_entry(
+            &old_channel.id,
+            "old-model",
+            "旧模型",
+            0,
+            "",
+            "",
+            "",
+            "",
+            "auto",
+        )
+        .unwrap();
+
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "CREATE TRIGGER fail_import_channel_insert
+                 BEFORE INSERT ON channels
+                 FOR EACH ROW
+                 BEGIN
+                   SELECT RAISE(ABORT, '模拟导入插入失败');
+                 END;",
+                [],
+            )
+            .unwrap();
+        }
+
+        let source_channel = Channel {
+            id: "source-channel-id".to_string(),
+            name: "新渠道".to_string(),
+            api_type: "openai".to_string(),
+            base_url: "https://new.example.com".to_string(),
+            api_key: "new-key".to_string(),
+            available_models: vec![],
+            selected_models: vec![],
+            enabled: true,
+            last_fetch_at: 999,
+            notes: "迁移渠道".to_string(),
+            response_ms: "999".to_string(),
+            created_at: 1,
+            updated_at: 2,
+        };
+        let source_entry = ApiEntry {
+            id: "source-entry-id".to_string(),
+            channel_id: "source-channel-id".to_string(),
+            model: "new-model".to_string(),
+            display_name: "新模型".to_string(),
+            sort_index: 3,
+            enabled: true,
+            cooldown_until: None,
+            circuit_state: "closed".to_string(),
+            created_at: 3,
+            updated_at: 4,
+            channel_name: Some("新渠道".to_string()),
+            channel_api_type: Some("openai".to_string()),
+            owned_by: Some("openai".to_string()),
+            response_ms: Some("777".to_string()),
+            provider_logo: None,
+            release_date: None,
+            model_meta_zh: None,
+            model_meta_en: None,
+            group_name: Some("auto".to_string()),
+            score: 1.0,
+        };
+        let json = build_transfer_json(&[source_channel], &[source_entry]).unwrap();
+        let transfer = validate_transfer_payload(&json).unwrap();
+
+        let result = db.replace_channels_and_models_from_transfer(&transfer);
+
+        assert!(result.is_err());
+        let channels = db.list_channels().unwrap();
+        let entries = db.list_entries().unwrap();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(channels[0].name, "旧渠道");
+        assert_eq!(channels[0].api_key, "old-key-12345");
+        assert_eq!(entries[0].model, "old-model");
     }
 }

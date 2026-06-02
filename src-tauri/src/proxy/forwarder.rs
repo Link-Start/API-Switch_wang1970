@@ -2649,15 +2649,66 @@ fn spawn_cool_down_entry(
     });
 }
 
-fn append_raw_protocol_to_other(other: &mut Value, success: bool, raw_protocol: Option<&Value>) {
-    if success {
-        return;
+fn split_raw_protocol_for_usage_log(raw_protocol: Option<&Value>) -> (String, String) {
+    let Some(raw_protocol) = raw_protocol else {
+        return (String::new(), String::new());
+    };
+
+    let mut raw_in = raw_protocol.clone();
+    if let Some(obj) = raw_in.as_object_mut() {
+        obj.insert("event".to_string(), Value::String("upstream_request".to_string()));
+        obj.remove("response_timestamp_ms");
+        obj.remove("status_code");
+        obj.remove("content_type");
+        obj.remove("x_request_id");
+        obj.remove("upstream_response_body");
+        obj.remove("error_body");
     }
 
-    if let Some(raw_protocol) = raw_protocol {
-        if let Some(obj) = other.as_object_mut() {
-            obj.insert("raw_protocol".to_string(), raw_protocol.clone());
-        }
+    let mut raw_out = raw_protocol.clone();
+    if let Some(obj) = raw_out.as_object_mut() {
+        obj.remove("gateway_body");
+        obj.remove("upstream_body");
+        obj.remove("is_responses_passthrough");
+        obj.remove("is_claude_passthrough");
+    }
+
+    let has_out = raw_protocol
+        .get("upstream_response_body")
+        .or_else(|| raw_protocol.get("error_body"))
+        .is_some();
+
+    let content = if has_out { raw_out.to_string() } else { String::new() };
+    (content, raw_in.to_string())
+}
+
+fn enrich_usage_log_in(
+    other: &mut Value,
+    first_token_ms: i64,
+    status_code: i32,
+    success: bool,
+    reasoning_tokens: i64,
+    attempt_path: Option<&str>,
+    stream_end_reason: Option<StreamEndReason>,
+) {
+    if let Some(obj) = other.as_object_mut() {
+        obj.insert("first_token_ms".to_string(), Value::Number(first_token_ms.into()));
+        obj.insert("status_code".to_string(), Value::Number(status_code.into()));
+        obj.insert("success".to_string(), Value::Bool(success));
+        obj.insert("reasoning_tokens".to_string(), Value::Number(reasoning_tokens.into()));
+        obj.insert(
+            "attempt_path".to_string(),
+            attempt_path
+                .and_then(|path| serde_json::from_str::<Value>(path).ok())
+                .unwrap_or(Value::Null),
+        );
+        obj.insert(
+            "stream_end_reason".to_string(),
+            stream_end_reason
+                .map(StreamEndReason::as_str)
+                .map(|reason| Value::String(reason.to_string()))
+                .unwrap_or(Value::Null),
+        );
     }
 }
 
@@ -2681,28 +2732,42 @@ fn log_usage(
     raw_protocol: Option<&Value>,
 ) {
     let log_type = if success { 2 } else { 5 };
-    let content = error_message.unwrap_or("");
+    let (content, mut other_raw) = split_raw_protocol_for_usage_log(raw_protocol);
     let token_name = access_key.map(|ak| ak.name.as_str()).unwrap_or("NONE");
     let use_time = ((latency_ms as f64) / 1000.0).ceil() as i64;
-    let mut other = serde_json::json!({
-        "requested_model": requested_model,
-        "resolved_model": entry.model,
-        "first_token_ms": first_token_ms,
-        "status_code": status_code,
-        "success": success,
-        "reasoning_tokens": reasoning_tokens,
-        "attempt_path": attempt_path.and_then(|path| serde_json::from_str::<Value>(path).ok()),
-        "stream_end_reason": stream_end_reason.map(StreamEndReason::as_str),
-    });
+    let mut other = if other_raw.trim().is_empty() {
+        serde_json::json!({
+            "event": "upstream_request",
+            "requested_model": requested_model,
+            "resolved_model": entry.model,
+        })
+    } else {
+        serde_json::from_str::<Value>(&other_raw).unwrap_or_else(|_| {
+            serde_json::json!({
+                "event": "upstream_request",
+                "requested_model": requested_model,
+                "resolved_model": entry.model,
+                "raw_in_parse_error": other_raw,
+            })
+        })
+    };
 
-    append_raw_protocol_to_other(&mut other, success, raw_protocol);
+    enrich_usage_log_in(
+        &mut other,
+        first_token_ms,
+        status_code,
+        success,
+        reasoning_tokens,
+        attempt_path,
+        stream_end_reason,
+    );
 
-    let other = other.to_string();
+    other_raw = other.to_string();
 
     if db
         .insert_usage_log(
             log_type,
-            content,
+            &content,
             access_key.map(|ak| ak.id.as_str()),
             access_key.map(|ak| ak.name.as_str()).unwrap_or("NONE"),
             token_name,
@@ -2722,7 +2787,7 @@ fn log_usage(
             success,
             "",
             "default",
-            &other,
+            &other_raw,
             error_message,
             None,
         )
@@ -2777,19 +2842,6 @@ mod tests {
     }
 
     #[test]
-    fn append_raw_protocol_to_other_skips_success_logs() {
-        let raw_protocol = serde_json::json!({"event": "upstream_error"});
-
-        let mut success_other = serde_json::json!({});
-        append_raw_protocol_to_other(&mut success_other, true, Some(&raw_protocol));
-        assert!(success_other.get("raw_protocol").is_none());
-
-        let mut failure_other = serde_json::json!({});
-        append_raw_protocol_to_other(&mut failure_other, false, Some(&raw_protocol));
-        assert_eq!(failure_other["raw_protocol"], raw_protocol);
-    }
-
-    #[test]
     fn raw_protocol_capture_keeps_original_request_and_response() {
         let entry = ApiEntry {
             id: "entry-1".to_string(),
@@ -2840,6 +2892,48 @@ mod tests {
         assert_eq!(capture["gateway_body"], gateway_body);
         assert_eq!(capture["upstream_body"], upstream_body);
         assert_eq!(capture["upstream_response_body"], response_body);
+    }
+
+    #[test]
+    fn raw_protocol_usage_log_fields_split_in_and_out() {
+        let raw_protocol = serde_json::json!({
+            "event": "upstream_response",
+            "timestamp_ms": 1,
+            "response_timestamp_ms": 2,
+            "caller_kind": "responses",
+            "requested_model": "auto",
+            "entry_id": "entry-1",
+            "entry_model": "gpt-5.5",
+            "channel_id": "channel-1",
+            "channel_name": "sharedchat",
+            "channel_api_type": "responses",
+            "url": "https://example.com/v1/responses?api_key=raw",
+            "is_stream": false,
+            "is_responses_passthrough": true,
+            "is_claude_passthrough": false,
+            "gateway_body": {"model": "auto", "input": "原始入口请求"},
+            "upstream_body": {"model": "gpt-5.5", "input": "原始上游请求"},
+            "status_code": 200,
+            "content_type": "application/json",
+            "x_request_id": "req-1",
+            "upstream_response_body": {"output": [{"text": "原始上游返回"}]}
+        });
+
+        let (content, other) = split_raw_protocol_for_usage_log(Some(&raw_protocol));
+        let content = serde_json::from_str::<Value>(&content).expect("content 应为 OUT JSON");
+        let other = serde_json::from_str::<Value>(&other).expect("other 应为 IN JSON");
+
+        assert_eq!(other["event"], "upstream_request");
+        assert_eq!(other["gateway_body"]["input"], "原始入口请求");
+        assert_eq!(other["upstream_body"]["input"], "原始上游请求");
+        assert!(other.get("upstream_response_body").is_none());
+        assert!(other.get("error_body").is_none());
+
+        assert_eq!(content["event"], "upstream_response");
+        assert_eq!(content["status_code"], 200);
+        assert_eq!(content["upstream_response_body"]["output"][0]["text"], "原始上游返回");
+        assert!(content.get("gateway_body").is_none());
+        assert!(content.get("upstream_body").is_none());
     }
 
     /// 扫描函数应正确识别 text_delta(有文本)、tool_use(工具调用)、message_stop，

@@ -16,6 +16,8 @@ pub struct TestUsageLogInput<'a> {
     pub status_code: i32,
     pub success: bool,
     pub error_message: Option<&'a str>,
+    pub request_payload: Option<&'a Value>,
+    pub response_payload: Option<&'a str>,
     pub error_kind: Option<&'a str>,
     pub response_ms: Option<&'a str>,
     pub error_preview: Option<&'a str>,
@@ -23,7 +25,7 @@ pub struct TestUsageLogInput<'a> {
 
 /// 记录测试对话和测速产生的真实消耗。
 ///
-/// 只记录元数据、耗时和 token 用量，不记录 API Key、用户提示词、请求体或模型回复。
+/// 字段职责：error_message 存错误摘要；content 存调试 OUT；other 存调试 IN。
 pub fn insert_test_usage_log(
     db: &Database,
     app_handle: Option<&crate::AppEventHandle>,
@@ -31,27 +33,34 @@ pub fn insert_test_usage_log(
 ) {
     let log_type = if input.success { 2 } else { 5 };
     let use_time = ((input.latency_ms as f64) / 1000.0).ceil() as i64;
-    let content = input.error_message.unwrap_or("");
+    let content = input
+        .response_payload
+        .or(input.error_preview)
+        .unwrap_or_default()
+        .to_string();
     let other = json!({
+        "event": "upstream_request",
         "kind": "test",
         "operation": input.operation,
         "entry_id": input.entry.id,
         "channel_id": input.channel.id,
+        "channel_name": input.channel.name,
+        "channel_base_url": input.channel.base_url,
         "api_type": input.channel.api_type,
         "requested_model": input.entry.model,
         "resolved_model": input.entry.model,
+        "request_payload": input.request_payload,
         "status_code": input.status_code,
         "success": input.success,
         "response_ms": input.response_ms,
         "entry_enabled": input.entry.enabled,
         "channel_enabled": input.channel.enabled,
         "error_kind": input.error_kind,
-        "error_preview": input.error_preview,
     });
 
     if let Err(e) = db.insert_usage_log(
         log_type,
-        content,
+        &content,
         None,
         "TEST",
         "TEST",

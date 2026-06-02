@@ -479,6 +479,43 @@
     "guide": {
       "title": "使用指南",
       "link": "查看使用指南与常见配置"
+    },
+    "importExport": {
+      "title": "数据导入导出",
+      "warningTitle": "提示",
+      "warningContent1": "仅迁移渠道和模型数据，不迁移系统设置、日志、token、连接应用或模型池。",
+      "warningContent2": "导出文本包含渠道 API Key，请自行妥善保管，不要发送给不可信的人。",
+      "warningContent3": "导入会清空当前设备上的所有渠道和模型，再使用粘贴文本重建。",
+      "exportSectionTitle": "导出渠道和模型",
+      "exportSectionDesc": "点击后生成 JSON 文本，用户自行复制到导入设备。",
+      "exportButton": "导出渠道和模型",
+      "exporting": "正在导出...",
+      "copyButton": "复制导出文本",
+      "importSectionTitle": "导入渠道和模型",
+      "importSectionDesc": "只接受 API Switch 本功能导出的 JSON 文本。导入前会先完整校验，再请求确认覆盖。",
+      "importPlaceholder": "粘贴 API Switch 导出的 JSON 文本...",
+      "importButton": "导入渠道和模型",
+      "validating": "正在校验...",
+      "dialogTitle": "确认覆盖当前渠道和模型",
+      "dialogDesc": "该操作会清空当前设备上的所有渠道和模型，并使用导入文本重建。",
+      "incomingData": "即将导入",
+      "currentData": "当前将被替换",
+      "channelsCount": "渠道：{{count}} 个",
+      "modelsCount": "模型：{{count}} 个",
+      "dialogWarning1": "不会迁移或覆盖：系统设置、模型池、日志、token、连接应用、代理端口、熔断/冷却/测速状态。",
+      "dialogWarning2": "导入确认后不恢复旧渠道和旧模型；如导入失败，请重新粘贴有效导出文本再次导入。",
+      "confirmButton": "确认覆盖当前渠道和模型",
+      "importing": "正在导入...",
+      "toast": {
+        "exportSuccess": "导出完成，请复制下方 JSON 文本。",
+        "exportFailed": "导出失败：{{error}}",
+        "previewFailed": "导入校验失败：{{error}}",
+        "importSuccess": "导入成功，已重建 {{channels}} 个渠道和 {{models}} 个模型。",
+        "importFailed": "导入失败，请重新粘贴有效导出文本再次导入：{{error}}",
+        "copySuccess": "已复制到剪贴板。",
+        "copyFailed": "复制失败，请手动复制文本框内容。",
+        "emptyImport": "请先粘贴 API Switch 导出的 JSON 文本。"
+      }
     }
   },
   "link": {

@@ -479,6 +479,43 @@
     "guide": {
       "title": "Usage Guide",
       "link": "View usage guide and configurations"
+    },
+    "importExport": {
+      "title": "Data Import/Export",
+      "warningTitle": "Notes",
+      "warningContent1": "Only channel and model data will be migrated. System settings, logs, tokens, connected apps, and model pools are not included.",
+      "warningContent2": "The exported text contains channel API Keys. Please keep it safe and do not share it with untrusted parties.",
+      "warningContent3": "Importing will clear all existing channels and models on this device and rebuild them using the pasted text.",
+      "exportSectionTitle": "Export Channels & Models",
+      "exportSectionDesc": "Generate a JSON string to copy and use on another device.",
+      "exportButton": "Export Channels & Models",
+      "exporting": "Exporting...",
+      "copyButton": "Copy Export Text",
+      "importSectionTitle": "Import Channels & Models",
+      "importSectionDesc": "Only accepts JSON exported from this tool. A full validation will be performed before confirming the overwrite.",
+      "importPlaceholder": "Paste JSON exported from API Switch...",
+      "importButton": "Import Channels & Models",
+      "validating": "Validating...",
+      "dialogTitle": "Confirm Overwrite Current Channels & Models",
+      "dialogDesc": "This operation will clear all current channels and models and rebuild them from the import text.",
+      "incomingData": "Incoming",
+      "currentData": "Current (to be replaced)",
+      "channelsCount": "Channels: {{count}}",
+      "modelsCount": "Models: {{count}}",
+      "dialogWarning1": "System settings, model pools, logs, tokens, connected apps, proxy ports, and circuit breaker states will NOT be migrated or overwritten.",
+      "dialogWarning2": "Old channels and models cannot be restored after confirmation. If import fails, please paste a valid export text and try again.",
+      "confirmButton": "Confirm Overwrite",
+      "importing": "Importing...",
+      "toast": {
+        "exportSuccess": "Export complete. Please copy the JSON text below.",
+        "exportFailed": "Export failed: {{error}}",
+        "previewFailed": "Validation failed: {{error}}",
+        "importSuccess": "Import successful. Rebuilt {{channels}} channels and {{models}} models.",
+        "importFailed": "Import failed, please re-paste a valid export text: {{error}}",
+        "copySuccess": "Copied to clipboard.",
+        "copyFailed": "Copy failed, please copy the text manually.",
+        "emptyImport": "Please paste the JSON text exported from API Switch first."
+      }
     }
   },
   "link": {

@@ -269,6 +269,7 @@
     "cost": "Cost",
     "status": "Status",
     "details": "Details",
+    "debugInfo": "Debug Info",
     "stream": "Stream",
     "streamYes": "Streaming",
     "streamNo": "Non-stream",

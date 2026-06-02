@@ -269,6 +269,7 @@
     "cost": "花费",
     "status": "状态",
     "details": "详情",
+    "debugInfo": "调试信息",
     "stream": "流式",
     "streamYes": "流式请求",
     "streamNo": "非流式请求",

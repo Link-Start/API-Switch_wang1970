@@ -216,7 +216,7 @@ export function LogPage() {
                           ) : null}
                           {log.error_message ? (
                             <div>
-                              <div className="font-medium text-red-500 mb-1">{t("log.error")}</div>
+                              <div className="font-medium text-red-500 mb-1">{t("log.debugInfo")}</div>
                               <pre className="whitespace-pre-wrap break-all text-red-500">{log.error_message}</pre>
                             </div>
                           ) : null}

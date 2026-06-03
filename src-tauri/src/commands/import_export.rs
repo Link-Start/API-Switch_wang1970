@@ -43,7 +43,6 @@ pub fn import_channel_model_transfer(
     crate::state_version::bump("pool");
     let _ = app.emit("channels-changed", ());
     let _ = app.emit("entries-changed", ());
-    crate::refresh_tray_if_enabled(&app);
 
     Ok(ImportResult {
         success: true,

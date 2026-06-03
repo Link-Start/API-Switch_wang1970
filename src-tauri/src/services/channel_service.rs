@@ -291,7 +291,6 @@ pub fn update_channel(
     )?;
     if let Some(app) = app {
         crate::event::emit(app, "channels-changed");
-        crate::refresh_tray_if_enabled(app);
     }
     crate::state_version::bump("channel");
     db.get_channel(&params.id)
@@ -305,7 +304,6 @@ pub fn delete_channel(
     db.delete_channel(&id)?;
     if let Some(app) = app {
         crate::event::emit(app, "channels-changed");
-        crate::refresh_tray_if_enabled(app);
     }
     crate::state_version::bump("channel");
     crate::state_version::bump("pool");
@@ -1430,7 +1428,6 @@ pub fn save_channel_with_models(
     if let Some(app) = app {
         crate::event::emit(app, "channels-changed");
         crate::event::emit(app, "entries-changed");
-        crate::refresh_tray_if_enabled(app);
     }
     crate::state_version::bump("channel");
     crate::state_version::bump("pool");

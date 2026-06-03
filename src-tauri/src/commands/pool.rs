@@ -97,7 +97,6 @@ pub async fn toggle_entry(
         pin_to_top.unwrap_or(false),
     )?;
     let _ = app.emit("entries-changed", ());
-    crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
 
@@ -112,7 +111,6 @@ pub async fn batch_toggle_entries(
 ) -> Result<(), AppError> {
     pool_service::batch_toggle_entries(&state.db, &state.failure_counts, &ids, enabled)?;
     let _ = app.emit("entries-changed", ());
-    crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
 
@@ -124,7 +122,6 @@ pub async fn reorder_entries(
 ) -> Result<(), AppError> {
     pool_service::reorder_entries(&state.db, &ordered_ids)?;
     let _ = app.emit("entries-changed", ());
-    crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
 
@@ -136,7 +133,6 @@ pub async fn delete_entry(
 ) -> Result<(), AppError> {
     pool_service::delete_entry(&state.db, &id)?;
     let _ = app.emit("entries-changed", ());
-    crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
 
@@ -148,13 +144,12 @@ pub async fn create_entry(
 ) -> Result<ApiEntry, AppError> {
     let entry = pool_service::create_entry(&state.db, params.into())?;
     let _ = app.emit("entries-changed", ());
-    crate::refresh_tray_if_enabled(&app);
     Ok(entry)
 }
 
 #[tauri::command]
 pub async fn backfill_entry_catalog_meta(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     state: State<'_, AppState>,
     items: Vec<EntryCatalogMetaUpdate>,
 ) -> Result<(), AppError> {
@@ -170,7 +165,6 @@ pub async fn backfill_entry_catalog_meta(
         })
         .collect();
     pool_service::backfill_entry_catalog_meta(&state.db, items)?;
-    crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
 
@@ -184,7 +178,6 @@ pub async fn test_entry_latency(
     let db = state.db.clone();
     let result = pool_service::test_entry_latency(&db, &entry_id, model_score).await?;
     let _ = app.emit("entries-changed", ());
-    crate::refresh_tray_if_enabled(&app);
     Ok(TestResult {
         status: result.status,
         response_ms: result.response_ms,
@@ -202,7 +195,6 @@ pub async fn update_entry_response_ms(
 ) -> Result<(), AppError> {
     pool_service::update_entry_response_ms(&state.db, &entry_id, &response_ms)?;
     let _ = app.emit("entries-changed", ());
-    crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
 
@@ -220,7 +212,6 @@ pub async fn update_entry_display_name(
 ) -> Result<(), AppError> {
     pool_service::update_entry_display_name(&state.db, &id, &display_name)?;
     let _ = app.emit("entries-changed", ());
-    crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
 
@@ -233,6 +224,5 @@ pub async fn update_entry_group(
 ) -> Result<(), AppError> {
     pool_service::update_entry_group(&state.db, &id, &group_name)?;
     let _ = app.emit("entries-changed", ());
-    crate::refresh_tray_if_enabled(&app);
     Ok(())
 }

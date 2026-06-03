@@ -45,3 +45,60 @@ pub struct StatVersionsResponse {
     pub channel: u64,
     pub token: u64,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrayVersions {
+    pub pool: u64,
+    pub channel: u64,
+    pub token: u64,
+}
+
+impl TrayVersions {
+    pub fn has_changed_since(self, previous: Self) -> bool {
+        self.pool != previous.pool
+            || self.channel != previous.channel
+            || self.token != previous.token
+    }
+}
+
+pub fn tray_versions() -> TrayVersions {
+    TrayVersions {
+        pool: current("pool"),
+        channel: current("channel"),
+        token: current("token"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TrayVersions;
+
+    #[test]
+    fn tray_versions_ignore_log_only_changes() {
+        let previous = TrayVersions {
+            pool: 1,
+            channel: 2,
+            token: 3,
+        };
+        let current = TrayVersions {
+            pool: 1,
+            channel: 2,
+            token: 3,
+        };
+
+        assert!(!current.has_changed_since(previous));
+    }
+
+    #[test]
+    fn tray_versions_detect_pool_channel_or_token_changes() {
+        let previous = TrayVersions {
+            pool: 1,
+            channel: 2,
+            token: 3,
+        };
+
+        assert!(TrayVersions { pool: 2, ..previous }.has_changed_since(previous));
+        assert!(TrayVersions { channel: 3, ..previous }.has_changed_since(previous));
+        assert!(TrayVersions { token: 4, ..previous }.has_changed_since(previous));
+    }
+}

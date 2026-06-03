@@ -10,6 +10,7 @@ mod proxy;
 mod runtime_mode;
 mod services;
 mod state_version;
+mod tray_refresh;
 
 use admin::AdminServer;
 use database::{AppSettings, Database};
@@ -26,9 +27,6 @@ use tokio::sync::Mutex;
 
 pub use error::AppError;
 pub(crate) use event::AppEventHandle;
-
-#[cfg(not(feature = "gui"))]
-pub(crate) use event::refresh_tray_if_enabled;
 
 /// Latest translation relay result cached in memory for the Web Admin display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,7 +54,6 @@ pub struct AppState {
 }
 
 pub(crate) const TRAY_ID: &str = "api-switch-tray";
-pub(crate) const EXPERIMENTAL_LAZY_TRAY_REFRESH: bool = false;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -171,24 +168,11 @@ fn run_gui(runtime_mode: RuntimeMode) {
                         .menu(&tray_menu)
                         .show_menu_on_left_click(true)
                         .on_tray_icon_event(|tray, event| match event {
-                            tauri::tray::TrayIconEvent::Click {
-                                button: tauri::tray::MouseButton::Right,
-                                button_state: tauri::tray::MouseButtonState::Up,
-                                ..
-                            } => {
-                                if EXPERIMENTAL_LAZY_TRAY_REFRESH {
-                                    let app = tray.app_handle().clone();
-                                    tauri::async_runtime::spawn(async move {
-                                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                                        if let Some(tray) = app.tray_by_id(TRAY_ID) {
-                                            if let Ok(new_menu) = build_tray_menu(&app) {
-                                                let _ = tray.set_menu(Some(new_menu));
-                                            }
-                                        }
-                                    });
-                                }
+                            tauri::tray::TrayIconEvent::Click { .. } => {
+                                tray_refresh::mark_tray_interaction();
                             }
                             tauri::tray::TrayIconEvent::DoubleClick { .. } => {
+                                tray_refresh::mark_tray_interaction();
                                 if let Some(window) = tray.app_handle().get_webview_window("main") {
                                     let _ = window.show();
                                     let _ = window.set_focus();
@@ -197,12 +181,14 @@ fn run_gui(runtime_mode: RuntimeMode) {
                             _ => {}
                         })
                         .on_menu_event(move |app, event| {
+                            tray_refresh::mark_tray_interaction();
                             handle_tray_menu_event(app, &event.id.0);
                         })
                         .build(app)
                     {
                         Ok(_tray) => {
                             log::info!("Tray icon built successfully");
+                            tray_refresh::start_tray_refresh_consumer(app.handle().clone());
                         }
                         Err(e) => {
                             log::warn!("Failed to build tray icon: {e}. Falling back to Standalone behavior (no tray/window).");
@@ -388,9 +374,6 @@ fn tray_debounce_check() -> bool {
 
 #[cfg(feature = "gui")]
 pub(crate) fn refresh_tray_if_enabled(app: &tauri::AppHandle) {
-    if EXPERIMENTAL_LAZY_TRAY_REFRESH {
-        return;
-    }
     if !tray_debounce_check() {
         return;
     }
@@ -440,9 +423,6 @@ fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
                         );
                     }
                 }
-
-                // Rebuild tray menu with updated AUTO-group priority.
-                refresh_tray_if_enabled(app);
 
                 // Notify frontend to refresh API Pool list
                 let _ = app.emit("tray-priority-changed", ());

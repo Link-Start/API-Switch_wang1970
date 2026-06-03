@@ -275,7 +275,6 @@ pub async fn apply_settings_update_with_restart(
         }
     }
 
-    crate::refresh_tray_if_enabled(&app);
     Ok(Some(restart_info))
 }
 

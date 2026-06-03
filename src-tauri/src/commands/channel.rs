@@ -271,7 +271,6 @@ pub async fn select_models(
     let _ = app.emit("channels-changed", ());
     crate::state_version::bump("channel");
     crate::state_version::bump("pool");
-    crate::refresh_tray_if_enabled(&app);
     Ok(())
 }
 

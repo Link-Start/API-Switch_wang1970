@@ -4,7 +4,6 @@ use super::middleware::{CallerKind, RequestContext};
 use super::protocol::get_adapter;
 use super::server::ProxyState;
 use crate::database::{AccessKey, ApiEntry, AppSettings, Database};
-use crate::refresh_tray_if_enabled;
 use crate::services::api_key_utils::primary_api_key;
 use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue};
@@ -2397,12 +2396,6 @@ fn append_and_parse_sse(
     Some(Bytes::from(output))
 }
 
-fn refresh_tray(app_handle: &Option<crate::AppEventHandle>) {
-    if let Some(h) = app_handle {
-        refresh_tray_if_enabled(h);
-    }
-}
-
 fn status_matches_rule(rule: &str, status: u16) -> bool {
     let rule = rule.trim();
     if rule.is_empty() {
@@ -2452,7 +2445,6 @@ async fn disable_entry(state: &ProxyState, entry: &ApiEntry) {
         crate::event::emit(h, "entries-changed");
     }
     crate::state_version::bump("pool");
-    refresh_tray(&state.app_handle);
 
     let mut breakers = state.circuit_breakers.write().await;
     breakers.remove(&entry.id);
@@ -2470,7 +2462,6 @@ async fn freeze_channel_entries(state: &ProxyState, entry: &ApiEntry) {
                 crate::event::emit(h, "entries-changed");
             }
             crate::state_version::bump("pool");
-            refresh_tray(&state.app_handle);
 
             let mut counts = state.failure_counts.write().await;
             let mut breakers = state.circuit_breakers.write().await;
@@ -2501,7 +2492,6 @@ async fn record_circuit_success(state: &ProxyState, entry_id: &str) {
         crate::event::emit(h, "entries-changed");
     }
     crate::state_version::bump("pool");
-    refresh_tray(&state.app_handle);
 
     // Clear failure count
     state.failure_counts.write().await.remove(entry_id);
@@ -2539,7 +2529,6 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
             crate::event::emit(h, "entries-changed");
         }
         crate::state_version::bump("pool");
-        refresh_tray(&state.app_handle);
 
         let mut breakers = state.circuit_breakers.write().await;
         breakers.remove(&entry.id);
@@ -2558,7 +2547,6 @@ async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
         crate::event::emit(h, "entries-changed");
     }
     crate::state_version::bump("pool");
-    refresh_tray(&state.app_handle);
 
     let mut breakers = state.circuit_breakers.write().await;
     let recovery_secs_u64 = settings.circuit_recovery_secs as u64;
@@ -2595,7 +2583,6 @@ fn spawn_record_circuit_success(
             crate::event::emit(h, "entries-changed");
         }
         crate::state_version::bump("pool");
-        refresh_tray(&app_handle);
 
         // Clear failure count
         failure_counts.write().await.remove(&entry_id);
@@ -2639,7 +2626,6 @@ fn spawn_cool_down_entry(
                 crate::event::emit(h, "entries-changed");
             }
             crate::state_version::bump("pool");
-            refresh_tray(&app_handle);
 
             log::warn!(
                 "Entry {} disabled after {} consecutive failures. Long cooldown: 6h.",
@@ -2655,7 +2641,6 @@ fn spawn_cool_down_entry(
             crate::event::emit(h, "entries-changed");
         }
         crate::state_version::bump("pool");
-        refresh_tray(&app_handle);
 
         let mut breakers = circuit_breakers.write().await;
         let cb = breakers

@@ -47,7 +47,6 @@ impl AdminState {
     pub fn mark_pool_dirty(&self) {
         if let Some(handle) = &self.app_handle {
             crate::event::emit(handle, "entries-changed");
-            crate::refresh_tray_if_enabled(handle);
         }
     }
 

@@ -1,8 +1,9 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Plus, Trash2, Copy, Check } from "lucide-react";
+import { Plus, Trash2, Copy, Check, MoreVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -78,13 +79,18 @@ export function TokenManager() {
 
   const formatDate = (ts: number) => new Date(ts * 1000).toLocaleString();
 
+  const shortKey = (key: string) => {
+    if (key.length <= 14) return key;
+    return `${key.slice(0, 6)}…${key.slice(-4)}`;
+  };
+
   if (isLoading) {
     return <div className="p-6 text-muted-foreground">{t("common.loading")}</div>;
   }
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 sm:p-6">
+      <div className="mb-6 flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">{t("token.title")}</h1>
         <Button size="sm" className="gap-1.5" onClick={() => setShowCreate(true)}>
           <Plus className="h-4 w-4" />
@@ -93,7 +99,7 @@ export function TokenManager() {
       </div>
 
       {keys.length ? (
-        <div className="border rounded-lg overflow-hidden">
+        <div className="hidden overflow-hidden rounded-lg border md:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/50 text-left text-muted-foreground">
@@ -151,6 +157,42 @@ export function TokenManager() {
             </tbody>
           </table>
         </div>
+      ) : null}
+
+      {keys.length ? (
+        <div className="space-y-2 md:hidden">
+          {keys.map((k) => (
+            <div key={k.id} className="rounded-lg border bg-background p-3">
+              <div className="flex items-center gap-3">
+                <Switch
+                  checked={k.enabled}
+                  onCheckedChange={(checked) => toggleMutation.mutate({ id: k.id, enabled: checked })}
+                />
+                <div className="min-w-0 flex-1 truncate font-medium">{k.name}</div>
+                <code className="max-w-[34vw] shrink-0 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+                  {shortKey(k.key)}
+                </code>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-40 p-1">
+                    <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent" onClick={() => copyKey(k.key, k.id)}>
+                      {copiedId === k.id ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                      {t("common.copy")}
+                    </button>
+                    <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm text-destructive hover:bg-accent" onClick={() => deleteMutation.mutate(k.id)}>
+                      <Trash2 className="h-4 w-4" />
+                      {t("common.delete")}
+                    </button>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="flex h-64 items-center justify-center text-muted-foreground">
           {t("common.noData")}
@@ -196,7 +238,7 @@ export function TokenManager() {
           </DialogHeader>
           {createdKey && (
             <div className="space-y-3">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <code className="flex-1 text-sm bg-muted p-3 rounded font-mono break-all">
                   {createdKey.key}
                 </code>

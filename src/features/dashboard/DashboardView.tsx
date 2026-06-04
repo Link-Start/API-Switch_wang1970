@@ -98,11 +98,11 @@ function buildSeriesData(
 function StatCard({ title, value, totalLabel }: { title: string; value: number; totalLabel?: string }) {
   return (
     <Card>
-      <CardContent className="p-4">
-        <p className="text-sm text-muted-foreground">{title}</p>
-        <p className="text-2xl font-bold mt-1">{value.toLocaleString()}</p>
+      <CardContent className="p-3 sm:p-4">
+        <p className="truncate text-xs text-muted-foreground sm:text-sm" title={title}>{title}</p>
+        <p className="mt-1 truncate text-xl font-bold sm:text-2xl" title={value.toLocaleString()}>{value.toLocaleString()}</p>
         {totalLabel !== undefined && (
-          <p className="text-xs text-muted-foreground mt-1">{totalLabel}</p>
+          <p className="mt-1 truncate text-xs text-muted-foreground" title={totalLabel}>{totalLabel}</p>
         )}
       </CardContent>
     </Card>
@@ -152,11 +152,11 @@ export function DashboardView() {
   })();
 
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-semibold mb-6">{t("dashboard.title")}</h1>
+    <div className="p-4 sm:p-6">
+      <h1 className="mb-4 text-xl font-semibold sm:mb-6">{t("dashboard.title")}</h1>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:mb-6 sm:gap-4 xl:grid-cols-4">
         <StatCard
           title={t("dashboard.cards.todayRequests")}
           value={stats?.today_requests ?? 0}
@@ -182,7 +182,7 @@ export function DashboardView() {
       <div className="grid gap-6">
         {/* Charts */}
         <Tabs defaultValue="consumption">
-          <TabsList>
+          <TabsList className="h-auto max-w-full flex-wrap justify-start">
             <TabsTrigger value="consumption">{t("dashboard.charts.consumption")}</TabsTrigger>
             <TabsTrigger value="callTrend">{t("dashboard.charts.callTrend")}</TabsTrigger>
             <TabsTrigger value="distribution">{t("dashboard.charts.distribution")}</TabsTrigger>
@@ -192,7 +192,7 @@ export function DashboardView() {
           <TabsContent value="consumption">
             <Card>
               <CardHeader className="pb-0">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <CardTitle>{t("dashboard.charts.consumption")}</CardTitle>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <span>{t("dashboard.filter.hour")}</span>
@@ -209,8 +209,8 @@ export function DashboardView() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="pt-6">
-                <ResponsiveContainer width="100%" height={400}>
+              <CardContent className="h-[280px] pt-6 sm:h-[400px]">
+                <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={consumptionSeries.data}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time" />
@@ -233,8 +233,8 @@ export function DashboardView() {
 
           <TabsContent value="callTrend">
             <Card>
-              <CardContent className="pt-6">
-                <ResponsiveContainer width="100%" height={400}>
+              <CardContent className="h-[280px] pt-6 sm:h-[400px]">
+                <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={callTrendSeries.data}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time" />
@@ -259,8 +259,8 @@ export function DashboardView() {
 
           <TabsContent value="distribution">
             <Card>
-              <CardContent className="pt-6">
-                <ResponsiveContainer width="100%" height={400}>
+              <CardContent className="h-[280px] pt-6 sm:h-[400px]">
+                <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
                       data={distributionData}
@@ -268,7 +268,7 @@ export function DashboardView() {
                       nameKey="model"
                       cx="50%"
                       cy="50%"
-                      outerRadius={150}
+                      outerRadius="70%"
                       label
                     >
                       {distributionData.map((_, index) => (
@@ -285,8 +285,8 @@ export function DashboardView() {
 
           <TabsContent value="userTrend">
             <Card>
-              <CardContent className="pt-6">
-                <ResponsiveContainer width="100%" height={400}>
+              <CardContent className="h-[280px] pt-6 sm:h-[400px]">
+                <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={userTrendSeries.data}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time" />

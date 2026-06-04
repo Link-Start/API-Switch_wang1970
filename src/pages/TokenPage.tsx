@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Plus, Trash2, Copy, Check } from "lucide-react";
+import { Plus, Trash2, Copy, Check, MoreVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -100,6 +101,11 @@ export function TokenPage() {
     setTimeout(() => setCopiedId(null), 3000);
   };
 
+  const shortKey = (key: string) => {
+    if (key.length <= 14) return key;
+    return `${key.slice(0, 6)}…${key.slice(-4)}`;
+  };
+
   if (isLoading) {
     return <div className="p-6 text-muted-foreground">{t("common.loading")}</div>;
   }
@@ -110,8 +116,8 @@ export function TokenPage() {
   };
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 sm:p-6">
+      <div className="mb-6 flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">{t("token.title")}</h1>
         <Button size="sm" className="gap-1.5" onClick={() => setShowCreate(true)}>
           <Plus className="h-4 w-4" />
@@ -120,7 +126,8 @@ export function TokenPage() {
       </div>
 
       {keys?.length ? (
-        <div className="border rounded-lg overflow-hidden">
+        <>
+        <div className="hidden overflow-hidden rounded-lg border lg:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/50 text-left text-muted-foreground">
@@ -182,6 +189,47 @@ export function TokenPage() {
             <div className="flex justify-center py-4 text-sm text-muted-foreground">Loading...</div>
           )}
         </div>
+
+        <div className="space-y-2 lg:hidden">
+          {keys.map((key) => (
+            <div key={key.id} className="rounded-lg border bg-background p-3">
+              <div className="flex items-center gap-3">
+                <Switch
+                  checked={key.enabled}
+                  onCheckedChange={(checked) =>
+                    toggleMutation.mutate({ id: key.id, enabled: checked })
+                  }
+                />
+                <div className="min-w-0 flex-1 truncate font-medium" title={key.name}>{key.name}</div>
+                <code className="max-w-[34vw] shrink-0 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground" title={key.key}>
+                  {shortKey(key.key)}
+                </code>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-40 p-1">
+                    <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent" onClick={() => copyKey(key.key, key.id)}>
+                      {copiedId === key.id ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                      {t("common.copy", "复制")}
+                    </button>
+                    <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm text-destructive hover:bg-accent" onClick={() => setDeleteTarget(key)}>
+                      <Trash2 className="h-4 w-4" />
+                      {t("common.delete")}
+                    </button>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+          ))}
+          <div ref={sentinelRef} className="h-4" />
+          {isFetchingNextPage && (
+            <div className="flex justify-center py-4 text-sm text-muted-foreground">Loading...</div>
+          )}
+        </div>
+        </>
       ) : (
         <div className="flex h-64 items-center justify-center text-muted-foreground">
           {t("common.noData")}
@@ -227,7 +275,7 @@ export function TokenPage() {
         </DialogHeader>
         {createdKey && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <code className="flex-1 text-sm bg-muted p-3 rounded font-mono break-all">
                 {createdKey.key}
               </code>

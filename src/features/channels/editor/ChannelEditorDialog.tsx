@@ -465,22 +465,16 @@ return (
       onOpenChange(value);
     }}>
       <DialogContent className={cn(
-        "flex flex-col",
-        showModels ? "sm:max-w-3xl max-w-3xl" : "max-w-[500px]"
+        "flex max-h-[calc(100dvh-1rem)] flex-col overflow-hidden sm:max-h-[calc(100dvh-2rem)]",
+        showModels ? "sm:max-w-3xl" : "sm:max-w-[500px]"
       )}>
         <DialogHeader>
           <DialogTitle>{channel ? t('channel.editor.editTitle') : t('channel.editor.title')}</DialogTitle>
         </DialogHeader>
 
-        <div className={cn(
-          "flex-1 min-h-0 overflow-auto",
-          showModels && "grid grid-cols-2 gap-3"
-        )}>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
           {/* 渠道信息区 */}
-          <div className={cn(
-            "space-y-4 pb-4",
-            showModels && "min-w-0 border-r pr-3"
-          )}>
+          <div className="min-w-0 space-y-4 rounded-md border border-border/60 p-3 sm:p-4">
 
             <div className="space-y-2">
               <Label htmlFor="channel-name">{t('channel.editor.channelName')}</Label>
@@ -512,13 +506,13 @@ return (
 
             <div className="space-y-2">
               <Label htmlFor="channel-baseurl">{t('channel.editor.baseUrl')}</Label>
-              <div className="relative">
+              <div className="relative min-w-0">
                 <Input
                   id="channel-baseurl"
                   value={form.base_url}
                   onChange={(event) => setValue('base_url', event.target.value)}
                   placeholder={t('channel.form.placeholderBaseUrl')}
-                  className={urlProbe ? (urlProbe.reachable ? 'pr-24 border-green-500/50 focus-visible:ring-green-500/30' : 'pr-24 border-red-500/50 focus-visible:ring-red-500/30') : 'pr-8'}
+                  className={urlProbe ? (urlProbe.reachable ? 'pr-24 border-green-500/50 focus-visible:ring-green-500/30' : 'pr-12 border-red-500/50 focus-visible:ring-red-500/30') : 'pr-8'}
                 />
                 <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none">
                   {probingUrl ? (
@@ -534,17 +528,17 @@ return (
 
             <div className="space-y-2">
               <Label htmlFor="channel-apikey">{t('channel.editor.apiKey')}</Label>
-              <div className="relative">
+              <div className="relative min-w-0">
                 <textarea
                   id="channel-apikey"
                   rows={1}
                   value={form.api_key}
                   onChange={(event) => setValue('api_key', event.target.value)}
                   placeholder={channel ? undefined : t('channel.editor.multiKeyPlaceholder', '每行一个 API Key；获取模型使用第一行，保存时按行批量创建')}
-                  className="flex min-h-9 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex min-h-9 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 pr-20 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                   style={{ WebkitTextSecurity: showApiKey ? 'none' : 'disc' } as React.CSSProperties}
                 />
-                <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0 h-9 px-3 hover:bg-transparent" onClick={() => setShowApiKey(!showApiKey)}>
+                <Button type="button" variant="ghost" size="sm" className="absolute right-1 top-1 h-7 px-2 text-xs hover:bg-transparent" onClick={() => setShowApiKey(!showApiKey)}>
                   {showApiKey ? t('channel.editor.hidePassword') : t('channel.editor.showPassword')}
                 </Button>
               </div>
@@ -574,7 +568,7 @@ return (
 
           {/* 模型信息区 - 仅在展开时显示 */}
           {showModels && (
-            <div className="min-w-0 space-y-3 pl-3 pr-4 pt-4">
+            <div className="min-w-0 space-y-3 rounded-md border border-border/60 p-3 sm:p-4">
               {/* 时间范围选择：3个月/6个月/12个月 */}
               <div className="flex overflow-hidden rounded-md border border-input">
                 {([3, 6, 12] as const).map((months) => (
@@ -597,14 +591,14 @@ return (
                   placeholder={t('channel.editor.searchPlaceholder', '搜索/创建模型')} 
                   value={modelSearch} 
                   onChange={(e) => setModelSearch(e.target.value)} 
-                  className="h-8 text-sm flex-1 min-w-48" 
+                  className="h-8 min-w-full flex-1 text-sm sm:min-w-48" 
                 />
                 <Button size="sm" variant="outline" onClick={selectAllFiltered}>{t('common.selectAll', '全选')}</Button>
                 <Button size="sm" variant="outline" onClick={clearAllSelected}>{t('common.clear', '清除')}</Button>
               </div>
 
               {/* 模型列表 */}
-              <div className="h-[262px] overflow-y-auto rounded-md border border-border bg-background pr-2">
+              <div className="max-h-[42dvh] min-h-48 overflow-y-auto rounded-md border border-border bg-background pr-2 sm:h-[262px] sm:max-h-none">
                 {filteredModels.map((model) => {
                   const testResult = modelTestResults[model.name];
                   return (
@@ -672,7 +666,7 @@ return (
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0 border-t pt-3">
           <Button variant="outline" onClick={handleClose} disabled={saving || fetchingModels} className="gap-1.5"><X className="h-4 w-4" />{t('common.cancel')}</Button>
           <Button onClick={handleSave} disabled={saving || fetchingModels} className="gap-1.5">
             <Save className="h-4 w-4" />

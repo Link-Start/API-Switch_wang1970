@@ -24,11 +24,15 @@ fn read_embedded_bytes(path: &str) -> Option<Vec<u8>> {
 }
 
 fn read_text(path: &Path, embedded_path: &str) -> Option<String> {
-    read_embedded_text(embedded_path).or_else(|| std::fs::read_to_string(path).ok())
+    std::fs::read_to_string(path)
+        .ok()
+        .or_else(|| read_embedded_text(embedded_path))
 }
 
 fn read_bytes(path: &Path, embedded_path: &str) -> Option<Vec<u8>> {
-    read_embedded_bytes(embedded_path).or_else(|| std::fs::read(path).ok())
+    std::fs::read(path)
+        .ok()
+        .or_else(|| read_embedded_bytes(embedded_path))
 }
 
 fn content_type_for(path: &str) -> &'static str {

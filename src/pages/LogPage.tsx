@@ -43,8 +43,8 @@ export function LogPage() {
 
   if (isLoading) {
     return (
-      <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
+      <div className="p-4 sm:p-6">
+        <div className="mb-6 flex items-center justify-between gap-3">
           <div className="h-6 w-32 animate-pulse bg-muted rounded" />
           <div className="flex items-center gap-2">
             <div className="h-4 w-12 animate-pulse bg-muted rounded" />
@@ -52,7 +52,7 @@ export function LogPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <Card key={i}>
               <CardContent className="p-4">
@@ -63,7 +63,7 @@ export function LogPage() {
           ))}
         </div>
 
-        <div className="rounded-md border overflow-x-hidden">
+        <div className="hidden overflow-x-hidden rounded-md border lg:block">
           <table className="w-full table-fixed text-sm">
             <colgroup>
               <col className="w-40" />
@@ -130,14 +130,24 @@ export function LogPage() {
     }
   };
 
+  const formatMobileDate = (ts: number) => {
+    const d = new Date(ts * 1000);
+    return d.toLocaleString(undefined, {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 sm:p-6">
+      <div className="mb-6 flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">{t("log.title")}</h1>
         <Button variant="outline" onClick={() => setShowClearDialog(true)}>{t("log.clearData")}</Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4 mb-4">
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Card>
           <CardContent className="p-4">
             <div className="text-sm text-muted-foreground">{t("log.recentLogs")}</div>
@@ -164,7 +174,7 @@ export function LogPage() {
         </Card>
       </div>
 
-      <div className="rounded-md border overflow-x-hidden">
+      <div className="hidden overflow-x-hidden rounded-md border lg:block">
         <table className="w-full table-fixed text-sm">
           <colgroup>
             <col className="w-40" />
@@ -230,6 +240,30 @@ export function LogPage() {
             })}
           </tbody>
         </table>
+      </div>
+
+      <div className="space-y-2 lg:hidden">
+        {logs.map((log) => {
+          const duration = `${log.use_time || Math.ceil(log.latency_ms / 1000)}s${log.is_stream && log.first_token_ms > 0 ? ` / ${(log.first_token_ms / 1000).toFixed(1)}s` : ""}`;
+          return (
+            <div key={log.id} className="rounded-lg border bg-background p-3">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="shrink-0 text-muted-foreground">{formatMobileDate(log.created_at)}</span>
+                <div className="min-w-0 flex-1 truncate font-mono" title={log.model}>{log.model}</div>
+                <div className="max-w-[28vw] shrink truncate text-muted-foreground" title={log.channel_name}>{log.channel_name}</div>
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span>IN {log.prompt_tokens}</span>
+                <span>OUT {log.completion_tokens}</span>
+                <span>{log.is_stream ? t("log.streamShort") : t("log.nonStreamShort")}</span>
+                <span>{duration}</span>
+                <span className={log.success ? "text-green-600" : "text-red-500"}>
+                  {log.success ? t("log.success") : t("log.failed")}
+                </span>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {!logs.length && !isLoading && (

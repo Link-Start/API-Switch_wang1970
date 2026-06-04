@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { keepPreviousData, useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { GripVertical, Plus, MessageSquare, RefreshCw, XCircle, X, Trash2, Check, ChevronsUpDown, Tag } from "lucide-react";
+import { GripVertical, Plus, MessageSquare, RefreshCw, XCircle, X, Trash2, Check, ChevronsUpDown, Tag, MoreVertical, Folder } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
@@ -298,10 +298,16 @@ function GroupSelector({
   value,
   groups,
   onChange,
+  triggerLabel,
+  triggerClassName,
+  contentAlign = "start",
 }: {
   value: string;
   groups: string[];
   onChange: (group: string) => void;
+  triggerLabel?: string;
+  triggerClassName?: string;
+  contentAlign?: "start" | "end";
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -321,13 +327,14 @@ function GroupSelector({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="flex items-center justify-center rounded p-1 text-muted-foreground hover:bg-muted"
+          className={cn(triggerClassName || "flex items-center justify-center rounded p-1 text-muted-foreground hover:bg-muted")}
           onClick={(event) => event.stopPropagation()}
         >
-          <Tag className="h-4 w-4" />
+          <Folder className="h-4 w-4 shrink-0" />
+          {triggerLabel ? <span className="truncate">{triggerLabel}</span> : null}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-48 p-2" align="start" onClick={(event) => event.stopPropagation()}>
+      <PopoverContent className="w-48 p-2" align={contentAlign} onClick={(event) => event.stopPropagation()}>
         <Input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
@@ -416,24 +423,24 @@ function CardBody({
   const cooldownRemaining = formatCooldownRemaining(entry.cooldown_until);
   return (
     <>
-      <div className="h-10 w-10 rounded-md bg-muted/40 border flex items-center justify-center shrink-0 mt-0.5">
+      <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-md border bg-muted/40 sm:flex">
         <img src={catalogLogo} alt="provider" className="h-6 w-6 shrink-0" loading="lazy" onError={(e) => {
           e.currentTarget.onerror = null;
           e.currentTarget.src = `${import.meta.env.BASE_URL}logo/custom.svg`;
         }} />
       </div>
       <div className="flex-1 min-w-0 overflow-hidden">
-        <div className="flex items-center gap-2 min-w-0">
-          <Button variant="link" className="h-auto p-0 font-medium truncate text-foreground max-w-[180px]" onClick={(e) => { e.stopPropagation(); onEditAlias?.(entry); }}>
+        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden sm:gap-2">
+          <Button variant="link" className="h-auto max-w-full shrink-0 truncate p-0 text-left font-medium text-foreground" onClick={(e) => { e.stopPropagation(); onEditAlias?.(entry); }}>
             {entry.display_name || entry.model}
           </Button>
           <StatusDot state={getEntryStatus(entry)} />
           {onEditChannel && entry.channel_name ? (
-            <Button variant="link" className="h-auto p-0 text-foreground font-medium truncate" onClick={(e) => { e.stopPropagation(); onEditChannel(entry); }}>
+            <Button variant="link" className="h-auto min-w-0 shrink truncate p-0 text-left text-xs font-medium text-muted-foreground sm:text-foreground" onClick={(e) => { e.stopPropagation(); onEditChannel(entry); }}>
               {entry.channel_name}
             </Button>
           ) : (
-            <span className="font-medium truncate">{entry.channel_name || "—"}</span>
+            <span className="min-w-0 shrink truncate text-xs font-medium text-muted-foreground sm:text-foreground">{entry.channel_name || "—"}</span>
           )}
           {testingEntryIds?.has(entry.id) ? <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
             : testResult === "X" ? <XCircle className="h-3 w-3 text-red-500 shrink-0" />
@@ -444,7 +451,7 @@ function CardBody({
           {cooldownRemaining ? <span className="text-xs text-red-500 shrink-0">{t("apiPool.cooldownInline", { time: cooldownRemaining })}</span> : null}
           {testErrorDetail ? <span className="text-xs text-yellow-600 shrink-0" title={testErrorDetail}>⚠</span> : null}
         </div>
-          <div className="mt-1 flex items-center gap-2 min-w-0">
+        <div className="mt-1 min-w-0">
             <ModelMetaBlock
               metaZh={modelMetaZh}
               metaEn={modelMetaEn}
@@ -453,10 +460,10 @@ function CardBody({
               output={catalogOutput}
               features={catalogFeatures.map((f) => t(`apiPool.modelMeta.features.${f}`))}
             />
-          </div>
+        </div>
       </div>
-<div className="flex items-center gap-2">
-          <div className="flex items-center gap-0.5">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+          <div className="hidden items-center gap-0.5 sm:flex">
             {groups && onGroupChange ? (
               <GroupSelector value={entry.group_name || "auto"} groups={groups} onChange={(group) => onGroupChange(entry, group)} />
             ) : null}
@@ -467,6 +474,39 @@ function CardBody({
               <Trash2 className="h-4 w-4" />
             </Button>
           </div>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0 sm:hidden" onClick={(e) => e.stopPropagation()}>
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-44 p-1" onClick={(e) => e.stopPropagation()}>
+              <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent" onClick={() => onEditAlias?.(entry)}>
+                <Tag className="h-4 w-4" />{t("apiPool.alias")}
+              </button>
+              {onEditChannel && entry.channel_name ? (
+                <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent" onClick={() => onEditChannel(entry)}>
+                  <ChevronsUpDown className="h-4 w-4" />{t("apiPool.channel")}
+                </button>
+              ) : null}
+              {groups && onGroupChange ? (
+                <GroupSelector
+                  value={entry.group_name || "auto"}
+                  groups={groups}
+                  onChange={(group) => onGroupChange(entry, group)}
+                  triggerLabel={t("apiPool.groupLabel")}
+                  triggerClassName="flex w-full items-center justify-start gap-2 rounded px-2 py-2 text-left text-sm text-foreground hover:bg-accent"
+                  contentAlign="end"
+                />
+              ) : null}
+              <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent" onClick={() => onTest(entry)}>
+                <MessageSquare className="h-4 w-4" />{t("common.test")}
+              </button>
+              <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm text-destructive hover:bg-accent" onClick={() => onDelete(entry)}>
+                <Trash2 className="h-4 w-4" />{t("common.delete")}
+              </button>
+            </PopoverContent>
+          </Popover>
           <Switch checked={entry.enabled} onClick={(e) => {
             e.stopPropagation();
             onToggleIntent(entry, !entry.enabled, { ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, metaKey: e.metaKey });
@@ -500,9 +540,14 @@ function SortablePoolEntryCard(props: {
   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined, opacity: isDragging ? 0.8 : undefined };
   return (
     <Card ref={setNodeRef} style={style} className={cn("transition-opacity", !props.entry.enabled && "opacity-60")}>
-      <CardContent className="flex items-center gap-3 p-4">
-        <div {...attributes} {...listeners} className="cursor-pointer text-muted-foreground hover:text-foreground">
-          <GripVertical className="h-3.5 w-3.5 shrink-0" />
+      <CardContent className="flex items-center gap-2 p-3 sm:gap-3 sm:p-4">
+        <div
+          {...attributes}
+          {...listeners}
+          className="flex h-10 w-10 shrink-0 touch-none cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing"
+          aria-label="Drag model"
+        >
+          <GripVertical className="h-5 w-5 shrink-0" />
         </div>
         <CardBody {...props} />
       </CardContent>
@@ -532,7 +577,7 @@ function PoolEntryCard(props: {
 }) {
   return (
     <Card className={cn("transition-opacity", !props.entry.enabled && "opacity-60")}>
-      <CardContent className="flex items-center gap-3 p-4">
+      <CardContent className="flex items-center gap-2 p-3 sm:gap-3 sm:p-4">
         <CardBody {...props} />
       </CardContent>
     </Card>
@@ -829,7 +874,7 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
       requestAnimationFrame(() => queryClient.invalidateQueries({ queryKey: entriesQueryKey }));
     }, [adapter.pool, displayEntries, entriesQueryKey, filteredEntries, localOrder, queryClient]);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 
 
 
@@ -927,18 +972,18 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
 
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl font-semibold">{t("apiPool.title")}</h1>
           <p className="text-sm text-muted-foreground mt-1">{t("apiPool.description")}</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button size="sm" variant="outline" className="gap-1.5 min-w-[140px]" onClick={testAllEntries} disabled={!!testProgress}>
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:gap-3">
+          <Button size="sm" variant="outline" className="min-w-[132px] flex-1 gap-1.5 sm:flex-none sm:min-w-[140px]" onClick={testAllEntries} disabled={!!testProgress}>
             <RefreshCw className={cn("h-4 w-4", testProgress && "animate-spin")} />
             {testProgress ? `${testProgress.current}/${testProgress.total}` : t("apiPool.testAllLatency")}
           </Button>
-          <Button size="sm" className="gap-1.5" onClick={() => setShowAdd(true)}>
+          <Button size="sm" className="flex-1 gap-1.5 sm:flex-none" onClick={() => setShowAdd(true)}>
             <Plus className="h-4 w-4" />
             {t("apiPool.addModel")}
           </Button>
@@ -951,8 +996,8 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
         </div>
       </div>
       {groups.length > 0 ? (
-        <div className="mt-2 -mx-px w-[calc(100%+2px)] rounded-t-md border border-b-0 bg-background">
-          <div className="flex w-full items-center px-0 py-0">
+        <div className="mt-2 -mx-px w-[calc(100%+2px)] overflow-x-auto rounded-t-md border border-b-0 bg-background">
+          <div className="flex min-w-max items-center px-0 py-0 sm:w-full">
             {groups.map((group, index) => (
               <button
                 key={group}
@@ -1025,7 +1070,7 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
       <Dialog open={!!editAliasEntry} onOpenChange={(open) => { if (!open) setEditAliasEntry(null); }}>
         <DialogContent className="sm:max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>{t("apiPool.editAlias")}</DialogTitle>
+            <DialogTitle>{t("apiPool.alias")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
@@ -1102,6 +1147,3 @@ const handleToggleIntent = useCallback(async (entry: ApiEntry, enabled: boolean,
     </div>
   );
 }
-
-
-

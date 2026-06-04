@@ -84,8 +84,8 @@ export function LinkPage() {
   }
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
+    <div className="p-4 sm:p-6">
+      <div className="mb-4 sm:mb-6">
         <h1 className="text-xl font-semibold">{t("link.title")}</h1>
       </div>
 
@@ -96,14 +96,14 @@ export function LinkPage() {
           return (
             <Card key={app.id} className="flex min-h-36 flex-col">
               <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                       <AppIcon icon={app.icon} />
                     </div>
                     <CardTitle className="truncate text-base">{app.name}</CardTitle>
                   </div>
-                  <Button size="sm" disabled={disabled} onClick={() => startConnect(app)} title={app.status === "coming_soon" ? t("link.comingSoon") : undefined}>
+                  <Button size="sm" className="shrink-0" disabled={disabled} onClick={() => startConnect(app)} title={app.status === "coming_soon" ? t("link.comingSoon") : undefined}>
                     {pending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
                     {t("link.connect")}
                   </Button>
@@ -139,7 +139,7 @@ export function LinkPage() {
       </Dialog>
 
       <Dialog open={!!clipboardResult} onOpenChange={(open) => !open && setClipboardResult(null)}>
-        <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-2xl">
+        <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col overflow-hidden sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{t("link.clipboard.title", { appName: clipboardResult?.app.name ?? "" })}</DialogTitle>
             <DialogDescription>{clipboardResult?.result.instructions}</DialogDescription>

@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner';
 import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Edit, Plus, RefreshCw, Trash2, Power, PowerOff, XCircle, FileText } from 'lucide-react';
+import { Edit, MoreVertical, Plus, RefreshCw, Trash2, Power, PowerOff, XCircle, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Dialog,
   DialogContent,
@@ -174,7 +175,7 @@ export const ChannelManager: React.FC = () => {
 
         {error && <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
 
-        <div className="overflow-hidden rounded-lg border border-border bg-background">
+        <div className="hidden overflow-hidden rounded-lg border border-border bg-background md:block">
           <table className="w-full table-fixed text-sm">
             <colgroup>
               <col className="w-[20%]" />
@@ -314,11 +315,37 @@ export const ChannelManager: React.FC = () => {
               )}
             </tbody>
           </table>
-          <div ref={sentinelRef} className="h-4" />
-          {isFetchingNextPage && (
-            <div className="flex justify-center py-4 text-sm text-muted-foreground">Loading...</div>
+        </div>
+
+        <div className="space-y-2 md:hidden">
+          {loading ? (
+            Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="rounded-lg border border-border bg-background p-3">
+                <div className="h-4 w-40 animate-pulse rounded bg-muted" />
+                <div className="mt-2 h-3 w-24 animate-pulse rounded bg-muted" />
+              </div>
+            ))
+          ) : channels.length === 0 ? (
+            <div className="rounded-lg border border-border bg-background px-4 py-10 text-center text-muted-foreground">
+              {t('channel.editor.channelListEmpty')}
+            </div>
+          ) : (
+            channels.map((channel) => (
+              <ChannelMobileCard
+                key={channel.id}
+                channel={channel}
+                onEdit={() => openEdit(channel)}
+                onDelete={() => handleDelete(channel)}
+                onChanged={refreshChannels}
+              />
+            ))
           )}
         </div>
+
+        <div ref={sentinelRef} className="h-4" />
+        {isFetchingNextPage && (
+          <div className="flex justify-center py-4 text-sm text-muted-foreground">Loading...</div>
+        )}
 
         <ChannelEditorDialog
           open={dialogOpen}
@@ -340,6 +367,78 @@ export const ChannelManager: React.FC = () => {
     </div>
   );
 };
+
+
+function ApiTypeMark({ type }: { type: string }) {
+  return (
+    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-muted text-[10px] font-semibold uppercase text-muted-foreground" title={type}>
+      {type.slice(0, 2)}
+    </span>
+  );
+}
+
+function ChannelMobileCard({
+  channel,
+  onEdit,
+  onDelete,
+  onChanged,
+}: {
+  channel: Channel;
+  onEdit: () => void;
+  onDelete: () => void;
+  onChanged: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const api = useApiAdapter();
+  const [saving, setSaving] = useState(false);
+
+  const toggleEnabled = async () => {
+    setSaving(true);
+    try {
+      await api.channels.update({ id: channel.id, enabled: !channel.enabled });
+      await onChanged();
+    } catch (err) {
+      const msg = (err && typeof err === 'object' && 'message' in err) ? String((err as { message: unknown }).message) : String(err);
+      toast.error(msg || t('channel.editor.saveStatusFailed', '保存渠道状态失败'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-background p-3 shadow-sm">
+      <div className="flex items-center gap-3">
+        <ApiTypeMark type={channel.api_type} />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="truncate font-medium">{channel.name}</span>
+            {channel.notes && <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />}
+          </div>
+        </div>
+        <span className={cn('h-3 w-3 shrink-0 rounded-full', channel.enabled ? 'bg-green-500' : 'bg-red-500')} title={channel.enabled ? t('channel.enabled') : t('channel.disabled')} />
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0">
+              <MoreVertical className="h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-44 p-1">
+            <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent" onClick={onEdit}>
+              <Edit className="h-4 w-4" />{t('common.edit')}
+            </button>
+            <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent disabled:opacity-50" onClick={toggleEnabled} disabled={saving}>
+              {channel.enabled ? <PowerOff className="h-4 w-4" /> : <Power className="h-4 w-4" />}
+              {channel.enabled ? t('channel.disabled') : t('channel.enabled')}
+            </button>
+            <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm text-destructive hover:bg-accent" onClick={onDelete}>
+              <Trash2 className="h-4 w-4" />{t('common.delete')}
+            </button>
+          </PopoverContent>
+        </Popover>
+      </div>
+    </div>
+  );
+}
 
 function ChannelRow({
   channel,

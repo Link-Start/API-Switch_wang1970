@@ -213,6 +213,9 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm remove sharp png-to-ico
 
+      - name: Build web-admin assets
+        run: pnpm build:web-admin
+
       - name: Build Android APK
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}

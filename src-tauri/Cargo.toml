@@ -1,6 +1,6 @@
 [package]
 name = "api-switch"
-version = "0.7.52"
+version = "0.7.53"
 description = "Personal API Management & Forwarding Center"
 authors = ["you"]
 license = "MIT"
@@ -41,7 +41,7 @@ hyper = { version = "1.0", features = ["full"] }
 hyper-util = { version = "0.1", features = ["tokio", "http1", "client-legacy"] }
 http = "1"
 http-body-util = "0.1"
-reqwest = { version = "0.12", features = ["rustls-tls-native-roots", "json", "stream", "gzip", "brotli", "deflate"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json", "stream", "gzip", "brotli", "deflate"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2.0"

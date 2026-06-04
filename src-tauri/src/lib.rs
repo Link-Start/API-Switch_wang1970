@@ -226,6 +226,7 @@ fn run_gui(runtime_mode: RuntimeMode) {
             commands::test_chat::test_chat,
             commands::limit::query_limit,
             commands::admin_cmd::get_admin_status,
+            commands::platform::get_platform_capabilities,
             commands::translation::translate_and_relay,
             commands::translation::get_translation_relay,
         ])

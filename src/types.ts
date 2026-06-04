@@ -305,6 +305,18 @@ export interface AdminStatus {
   port: number;
 }
 
+// --- Platform Shell ---
+
+export type PlatformShell = "web" | "desktop" | "android";
+
+export interface PlatformCapabilities {
+  shell: PlatformShell;
+  isTauri: boolean;
+  isAndroidShell: boolean;
+  canOpenAndroidSettings: boolean;
+  canUseConnectionApps: boolean;
+}
+
 // --- Limit Query ---
 
 export type LimitCredentialStatus = "valid" | "expired" | "not_found" | "parse_error";

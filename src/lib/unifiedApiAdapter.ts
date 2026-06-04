@@ -25,6 +25,7 @@ import type {
   AppSettings,
   ProxyStatus,
   AdminStatus,
+  PlatformCapabilities,
   TestChatResponse,
   TranslationRelayPayload,
   TranslationRelayRequest,
@@ -635,6 +636,18 @@ export const apiAdapter: ApiAdapter = {
       address: '',
       port: 0,
     }));
+  },
+  getPlatformCapabilities: () => {
+    if (useTauri()) {
+      return tauriCmd<PlatformCapabilities>('get_platform_capabilities');
+    }
+    return Promise.resolve({
+      shell: 'web',
+      isTauri: false,
+      isAndroidShell: false,
+      canOpenAndroidSettings: false,
+      canUseConnectionApps: true,
+    });
   },
   getStateVersion: () =>
     webRequest<{ log: number; pool: number; channel: number; token: number }>('GET', '/state-version'),

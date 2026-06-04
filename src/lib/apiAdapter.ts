@@ -70,6 +70,7 @@ settings: {
   };
   getVersion(): Promise<{ version: string }>;
   getAdminStatus(): Promise<AdminStatus>;
+  getPlatformCapabilities(): Promise<PlatformCapabilities>;
   getStateVersion(): Promise<{ log: number; pool: number; channel: number; token: number }>;
   dirty: {
     /**
@@ -83,7 +84,7 @@ settings: {
 
 
 import type { Channel, CreateChannelParams, UpdateChannelParams, FetchModelsResult, ProbeResult, TestChannelResult, TestChannelDirectParams, ModelInfo, ModelCatalogMetaUpdate, SaveChannelWithModelsParams, SaveChannelWithModelsResult } from '../features/channels/types';
-import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, ProxyStatus, AdminStatus, TestChatResponse, TranslationRelayPayload, TranslationRelayRequest, ConnectionAppItem, AppConfigResult, ChannelModelImportPreview, ChannelModelImportResult } from '../types';
+import type { DashboardFilter, DashboardStats, ChartDataPoint, ModelRanking, UsageLog, UsageLogFilter, PaginatedResult, ApiEntry, AccessKey, AppSettings, ProxyStatus, AdminStatus, PlatformCapabilities, TestChatResponse, TranslationRelayPayload, TranslationRelayRequest, ConnectionAppItem, AppConfigResult, ChannelModelImportPreview, ChannelModelImportResult } from '../types';
 
 
 

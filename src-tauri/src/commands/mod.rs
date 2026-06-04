@@ -11,6 +11,8 @@ pub mod import_export;
 #[cfg(feature = "gui")]
 pub mod limit;
 #[cfg(feature = "gui")]
+pub mod platform;
+#[cfg(feature = "gui")]
 pub mod pool;
 #[cfg(feature = "gui")]
 pub mod proxy_cmd;

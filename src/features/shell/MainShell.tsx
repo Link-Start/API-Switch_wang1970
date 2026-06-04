@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import type { AdminStatus, AppSettings, ProxyStatus } from '@/types';
+import type { AdminStatus, AppSettings, PlatformCapabilities, ProxyStatus } from '@/types';
 
 export type MainPage = 'apiPool' | 'channels' | 'tokens' | 'link' | 'logs' | 'dashboard' | 'translator' | 'settings' | 'guide';
 
@@ -26,6 +26,7 @@ export interface MainShellProps {
   currentPage: MainPage;
   proxyStatus?: ProxyStatus | null;
   adminStatus?: AdminStatus | null;
+  platformCapabilities?: PlatformCapabilities | null;
   settings?: AppSettings | null;
   updateInfo?: { current: string; latest: string; url: string } | null;
   onUpdateDismiss?: () => void;
@@ -37,17 +38,11 @@ export interface MainShellProps {
   children?: React.ReactNode;
 }
 
-function isAndroidShellRuntime() {
-  if (typeof navigator === 'undefined' || typeof window === 'undefined') return false;
-  const candidate = window as Window & { __TAURI__?: unknown; __TAURI_INTERNALS__?: unknown };
-  const isTauri = typeof candidate.__TAURI__ !== 'undefined' || typeof candidate.__TAURI_INTERNALS__ !== 'undefined';
-  return isTauri && /Android/i.test(navigator.userAgent);
-}
-
 export function MainShell({
   currentPage,
   proxyStatus,
   adminStatus,
+  platformCapabilities,
   settings,
   updateInfo,
   onUpdateDismiss,
@@ -60,7 +55,8 @@ export function MainShell({
 }: MainShellProps) {
   const { t, i18n } = useTranslation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const navItems = NAV_ITEMS.filter((item) => !(item.androidHidden && isAndroidShellRuntime()));
+  const canUseConnectionApps = platformCapabilities?.canUseConnectionApps ?? true;
+  const navItems = NAV_ITEMS.filter((item) => !(item.androidHidden && !canUseConnectionApps));
 
   const openGuide = () => {
     const lang = i18n.language.startsWith('zh') ? 'zh' : 'en';

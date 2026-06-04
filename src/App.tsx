@@ -49,6 +49,12 @@ function MainApp({ onLogout }: { onLogout?: () => void }) {
     refetchInterval: 2000,
   });
 
+  const { data: platformCapabilities } = useQuery({
+    queryKey: ["platformCapabilities"],
+    queryFn: () => api.getPlatformCapabilities(),
+    staleTime: Infinity,
+  });
+
   // 状态版本检测：组件挂载时检测一次，不轮询
   // 数据看板等页面不再 2 秒自动刷新，进去有一次数据即可
   const queryClient = useQueryClient();
@@ -132,6 +138,7 @@ function MainApp({ onLogout }: { onLogout?: () => void }) {
       currentPage={currentPage}
       proxyStatus={proxyStatus}
       adminStatus={adminStatus}
+      platformCapabilities={platformCapabilities}
       settings={settings}
       updateInfo={updateInfo}
       onUpdateDismiss={() => setUpdateInfo(null)}

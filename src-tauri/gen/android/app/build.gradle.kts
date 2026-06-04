@@ -17,7 +17,7 @@ android {
     compileSdk = 36
     namespace = "com.api_switch.app"
     defaultConfig {
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
+        manifestPlaceholders["usesCleartextTraffic"] = "true"
         applicationId = "com.api_switch.app"
         minSdk = 24
         targetSdk = 36

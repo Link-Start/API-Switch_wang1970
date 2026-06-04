@@ -3,8 +3,8 @@
 //! 调用 `services::token_service` 中的函数，底层使用 `&Database`，
 //! 在所有构建模式下均可用。
 
-use crate::database::AccessKey;
 use crate::database::dao::PaginatedResult;
+use crate::database::AccessKey;
 use crate::error::AppError;
 
 use super::ServerApi;
@@ -21,7 +21,11 @@ impl ServerApi {
         page: i32,
         page_size: i32,
     ) -> Result<PaginatedResult<AccessKey>, AppError> {
-        crate::services::token_service::list_access_keys_paginated(&self.state().db, page, page_size)
+        crate::services::token_service::list_access_keys_paginated(
+            &self.state().db,
+            page,
+            page_size,
+        )
     }
 
     /// 创建新 access key。

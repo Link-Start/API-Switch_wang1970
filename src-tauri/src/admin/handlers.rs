@@ -1,7 +1,6 @@
 use crate::admin::error::AdminError;
 use crate::admin::state::{AdminState, SessionInfo};
 use crate::database::AppSettings;
-use crate::server_api::ServerApi;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::Json;
@@ -9,19 +8,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 const SESSION_TTL_MINUTES: i64 = 30;
-
-/// 获取 ServerApi 实例（从 AdminState 中提取 runtime + app_handle）。
-fn server_api(state: &AdminState) -> Result<ServerApi, AdminError> {
-    let runtime = state
-        .runtime
-        .as_ref()
-        .ok_or_else(|| AdminError::Internal("AdminState missing runtime".to_string()))?;
-    let app_handle = state
-        .app_handle
-        .as_ref()
-        .ok_or_else(|| AdminError::Internal("AdminState missing app handle".to_string()))?;
-    Ok(ServerApi::new(runtime.clone(), app_handle.clone()))
-}
 
 pub async fn version() -> axum::Json<serde_json::Value> {
     axum::Json(serde_json::json!({
@@ -239,13 +225,7 @@ pub async fn patch_settings(
         merged.web_admin_password = current.web_admin_password;
     }
 
-    if let Ok(api) = server_api(&state) {
-        api.update_settings(merged).await?;
-    } else {
-        state.db.update_settings(&merged)?;
-        let refreshed = state.db.get_settings()?;
-        *state.settings.write().await = refreshed;
-    }
+    state.server_api()?.update_settings(merged).await?;
 
     let mut response_settings = state.settings.read().await.clone();
     let version = response_settings.updated_at;
@@ -284,35 +264,10 @@ pub async fn update_settings(
     }
     let session_invalidated = credentials_changed;
 
-    if let Ok(api) = server_api(&state) {
-        let restart_info = api
-            .update_settings_with_restart(payload.data.clone(), true)
-            .await?;
-        let refreshed = state.settings.read().await.clone();
-        let _ = state.db.add_audit_log(
-            "admin_settings_updated",
-            &format!(
-                "port={}, enabled={}, version={}, session_invalidated={}, invalidated_session_count={}, username_changed={}, password_changed={}",
-                refreshed.web_admin_port,
-                refreshed.web_admin_enabled,
-                refreshed.updated_at,
-                session_invalidated,
-                invalidated_session_count,
-                payload.data.web_admin_username != current_username,
-                payload.data.web_admin_password != current_password
-            ),
-        );
-        return Ok(Json(RestartResponse {
-            ok: true,
-            _version: refreshed.updated_at,
-            restart: restart_info,
-        }));
-    }
-
-    state.db.update_settings(&payload.data)?;
-    let refreshed = state.db.get_settings()?;
-    *state.settings.write().await = refreshed;
-
+    let restart_info = state
+        .server_api()?
+        .update_settings_with_restart(payload.data.clone(), true)
+        .await?;
     let refreshed = state.settings.read().await.clone();
     let _ = state.db.add_audit_log(
         "admin_settings_updated",
@@ -330,6 +285,6 @@ pub async fn update_settings(
     Ok(Json(RestartResponse {
         ok: true,
         _version: refreshed.updated_at,
-        restart: None,
+        restart: restart_info,
     }))
 }

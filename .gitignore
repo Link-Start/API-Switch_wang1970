@@ -45,6 +45,24 @@ src-tauri/src/services/learnings_translation.md
 
 # Rust / Tauri
 src-tauri/target
+src-tauri/gen/schemas/
+
+# Android / Gradle local build artifacts
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/**/build/
+src-tauri/gen/android/**/local.properties
+src-tauri/gen/android/**/key.properties
+src-tauri/gen/android/**/*.apk
+src-tauri/gen/android/**/*.aab
+src-tauri/gen/android/.idea/caches/
+src-tauri/gen/android/.idea/libraries/
+src-tauri/gen/android/.idea/modules.xml
+src-tauri/gen/android/.idea/workspace.xml
+src-tauri/gen/android/.idea/navEditor.xml
+src-tauri/gen/android/.idea/assetWizardSettings.xml
+src-tauri/gen/android/.externalNativeBuild/
+src-tauri/gen/android/.cxx/
+src-tauri/gen/android/captures/
 
 # Build artifacts
 tsconfig.tsbuildinfo

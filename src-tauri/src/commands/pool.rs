@@ -5,7 +5,7 @@ use crate::server_api::ServerApi;
 use crate::services::pool_service;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, State};
+use tauri::State;
 
 #[derive(Serialize)]
 pub struct TestResult {
@@ -59,12 +59,17 @@ impl From<CreateEntryParams> for pool_service::CreateEntryParams {
 }
 
 #[tauri::command]
-pub fn list_entries(state: State<'_, AppState>) -> Result<Vec<ApiEntry>, AppError> {
-    pool_service::list_entries(&state.db)
+pub fn list_entries(
+    app: crate::AppEventHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<ApiEntry>, AppError> {
+    let api = ServerApi::new(state.inner().clone(), app);
+    api.list_entries()
 }
 
 #[tauri::command]
 pub fn list_entries_paginated(
+    app: crate::AppEventHandle,
     state: State<'_, AppState>,
     page: i32,
     page_size: i32,
@@ -72,8 +77,8 @@ pub fn list_entries_paginated(
     search: Option<String>,
     channel_id: Option<String>,
 ) -> Result<PaginatedResult<ApiEntry>, AppError> {
-    pool_service::list_entries_paginated(
-        &state.db,
+    let api = ServerApi::new(state.inner().clone(), app);
+    api.list_entries_paginated(
         page,
         page_size,
         group_name.as_deref(),
@@ -90,10 +95,8 @@ pub async fn toggle_entry(
     enabled: bool,
     pin_to_top: Option<bool>,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app.clone());
-    api.toggle_entry(&id, enabled, pin_to_top.unwrap_or(false))?;
-    let _ = app.emit("entries-changed", ());
-    Ok(())
+    let api = ServerApi::new(state.inner().clone(), app);
+    api.toggle_entry(&id, enabled, pin_to_top.unwrap_or(false))
 }
 
 /// Batch toggle entries: single IPC call to toggle multiple entries.
@@ -105,10 +108,8 @@ pub async fn batch_toggle_entries(
     ids: Vec<String>,
     enabled: bool,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app.clone());
-    api.batch_toggle_entries(&ids, enabled)?;
-    let _ = app.emit("entries-changed", ());
-    Ok(())
+    let api = ServerApi::new(state.inner().clone(), app);
+    api.batch_toggle_entries(&ids, enabled)
 }
 
 #[tauri::command]
@@ -117,10 +118,8 @@ pub async fn reorder_entries(
     state: State<'_, AppState>,
     ordered_ids: Vec<String>,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app.clone());
-    api.reorder_entries(&ordered_ids)?;
-    let _ = app.emit("entries-changed", ());
-    Ok(())
+    let api = ServerApi::new(state.inner().clone(), app);
+    api.reorder_entries(&ordered_ids)
 }
 
 #[tauri::command]
@@ -129,10 +128,8 @@ pub async fn delete_entry(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app.clone());
-    api.delete_entry(&id)?;
-    let _ = app.emit("entries-changed", ());
-    Ok(())
+    let api = ServerApi::new(state.inner().clone(), app);
+    api.delete_entry(&id)
 }
 
 #[tauri::command]
@@ -141,10 +138,8 @@ pub async fn create_entry(
     state: State<'_, AppState>,
     params: CreateEntryParams,
 ) -> Result<ApiEntry, AppError> {
-    let api = ServerApi::new(state.inner().clone(), app.clone());
-    let entry = api.create_entry(params.into())?;
-    let _ = app.emit("entries-changed", ());
-    Ok(entry)
+    let api = ServerApi::new(state.inner().clone(), app);
+    api.create_entry(params.into())
 }
 
 #[tauri::command]
@@ -175,9 +170,8 @@ pub async fn test_entry_latency(
     entry_id: String,
     model_score: f64,
 ) -> Result<TestResult, AppError> {
-    let db = state.db.clone();
-    let result = pool_service::test_entry_latency(&db, &entry_id, model_score).await?;
-    let _ = app.emit("entries-changed", ());
+    let api = ServerApi::new(state.inner().clone(), app);
+    let result = api.test_entry_latency(&entry_id, model_score).await?;
     Ok(TestResult {
         status: result.status,
         response_ms: result.response_ms,
@@ -193,14 +187,17 @@ pub async fn update_entry_response_ms(
     entry_id: String,
     response_ms: String,
 ) -> Result<(), AppError> {
-    pool_service::update_entry_response_ms(&state.db, &entry_id, &response_ms)?;
-    let _ = app.emit("entries-changed", ());
-    Ok(())
+    let api = ServerApi::new(state.inner().clone(), app);
+    api.update_entry_response_ms(&entry_id, &response_ms)
 }
 
 #[tauri::command]
-pub fn get_all_groups(state: State<'_, AppState>) -> Result<Vec<String>, AppError> {
-    pool_service::get_all_groups(&state.db)
+pub fn get_all_groups(
+    app: crate::AppEventHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, AppError> {
+    let api = ServerApi::new(state.inner().clone(), app);
+    api.get_all_groups()
 }
 
 #[tauri::command]
@@ -210,10 +207,8 @@ pub async fn update_entry_display_name(
     id: String,
     display_name: String,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app.clone());
-    api.update_entry_display_name(&id, &display_name)?;
-    let _ = app.emit("entries-changed", ());
-    Ok(())
+    let api = ServerApi::new(state.inner().clone(), app);
+    api.update_entry_display_name(&id, &display_name)
 }
 
 #[tauri::command]
@@ -223,8 +218,6 @@ pub async fn update_entry_group(
     id: String,
     group_name: String,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app.clone());
-    api.update_entry_group(&id, &group_name)?;
-    let _ = app.emit("entries-changed", ());
-    Ok(())
+    let api = ServerApi::new(state.inner().clone(), app);
+    api.update_entry_group(&id, &group_name)
 }

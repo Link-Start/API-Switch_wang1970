@@ -40,10 +40,7 @@ impl ServerApi {
     /// 局部补丁更新设置，返回更新后的设置。
     ///
     /// 注意：`web_admin_password` 保护逻辑（空密码时保持原值）由调用方负责。
-    pub async fn patch_settings(
-        &self,
-        patch: serde_json::Value,
-    ) -> Result<AppSettings, AppError> {
+    pub async fn patch_settings(&self, patch: serde_json::Value) -> Result<AppSettings, AppError> {
         config::patch_settings_from_state(self.app.clone(), self.state(), patch).await
     }
 }

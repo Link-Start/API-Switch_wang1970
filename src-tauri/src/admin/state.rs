@@ -1,4 +1,6 @@
+use crate::admin::error::AdminError;
 use crate::database::{AppSettings, Database};
+use crate::server_api::ServerApi;
 use crate::AppState;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -50,11 +52,89 @@ impl AdminState {
         }
     }
 
+    /// Build the shared SERVER API facade for Web API handlers.
+    pub fn server_api(&self) -> Result<ServerApi, AdminError> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| AdminError::Internal("AdminState missing runtime".to_string()))?;
+        let app_handle = self
+            .app_handle
+            .as_ref()
+            .ok_or_else(|| AdminError::Internal("AdminState missing app handle".to_string()))?;
+        Ok(ServerApi::new(runtime.clone(), app_handle.clone()))
+    }
+
     pub fn mark_token_dirty(&self) {
         // Token bumps are managed by token_service
     }
 
     pub fn mark_log_dirty(&self) {
         // Log bumps are managed by log_service
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn test_admin_state(
+        runtime: Option<AppState>,
+        app_handle: Option<crate::AppEventHandle>,
+    ) -> AdminState {
+        let db_path = std::env::temp_dir().join(format!(
+            "api-switch-admin-state-test-{}-{}.db",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let db = Database::open_at(&db_path).expect("test database should open");
+        db.create_tables().expect("test schema should initialize");
+        let _ = std::fs::remove_file(PathBuf::from(format!("{}-wal", db_path.display())));
+        let _ = std::fs::remove_file(PathBuf::from(format!("{}-shm", db_path.display())));
+        let _ = std::fs::remove_file(&db_path);
+
+        AdminState {
+            db: Arc::new(db),
+            settings: Arc::new(RwLock::new(AppSettings::default())),
+            login_sessions: Arc::new(RwLock::new(HashMap::new())),
+            login_failures: Arc::new(Mutex::new(HashMap::new())),
+            runtime,
+            app_handle,
+        }
+    }
+
+    #[test]
+    fn server_api_requires_runtime_state() {
+        let state = test_admin_state(None, Some(crate::AppEventHandle));
+
+        let err = match state.server_api() {
+            Ok(_) => panic!("missing runtime should fail"),
+            Err(err) => err,
+        };
+
+        assert!(format!("{err:?}").contains("AdminState missing runtime"));
+    }
+
+    #[test]
+    fn server_api_requires_app_handle() {
+        let base = test_admin_state(None, None);
+        let runtime = AppState {
+            db: base.db.clone(),
+            settings: base.settings.clone(),
+            proxy: Arc::new(RwLock::new(None)),
+            admin: Arc::new(RwLock::new(None)),
+            translation_relay: Arc::new(RwLock::new(None)),
+            failure_counts: Arc::new(RwLock::new(HashMap::new())),
+            runtime_mode: crate::runtime_mode::RuntimeMode::Standalone,
+        };
+        let state = test_admin_state(Some(runtime), None);
+
+        let err = match state.server_api() {
+            Ok(_) => panic!("missing app handle should fail"),
+            Err(err) => err,
+        };
+
+        assert!(format!("{err:?}").contains("AdminState missing app handle"));
     }
 }

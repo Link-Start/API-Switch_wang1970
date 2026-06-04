@@ -4,7 +4,7 @@ use crate::error::AppError;
 use crate::services::channel_service::{self, FetchModelsResult, ProbeResult, TestChannelResult};
 use crate::AppState;
 use serde::Deserialize;
-use tauri::{Emitter, State};
+use tauri::State;
 
 #[derive(Deserialize)]
 pub struct ModelCatalogMetaInput {
@@ -100,31 +100,32 @@ pub fn update_channel(
 
 #[tauri::command]
 pub fn update_channel_response_ms(
+    app: crate::AppEventHandle,
     state: State<'_, AppState>,
     params: UpdateResponseMsParams,
 ) -> Result<(), AppError> {
-    channel_service::update_channel_response_ms(
-        &state.db,
-        channel_service::UpdateResponseMsParams {
-            channel_id: params.channel_id,
-            response_ms: params.response_ms,
-        },
-    )?;
-    Ok(())
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    api.update_channel_response_ms(&params.channel_id, &params.response_ms)
 }
 
 #[tauri::command]
-pub fn list_channels(state: State<'_, AppState>) -> Result<Vec<Channel>, AppError> {
-    channel_service::list_channels(&state.db)
+pub fn list_channels(
+    app: crate::AppEventHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<Channel>, AppError> {
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    api.list_channels()
 }
 
 #[tauri::command]
 pub fn list_channels_paginated(
+    app: crate::AppEventHandle,
     state: State<'_, AppState>,
     page: i32,
     page_size: i32,
 ) -> Result<PaginatedResult<Channel>, AppError> {
-    channel_service::list_channels_paginated(&state.db, page, page_size)
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    api.list_channels_paginated(page, page_size)
 }
 
 #[tauri::command]
@@ -133,16 +134,14 @@ pub async fn create_channel(
     state: State<'_, AppState>,
     params: CreateChannelParams,
 ) -> Result<Channel, AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app.clone());
-    let channel = api.create_channel(channel_service::CreateChannelParams {
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    api.create_channel(channel_service::CreateChannelParams {
         name: params.name,
         api_type: params.api_type,
         base_url: params.base_url,
         api_key: params.api_key,
         notes: params.notes,
-    })?;
-    let _ = app.emit("channels-changed", ());
-    Ok(channel)
+    })
 }
 
 #[tauri::command]
@@ -170,47 +169,8 @@ pub async fn test_channel(
     state: State<'_, AppState>,
     channel_id: String,
 ) -> Result<TestChannelResult, AppError> {
-    let channel = state.db.get_channel(&channel_id)?;
-
-    let model = channel
-        .selected_models
-        .first()
-        .or_else(|| channel.available_models.first().map(|m| &m.name))
-        .cloned()
-        .unwrap_or_else(|| "gpt-3.5-turbo".to_string());
-
-    let result = channel_service::test_channel_chat(
-        &channel.base_url,
-        &channel.api_key,
-        &channel.api_type,
-        &model,
-    )
-    .await;
-
-    if result.success && result.status_code == Some(200) {
-        let _ = state
-            .db
-            .update_channel_response_ms(&channel_id, &result.latency_ms.to_string());
-        let _ = channel_service::update_channel(
-            &state.db,
-            Some(&app),
-            channel_service::UpdateChannelParams {
-                id: channel_id.clone(),
-                name: None,
-                api_type: None,
-                base_url: None,
-                api_key: None,
-                enabled: Some(true),
-                notes: None,
-            },
-        );
-    } else {
-        let _ = state.db.disable_channel(&channel_id);
-        crate::state_version::bump("channel");
-        let _ = app.emit("channels-changed", ());
-    }
-
-    Ok(result)
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    api.test_channel(&channel_id).await
 }
 
 #[tauri::command]
@@ -233,10 +193,12 @@ pub async fn fetch_models_direct(
 
 #[tauri::command]
 pub async fn fetch_models(
+    app: crate::AppEventHandle,
     state: State<'_, AppState>,
     channel_id: String,
 ) -> Result<FetchModelsResult, AppError> {
-    channel_service::fetch_models(&state.db, channel_id).await
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    api.fetch_channel_models(channel_id).await
 }
 
 #[tauri::command]
@@ -248,9 +210,6 @@ pub async fn select_models(
     available_models: Vec<ModelInfo>,
     catalog_meta: Vec<ModelCatalogMetaInput>,
 ) -> Result<(), AppError> {
-    state
-        .db
-        .update_channel_models(&channel_id, &available_models, &model_names)?;
     let catalog_meta: Vec<crate::database::ModelCatalogMetaInput> = catalog_meta
         .into_iter()
         .map(|item| crate::database::ModelCatalogMetaInput {
@@ -262,14 +221,8 @@ pub async fn select_models(
             model_meta_en: item.model_meta_en,
         })
         .collect();
-    state
-        .db
-        .sync_entries_for_channel_with_meta(&channel_id, &model_names, &catalog_meta)?;
-    let _ = app.emit("entries-changed", ());
-    let _ = app.emit("channels-changed", ());
-    crate::state_version::bump("channel");
-    crate::state_version::bump("pool");
-    Ok(())
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    api.select_channel_models(&channel_id, &model_names, &available_models, &catalog_meta)
 }
 
 /// Generate model list URL candidates: adapter standard + common variants

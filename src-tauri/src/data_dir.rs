@@ -1,6 +1,9 @@
 use crate::error::AppError;
 use std::path::{Path, PathBuf};
 
+#[cfg(all(feature = "gui", mobile))]
+use tauri::Manager;
+
 const APP_BINARY_NAMES: &[&str] = &["api-switch", "api-switch.exe"];
 
 pub(crate) fn resolve_data_dir() -> Result<PathBuf, AppError> {

@@ -1,9 +1,8 @@
 use crate::admin::{
     ERROR_CODE_EMPTY_MODEL_LIST, ERROR_CODE_ENDPOINT_CORRECTION_FAILED,
-    ERROR_CODE_ENDPOINT_UNREACHABLE,
-    ERROR_CODE_FETCH_MODELS_FAILED, ERROR_CODE_HTTP_CLIENT_ERROR, ERROR_CODE_INVALID_CREDENTIALS,
-    ERROR_CODE_INVALID_URL, ERROR_CODE_RATE_LIMITED, ERROR_CODE_TIMEOUT,
-    ERROR_CODE_UNSUPPORTED_PROVIDER,
+    ERROR_CODE_ENDPOINT_UNREACHABLE, ERROR_CODE_FETCH_MODELS_FAILED, ERROR_CODE_HTTP_CLIENT_ERROR,
+    ERROR_CODE_INVALID_CREDENTIALS, ERROR_CODE_INVALID_URL, ERROR_CODE_RATE_LIMITED,
+    ERROR_CODE_TIMEOUT, ERROR_CODE_UNSUPPORTED_PROVIDER,
 };
 use crate::database::dao::PaginatedResult;
 use crate::database::{Channel, Database, ModelInfo};
@@ -609,7 +608,8 @@ async fn detect_endpoint_and_collect(
     };
 
     let candidates = detect_endpoint_candidates(&client, api_type, base_url, api_key).await;
-    let primary_guess = select_preferred_endpoint_candidate(&candidates).map(|candidate| candidate.guess);
+    let primary_guess =
+        select_preferred_endpoint_candidate(&candidates).map(|candidate| candidate.guess);
     let all_found_types = collect_reachable_endpoint_types(&candidates);
 
     (primary_guess, all_found_types)
@@ -697,7 +697,10 @@ async fn detect_endpoint_candidates(
     let selected_api_type = normalize_api_type(api_type);
     let mut tasks = Vec::new();
 
-    for scope in [EndpointCandidateScope::UserUrl, EndpointCandidateScope::BaseSite] {
+    for scope in [
+        EndpointCandidateScope::UserUrl,
+        EndpointCandidateScope::BaseSite,
+    ] {
         let base_urls = match scope {
             EndpointCandidateScope::UserUrl => &scoped_candidates.user_urls,
             EndpointCandidateScope::BaseSite => &scoped_candidates.base_sites,
@@ -787,7 +790,8 @@ async fn detect_type_with_base_url(
             Err(ModelsEndpointError::Network(_)) | Err(ModelsEndpointError::Timeout(_)) => {}
             Err(err) => {
                 if reachable_candidate.is_none() {
-                    let corrected_base_url = canonical_base_url_for_success(api_type, base_url, url);
+                    let corrected_base_url =
+                        canonical_base_url_for_success(api_type, base_url, url);
                     let detected_type = if respect_selected_type {
                         api_type.to_string()
                     } else {
@@ -827,12 +831,26 @@ fn normalize_api_type(api_type: &str) -> &'static str {
     }
 }
 
-fn select_preferred_endpoint_candidate(candidates: &[EndpointCandidate]) -> Option<EndpointCandidate> {
+fn select_preferred_endpoint_candidate(
+    candidates: &[EndpointCandidate],
+) -> Option<EndpointCandidate> {
     [
-        (EndpointCandidateScope::UserUrl, EndpointCandidateStatus::Usable),
-        (EndpointCandidateScope::UserUrl, EndpointCandidateStatus::Reachable),
-        (EndpointCandidateScope::BaseSite, EndpointCandidateStatus::Usable),
-        (EndpointCandidateScope::BaseSite, EndpointCandidateStatus::Reachable),
+        (
+            EndpointCandidateScope::UserUrl,
+            EndpointCandidateStatus::Usable,
+        ),
+        (
+            EndpointCandidateScope::UserUrl,
+            EndpointCandidateStatus::Reachable,
+        ),
+        (
+            EndpointCandidateScope::BaseSite,
+            EndpointCandidateStatus::Usable,
+        ),
+        (
+            EndpointCandidateScope::BaseSite,
+            EndpointCandidateStatus::Reachable,
+        ),
     ]
     .into_iter()
     .find_map(|(scope, status)| {
@@ -870,10 +888,15 @@ fn build_user_url_candidates(base_url: &str) -> Vec<String> {
     push_unique_url_candidate(&mut candidates, normalized.clone());
 
     if normalized.to_ascii_lowercase().ends_with("/v1") {
-        let without_v1 = normalized[..normalized.len() - 3].trim_end_matches('/').to_string();
+        let without_v1 = normalized[..normalized.len() - 3]
+            .trim_end_matches('/')
+            .to_string();
         push_unique_url_candidate(&mut candidates, without_v1);
     } else if !normalized.is_empty() {
-        push_unique_url_candidate(&mut candidates, format!("{}/v1", normalized.trim_end_matches('/')));
+        push_unique_url_candidate(
+            &mut candidates,
+            format!("{}/v1", normalized.trim_end_matches('/')),
+        );
     }
 
     candidates
@@ -885,10 +908,15 @@ fn build_site_url_candidates(base_site: &str) -> Vec<String> {
     push_unique_url_candidate(&mut candidates, normalized.clone());
 
     if normalized.to_ascii_lowercase().ends_with("/v1") {
-        let without_v1 = normalized[..normalized.len() - 3].trim_end_matches('/').to_string();
+        let without_v1 = normalized[..normalized.len() - 3]
+            .trim_end_matches('/')
+            .to_string();
         push_unique_url_candidate(&mut candidates, without_v1);
     } else if !normalized.is_empty() {
-        push_unique_url_candidate(&mut candidates, format!("{}/v1", normalized.trim_end_matches('/')));
+        push_unique_url_candidate(
+            &mut candidates,
+            format!("{}/v1", normalized.trim_end_matches('/')),
+        );
     }
 
     candidates
@@ -1482,7 +1510,10 @@ mod tests {
 
         assert_eq!(selected.scope, EndpointCandidateScope::UserUrl);
         assert_eq!(selected.status, EndpointCandidateStatus::Reachable);
-        assert_eq!(selected.guess.corrected_base_url, "https://a.com/xxx/yyy/v1");
+        assert_eq!(
+            selected.guess.corrected_base_url,
+            "https://a.com/xxx/yyy/v1"
+        );
     }
 
     #[test]

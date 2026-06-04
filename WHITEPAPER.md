@@ -2,7 +2,7 @@
 
 > 文档定位：架构、模块、数据流、数据库、协议适配、运行模式与实现细节  
 > 文档层级：程序实现可归纳为 `WHITEPAPER.md`；`WHITEPAPER.md` 可归纳为 `PLAN.md`。反向看，`PLAN.md` 的扩展是 `WHITEPAPER.md`，`WHITEPAPER.md` 的扩展是程序实现。  
-> 更新日期：2026-05-20
+> 更新日期：2026-06-04
 
 ---
 
@@ -122,6 +122,31 @@ Server-only 模式用于无 GUI 环境运行。启动参数或环境变量可绕
 - `API_SWITCH_HEADLESS=1`
 
 该模式适合服务器、NAS、远程主机或只需要代理/API 管理服务的场景。
+
+### 2.4 Android Mobile 构建基线
+
+Android 基线使用 Tauri v2 mobile 工程生成 Android 壳，当前只要求能完成工程生成和 APK 构建；真机代理监听、WebView 生命周期、cleartext/loopback 策略和 Android 客户端联调属于后续真机验证。
+
+Windows 本机 Android SDK 原始安装路径位于 `D:\Program Files\Android\Sdk`，该路径包含空格，NDK 构建会报 `NDK path cannot contain spaces`。因此 Android 构建统一使用无空格 junction 路径：
+
+- `ANDROID_HOME=D:\Android\Sdk`
+- `ANDROID_SDK_ROOT=D:\Android\Sdk`
+- `ANDROID_NDK_HOME=D:\Android\Sdk\ndk\27.3.13750724`
+- `JAVA_HOME=D:\Program Files\Android\Android Studio\jbr`
+
+重新构建 Android APK 时使用以下命令：
+
+```powershell
+$env:JAVA_HOME='D:\Program Files\Android\Android Studio\jbr'
+$env:ANDROID_HOME='D:\Android\Sdk'
+$env:ANDROID_SDK_ROOT='D:\Android\Sdk'
+$env:ANDROID_NDK_HOME='D:\Android\Sdk\ndk\27.3.13750724'
+$env:CARGO_BUILD_JOBS='1'
+
+pnpm android:build
+```
+
+当前已验证的 Android 构建产物路径：`src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk`。
 
 ---
 

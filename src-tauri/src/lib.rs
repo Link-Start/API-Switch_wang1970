@@ -235,9 +235,12 @@ fn run_gui(runtime_mode: RuntimeMode) {
 
 #[cfg(all(feature = "gui", not(all(feature = "tray", not(mobile)))))]
 fn configure_platform_shell(app: &mut tauri::App) {
+    #[cfg(not(mobile))]
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
     }
+    #[cfg(mobile)]
+    let _ = app;
     log::info!("Running without desktop tray shell");
 }
 

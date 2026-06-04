@@ -3,10 +3,12 @@
 //! 调用 `services::pool_service` 中的函数，底层使用 `&Database`，
 //! 在所有构建模式下均可用。
 
-use crate::database::ApiEntry;
 use crate::database::dao::PaginatedResult;
+use crate::database::ApiEntry;
 use crate::error::AppError;
-use crate::services::pool_service::{self, CatalogMetaUpdate, CreateEntryParams, TestLatencyResult};
+use crate::services::pool_service::{
+    self, CatalogMetaUpdate, CreateEntryParams, TestLatencyResult,
+};
 
 use super::ServerApi;
 
@@ -37,38 +39,56 @@ impl ServerApi {
 
     /// 切换单个入口的启用状态。
     pub fn toggle_entry(&self, id: &str, enabled: bool, pin_to_top: bool) -> Result<(), AppError> {
-        pool_service::toggle_entry(
+        let result = pool_service::toggle_entry(
             &self.state().db,
             &self.state().failure_counts,
             id,
             enabled,
             pin_to_top,
-        )
+        );
+        if result.is_ok() {
+            crate::event::emit(self.app(), "entries-changed");
+        }
+        result
     }
 
     /// 批量切换入口的启用状态（单次 IPC 调用）。
     pub fn batch_toggle_entries(&self, ids: &[String], enabled: bool) -> Result<(), AppError> {
-        pool_service::batch_toggle_entries(
+        let result = pool_service::batch_toggle_entries(
             &self.state().db,
             &self.state().failure_counts,
             ids,
             enabled,
-        )
+        );
+        if result.is_ok() {
+            crate::event::emit(self.app(), "entries-changed");
+        }
+        result
     }
 
     /// 按给定顺序重新排列入口。
     pub fn reorder_entries(&self, ordered_ids: &[String]) -> Result<(), AppError> {
-        pool_service::reorder_entries(&self.state().db, ordered_ids)
+        let result = pool_service::reorder_entries(&self.state().db, ordered_ids);
+        if result.is_ok() {
+            crate::event::emit(self.app(), "entries-changed");
+        }
+        result
     }
 
     /// 删除指定入口。
     pub fn delete_entry(&self, id: &str) -> Result<(), AppError> {
-        pool_service::delete_entry(&self.state().db, id)
+        let result = pool_service::delete_entry(&self.state().db, id);
+        if result.is_ok() {
+            crate::event::emit(self.app(), "entries-changed");
+        }
+        result
     }
 
     /// 创建新 API 入口。
     pub fn create_entry(&self, params: CreateEntryParams) -> Result<ApiEntry, AppError> {
-        pool_service::create_entry(&self.state().db, params)
+        let entry = pool_service::create_entry(&self.state().db, params)?;
+        crate::event::emit(self.app(), "entries-changed");
+        Ok(entry)
     }
 
     /// 批量回填目录元数据。
@@ -76,7 +96,11 @@ impl ServerApi {
         &self,
         items: Vec<CatalogMetaUpdate>,
     ) -> Result<(), AppError> {
-        pool_service::backfill_entry_catalog_meta(&self.state().db, items)
+        let result = pool_service::backfill_entry_catalog_meta(&self.state().db, items);
+        if result.is_ok() {
+            crate::event::emit(self.app(), "entries-changed");
+        }
+        result
     }
 
     /// 测试指定入口的延迟。
@@ -85,7 +109,12 @@ impl ServerApi {
         entry_id: &str,
         model_score: f64,
     ) -> Result<TestLatencyResult, AppError> {
-        pool_service::test_entry_latency(&self.state().db, entry_id, model_score).await
+        let result =
+            pool_service::test_entry_latency(&self.state().db, entry_id, model_score).await;
+        if result.is_ok() {
+            crate::event::emit(self.app(), "entries-changed");
+        }
+        result
     }
 
     /// 更新指定入口的响应时间。
@@ -94,7 +123,12 @@ impl ServerApi {
         entry_id: &str,
         response_ms: &str,
     ) -> Result<(), AppError> {
-        pool_service::update_entry_response_ms(&self.state().db, entry_id, response_ms)
+        let result =
+            pool_service::update_entry_response_ms(&self.state().db, entry_id, response_ms);
+        if result.is_ok() {
+            crate::event::emit(self.app(), "entries-changed");
+        }
+        result
     }
 
     /// 获取所有分组名称。
@@ -103,16 +137,20 @@ impl ServerApi {
     }
 
     /// 更新指定入口的显示名称。
-    pub fn update_entry_display_name(
-        &self,
-        id: &str,
-        display_name: &str,
-    ) -> Result<(), AppError> {
-        pool_service::update_entry_display_name(&self.state().db, id, display_name)
+    pub fn update_entry_display_name(&self, id: &str, display_name: &str) -> Result<(), AppError> {
+        let result = pool_service::update_entry_display_name(&self.state().db, id, display_name);
+        if result.is_ok() {
+            crate::event::emit(self.app(), "entries-changed");
+        }
+        result
     }
 
     /// 更新指定入口的分组。
     pub fn update_entry_group(&self, id: &str, group_name: &str) -> Result<(), AppError> {
-        pool_service::update_entry_group(&self.state().db, id, group_name)
+        let result = pool_service::update_entry_group(&self.state().db, id, group_name);
+        if result.is_ok() {
+            crate::event::emit(self.app(), "entries-changed");
+        }
+        result
     }
 }

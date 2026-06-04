@@ -54,7 +54,7 @@ pub struct TestLatencyParams {
 
 /// GET /admin/pool - List all API entries
 pub async fn list(State(state): State<AdminState>) -> Result<Json<Vec<ApiEntry>>, AdminError> {
-    let entries = pool_service::list_entries(&state.db)?;
+    let entries = state.server_api()?.list_entries()?;
     Ok(Json(entries))
 }
 
@@ -72,8 +72,7 @@ pub async fn list_paginated(
     State(state): State<AdminState>,
     Query(params): Query<PoolPageParams>,
 ) -> Result<Json<PaginatedResult<ApiEntry>>, AdminError> {
-    let entries = pool_service::list_entries_paginated(
-        &state.db,
+    let entries = state.server_api()?.list_entries_paginated(
         params.page.unwrap_or(1),
         params.page_size.unwrap_or(20),
         params.group_name.as_deref(),
@@ -88,9 +87,9 @@ pub async fn create(
     State(state): State<AdminState>,
     Json(payload): Json<CreateEntryParams>,
 ) -> Result<Json<ApiEntry>, AdminError> {
-    let entry = pool_service::create_entry(
-        &state.db,
-        pool_service::CreateEntryParams {
+    let entry = state
+        .server_api()?
+        .create_entry(pool_service::CreateEntryParams {
             channel_id: payload.channel_id,
             model: payload.model,
             display_name: payload.display_name,
@@ -99,9 +98,7 @@ pub async fn create(
             model_meta_zh: payload.model_meta_zh,
             model_meta_en: payload.model_meta_en,
             group_name: payload.group_name,
-        },
-    )?;
-    state.mark_pool_dirty();
+        })?;
     Ok(Json(entry))
 }
 
@@ -122,20 +119,7 @@ pub async fn toggle(
         ),
         _ => (false, false),
     };
-    pool_service::toggle_entry(
-        &state.db,
-        &state
-            .runtime
-            .as_ref()
-            .ok_or_else(|| {
-                AdminError::Internal("Runtime state not available for toggle operation".to_string())
-            })?
-            .failure_counts,
-        &id,
-        enabled,
-        pin_to_top,
-    )?;
-    state.mark_pool_dirty();
+    state.server_api()?.toggle_entry(&id, enabled, pin_to_top)?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -144,8 +128,7 @@ pub async fn delete(
     State(state): State<AdminState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
-    pool_service::delete_entry(&state.db, &id)?;
-    state.mark_pool_dirty();
+    state.server_api()?.delete_entry(&id)?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -154,8 +137,7 @@ pub async fn reorder(
     State(state): State<AdminState>,
     Json(payload): Json<ReorderParams>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
-    pool_service::reorder_entries(&state.db, &payload.ordered_ids)?;
-    state.mark_pool_dirty();
+    state.server_api()?.reorder_entries(&payload.ordered_ids)?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -168,7 +150,10 @@ pub async fn test_latency(
     let model_score = payload
         .map(|Json(params)| params.model_score)
         .unwrap_or(0.0);
-    let result = pool_service::test_entry_latency(&state.db, &id, model_score).await?;
+    let result = state
+        .server_api()?
+        .test_entry_latency(&id, model_score)
+        .await?;
     Ok(Json(result))
 }
 
@@ -189,14 +174,13 @@ pub async fn backfill_catalog_meta(
         })
         .collect();
 
-    pool_service::backfill_entry_catalog_meta(&state.db, updates)?;
-    state.mark_pool_dirty();
+    state.server_api()?.backfill_entry_catalog_meta(updates)?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
 /// GET /admin/pool/groups - Get all distinct group names
 pub async fn get_groups(State(state): State<AdminState>) -> Result<Json<Vec<String>>, AdminError> {
-    let groups = pool_service::get_all_groups(&state.db)?;
+    let groups = state.server_api()?.get_all_groups()?;
     Ok(Json(groups))
 }
 
@@ -210,8 +194,9 @@ pub async fn update_display_name(
         .get("display_name")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    pool_service::update_entry_display_name(&state.db, &id, display_name)?;
-    state.mark_pool_dirty();
+    state
+        .server_api()?
+        .update_entry_display_name(&id, display_name)?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -221,7 +206,6 @@ pub async fn update_group(
     Path(id): Path<String>,
     Json(group_name): Json<String>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
-    pool_service::update_entry_group(&state.db, &id, &group_name)?;
-    state.mark_pool_dirty();
+    state.server_api()?.update_entry_group(&id, &group_name)?;
     Ok(Json(serde_json::json!({"ok": true})))
 }

@@ -134,7 +134,7 @@ fn ensure_probe_result(result: ProbeResult) -> Result<ProbeResult, AdminError> {
 // ---------- Handlers -------------------------------------------------------
 
 pub async fn list(State(state): State<AdminState>) -> Result<Json<Vec<Channel>>, AdminError> {
-    let res = channel_service::list_channels(&state.db)?;
+    let res = state.server_api()?.list_channels()?;
     Ok(Json(res))
 }
 
@@ -148,11 +148,9 @@ pub async fn list_paginated(
     State(state): State<AdminState>,
     Query(params): Query<SimplePageParams>,
 ) -> Result<Json<PaginatedResult<Channel>>, AdminError> {
-    let res = channel_service::list_channels_paginated(
-        &state.db,
-        params.page.unwrap_or(1),
-        params.page_size.unwrap_or(20),
-    )?;
+    let res = state
+        .server_api()?
+        .list_channels_paginated(params.page.unwrap_or(1), params.page_size.unwrap_or(20))?;
     Ok(Json(res))
 }
 
@@ -160,17 +158,15 @@ pub async fn create(
     State(state): State<AdminState>,
     Json(payload): Json<CreateChannelParams>,
 ) -> Result<Json<Channel>, AdminError> {
-    let res = channel_service::create_channel(
-        &state.db,
-        channel_service::CreateChannelParams {
+    let res = state
+        .server_api()?
+        .create_channel(channel_service::CreateChannelParams {
             name: payload.name,
             api_type: payload.api_type,
             base_url: payload.base_url,
             api_key: payload.api_key,
             notes: payload.notes,
-        },
-    )?;
-    state.mark_channel_dirty();
+        })?;
     Ok(Json(res))
 }
 
@@ -188,8 +184,7 @@ pub async fn update(
         enabled: payload.enabled,
         notes: payload.notes,
     };
-    let chan = channel_service::update_channel(&state.db, None, params)?;
-    state.mark_channel_dirty();
+    let chan = state.server_api()?.update_channel(params)?;
     Ok(Json(chan))
 }
 
@@ -197,9 +192,7 @@ pub async fn delete(
     State(state): State<AdminState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
-    channel_service::delete_channel(&state.db, None, id)?;
-    state.mark_channel_dirty();
-    state.mark_pool_dirty();
+    state.server_api()?.delete_channel(id)?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -207,7 +200,7 @@ pub async fn fetch_models(
     State(state): State<AdminState>,
     Path(id): Path<String>,
 ) -> Result<Json<FetchModelsResult>, AdminError> {
-    let res = channel_service::fetch_models(&state.db, id).await?;
+    let res = state.server_api()?.fetch_channel_models(id).await?;
     Ok(Json(ensure_fetch_models_result(res)?))
 }
 
@@ -238,18 +231,12 @@ pub async fn select_models(
     Path(id): Path<String>,
     Json(payload): Json<SelectModelsParams>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
-    state
-        .db
-        .update_channel_models(&id, &payload.available_models, &payload.model_names)?;
-    state.db.sync_entries_for_channel_with_meta(
+    state.server_api()?.select_channel_models(
         &id,
         &payload.model_names,
+        &payload.available_models,
         &payload.catalog_meta,
     )?;
-    crate::state_version::bump("channel");
-    crate::state_version::bump("pool");
-    state.mark_channel_dirty();
-    state.mark_pool_dirty();
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -257,14 +244,9 @@ pub async fn update_response_ms(
     State(state): State<AdminState>,
     Json(payload): Json<UpdateResponseMsParams>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
-    channel_service::update_channel_response_ms(
-        &state.db,
-        channel_service::UpdateResponseMsParams {
-            channel_id: payload.channel_id,
-            response_ms: payload.response_ms,
-        },
-    )?;
-    state.mark_channel_dirty();
+    state
+        .server_api()?
+        .update_channel_response_ms(&payload.channel_id, &payload.response_ms)?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -272,42 +254,7 @@ pub async fn test_channel(
     State(state): State<AdminState>,
     Path(id): Path<String>,
 ) -> Result<Json<TestChannelResult>, AdminError> {
-    let channel = state.db.get_channel(&id)?;
-    let model = channel
-        .selected_models
-        .first()
-        .or_else(|| channel.available_models.first().map(|m| &m.name))
-        .cloned()
-        .unwrap_or_else(|| "gpt-3.5-turbo".to_string());
-    let result = channel_service::test_channel_chat(
-        &channel.base_url,
-        &channel.api_key,
-        &channel.api_type,
-        &model,
-    )
-    .await;
-    if result.success && result.status_code == Some(200) {
-        let _ = state
-            .db
-            .update_channel_response_ms(&channel.id, &result.latency_ms.to_string());
-        let _ = channel_service::update_channel(
-            &state.db,
-            None,
-            channel_service::UpdateChannelParams {
-                id: channel.id.clone(),
-                name: None,
-                api_type: None,
-                base_url: None,
-                api_key: None,
-                enabled: Some(true),
-                notes: None,
-            },
-        );
-    } else {
-        let _ = state.db.disable_channel(&channel.id);
-        crate::state_version::bump("channel");
-    }
-    state.mark_channel_dirty();
+    let result = state.server_api()?.test_channel(&id).await?;
     Ok(Json(result))
 }
 
@@ -329,10 +276,7 @@ pub async fn save_with_models(
     State(state): State<AdminState>,
     Json(params): Json<channel_service::SaveChannelWithModelsParams>,
 ) -> Result<Json<channel_service::SaveChannelWithModelsResult>, AdminError> {
-    let result =
-        channel_service::save_channel_with_models(&state.db, state.app_handle.as_ref(), params)?;
-    state.mark_channel_dirty();
-    state.mark_pool_dirty();
+    let result = state.server_api()?.save_channel_with_models(params)?;
     Ok(Json(result))
 }
 

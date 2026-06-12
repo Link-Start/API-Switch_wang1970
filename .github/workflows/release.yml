@@ -73,7 +73,7 @@ jobs:
       - name: Build
         run: |
           pnpm build:web-admin
-          pnpm tauri build --target ${{ matrix.target }}
+          pnpm tauri build --features desktop --target ${{ matrix.target }}
 
       - name: Prepare artifact (rename)
         shell: bash

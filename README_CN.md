@@ -1,5 +1,9 @@
 # API Switch
 
+[English README](README.md) | [中文 README](README_CN.md)
+
+---
+
 > 绿色便携的个人 AI 网关：多渠道路由、五协议转换、智能容错，一站管理所有 AI 服务。
 
 API Switch 是一个本地优先的 AI API 管理与转发中心。它把 OpenAI-compatible、OpenAI Responses、Claude、Gemini、Azure OpenAI 等不同上游接入到同一个本地入口，面向桌面、Web Admin 和无头服务器场景提供统一管理、路由、日志和故障转移能力。
@@ -204,7 +208,6 @@ pnpm android:build
 
 - [中文使用指南](GUIDE_CN.md)
 - [English Guide](GUIDE.md)
-- [项目计划书](PLAN.md)
 - [技术白皮书](WHITEPAPER.md)
 
 ---
@@ -221,4 +224,4 @@ API Switch 当前面向个人本地使用持续迭代。后续重点包括：中
 
 欢迎加入微信交流群，扫码添加：
 
-![微信群](wx1.jpg)
+<img src="wx1.jpg" alt="微信群" width="240">

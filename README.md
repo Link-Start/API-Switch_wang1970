@@ -1,5 +1,9 @@
 # API Switch
 
+[English README](README.md) | [中文 README](README_CN.md)
+
+---
+
 > A portable personal AI gateway: multi-provider routing, five-protocol conversion, smart failover, and one place to manage AI services.
 
 API Switch is a local-first AI API management and forwarding hub. It gives your tools one local endpoint while managing multiple upstream providers and protocols, including OpenAI-compatible APIs, OpenAI Responses, Claude, Gemini, and Azure OpenAI.
@@ -204,7 +208,6 @@ pnpm android:build
 
 - [English Guide](GUIDE.md)
 - [中文使用指南](GUIDE_CN.md)
-- [Project Plan](PLAN.md)
 - [Technical Whitepaper](WHITEPAPER.md)
 
 ---
@@ -221,4 +224,4 @@ If API Switch helps you, consider giving it a Star on [GitHub](https://github.co
 
 Join our WeChat group:
 
-![WeChat Group](wx1.jpg)
+<img src="wx1.jpg" alt="WeChat Group" width="240">

@@ -820,6 +820,85 @@ pub async fn forward_with_retry(
         .unwrap_or(ProxyError::AllProvidersFailed))
 }
 
+fn is_inside_unclosed_fenced_code(text: &str, byte_pos: usize) -> bool {
+    let before = &text[..byte_pos.min(text.len())];
+    before
+        .lines()
+        .filter(|line| line.trim_start().starts_with("```"))
+        .count()
+        % 2
+        == 1
+}
+
+fn strip_model_info_suffix(text: &str) -> String {
+    let trimmed_end = text.trim_end();
+    let Some(last_line_start) = trimmed_end.rfind('\n').map(|idx| idx + 1) else {
+        return text.to_string();
+    };
+    let last_line = &trimmed_end[last_line_start..];
+    let candidate = last_line.trim();
+    if !candidate.starts_with("model: ") || candidate["model: ".len()..].trim().is_empty() {
+        return text.to_string();
+    }
+    if is_inside_unclosed_fenced_code(trimmed_end, last_line_start) {
+        return text.to_string();
+    }
+
+    text[..last_line_start].trim_end().to_string()
+}
+
+fn clean_text_value_model_suffix(value: &mut Value) {
+    if let Some(text) = value.as_str() {
+        let cleaned = strip_model_info_suffix(text);
+        if cleaned != text {
+            *value = Value::String(cleaned);
+        }
+    }
+}
+
+fn clean_assistant_content_model_suffix(content: &mut Value) {
+    match content {
+        Value::String(_) => clean_text_value_model_suffix(content),
+        Value::Array(parts) => {
+            for part in parts.iter_mut().rev() {
+                if let Some(obj) = part.as_object_mut() {
+                    for key in ["text", "content"] {
+                        if let Some(text_value) = obj.get_mut(key) {
+                            let before = text_value.clone();
+                            clean_text_value_model_suffix(text_value);
+                            if *text_value != before {
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn clean_model_info_from_inbound_body(body: &mut Value) {
+    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
+        for message in messages {
+            if message.get("role").and_then(Value::as_str) == Some("assistant") {
+                if let Some(content) = message.get_mut("content") {
+                    clean_assistant_content_model_suffix(content);
+                }
+            }
+        }
+    }
+
+    if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
+        for item in input {
+            if item.get("role").and_then(Value::as_str) == Some("assistant") {
+                if let Some(content) = item.get_mut("content") {
+                    clean_assistant_content_model_suffix(content);
+                }
+            }
+        }
+    }
+}
 fn remove_reasoning_trigger_fields(value: &mut Value) {
     let Some(obj) = value.as_object_mut() else {
         return;
@@ -902,6 +981,8 @@ async fn forward_single(
         obj.remove(RAW_RESPONSES_REQUEST_FIELD);
         obj.remove(RAW_CLAUDE_REQUEST_FIELD);
     }
+
+    clean_model_info_from_inbound_body(&mut upstream_body);
 
     if settings.disable_reasoning {
         apply_disable_reasoning(&mut upstream_body);
@@ -1333,6 +1414,7 @@ fn build_streaming_response(
     let has_tool_calls = Arc::new(AtomicBool::new(false));
     let seen_first_chunk = Arc::new(AtomicBool::new(false));
     let logged = Arc::new(AtomicBool::new(false));
+    let model_info = model_info_label(entry.model.as_str(), entry.channel_name.as_deref());
     let mut sse_buffer = String::new();
     let mut sse_utf8_remainder: Vec<u8> = Vec::new();
     let mut raw_stream_buffer = String::new();
@@ -1557,7 +1639,7 @@ fn build_streaming_response(
                             &has_sse_error,
                             &has_text_delta,
                             &has_tool_calls,
-                            append_model_info.then_some(entry.model.as_str()),
+                            append_model_info.then_some(model_info.as_str()),
                             &mut done_state,
                         ) {
                             if let Ok(mut chunk_text) = String::from_utf8(transformed.to_vec()) {
@@ -1596,13 +1678,13 @@ fn build_streaming_response(
                                 let mut out = Vec::with_capacity(chunk.len() + 256);
                                 out.extend_from_slice(&chunk[..pos]);
                                 out.extend_from_slice(&anthropic_model_info_events(
-                                    entry.model.as_str(),
+                                    model_info.as_str(),
                                 ));
                                 out.extend_from_slice(&chunk[pos..]);
                                 return Poll::Ready(Some(Ok(Bytes::from(out))));
                             }
                             // 没找到 message_stop 文本边界：注入放到 chunk 前
-                            let mut out = anthropic_model_info_events(entry.model.as_str());
+                            let mut out = anthropic_model_info_events(model_info.as_str());
                             out.extend_from_slice(&chunk);
                             return Poll::Ready(Some(Ok(Bytes::from(out))));
                         }
@@ -1617,7 +1699,7 @@ fn build_streaming_response(
                             &has_sse_error,
                             &has_text_delta,
                             &has_tool_calls,
-                            append_model_info.then_some(entry.model.as_str()),
+                            append_model_info.then_some(model_info.as_str()),
                             &mut done_state,
                         ) {
                             // Normalize reasoning fields in model-info-injected chunk
@@ -1994,6 +2076,15 @@ fn normalize_reasoning_in_sse_chunk(chunk: &Bytes) -> Option<Bytes> {
 
 fn sse_data_payload_for_reasoning(line: &str) -> Option<&str> {
     line.strip_prefix("data:").map(str::trim_start)
+}
+
+fn model_info_label(model: &str, channel_name: Option<&str>) -> String {
+    let channel_name = channel_name.unwrap_or("").trim();
+    if channel_name.is_empty() || channel_name == "unknown" {
+        model.to_string()
+    } else {
+        format!("{model}/{channel_name}")
+    }
 }
 
 fn stream_chunk_has_model_info_delta(value: &Value, model: &str) -> bool {
@@ -2865,6 +2956,147 @@ mod tests {
         }
     }
 
+    #[test]
+    fn strip_model_info_suffix_removes_assistant_tail_only() {
+        let input = "回答正文\n\nmodel: gpt-real";
+        assert_eq!(strip_model_info_suffix(input), "回答正文");
+    }
+
+    #[test]
+    fn strip_model_info_suffix_preserves_middle_and_code_block_model_text() {
+        let middle = "这里提到 model: gpt-real 但不是尾部\n继续正文";
+        assert_eq!(strip_model_info_suffix(middle), middle);
+
+        let code = "```yaml\nmodel: gpt-real\n```";
+        assert_eq!(strip_model_info_suffix(code), code);
+    }
+
+    #[test]
+    fn clean_model_info_from_inbound_body_only_assistant_messages() {
+        let mut body = serde_json::json!({
+            "messages": [
+                {"role": "user", "content": "请保留这个 model: user-mentioned"},
+                {"role": "assistant", "content": "上一轮回答\n\nmodel: gpt-real"},
+                {"role": "tool", "content": "工具输出\n\nmodel: tool-mentioned"},
+                {"role": "assistant", "content": [
+                    {"type": "text", "text": "数组文本\n\nmodel: gpt-array"}
+                ]}
+            ]
+        });
+
+        clean_model_info_from_inbound_body(&mut body);
+
+        assert_eq!(
+            body["messages"][0]["content"],
+            "请保留这个 model: user-mentioned"
+        );
+        assert_eq!(body["messages"][1]["content"], "上一轮回答");
+        assert_eq!(
+            body["messages"][2]["content"],
+            "工具输出\n\nmodel: tool-mentioned"
+        );
+        assert_eq!(body["messages"][3]["content"][0]["text"], "数组文本");
+    }
+
+    #[test]
+    fn clean_model_info_from_inbound_body_cleans_responses_and_claude_shapes() {
+        let mut body = serde_json::json!({
+            "input": [
+                {"role": "assistant", "content": [
+                    {"type": "output_text", "text": "responses 历史
+
+model: gpt-responses"}
+                ]}
+            ],
+            "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "text", "text": "claude 历史
+
+model: claude-entry"}
+                ]}
+            ]
+        });
+
+        clean_model_info_from_inbound_body(&mut body);
+
+        assert_eq!(body["input"][0]["content"][0]["text"], "responses 历史");
+        assert_eq!(body["messages"][0]["content"][0]["text"], "claude 历史");
+    }
+
+    #[test]
+    fn model_info_tool_loop_history_is_cleaned_before_final_text_injects_once() {
+        let mut inbound_body = serde_json::json!({
+            "model": "auto",
+            "messages": [
+                {"role": "assistant", "content": "上一轮可见回答
+
+model: old-entry"},
+                {"role": "user", "content": "继续"}
+            ]
+        });
+        clean_model_info_from_inbound_body(&mut inbound_body);
+        assert_eq!(inbound_body["messages"][0]["content"], "上一轮可见回答");
+
+        let prompt_tokens = Arc::new(AtomicI64::new(0));
+        let completion_tokens = Arc::new(AtomicI64::new(0));
+        let has_sse_error = Arc::new(AtomicBool::new(false));
+
+        let mut tool_buffer = String::new();
+        let mut tool_remainder = Vec::new();
+        let tool_has_text_delta = Arc::new(AtomicBool::new(false));
+        let tool_has_tool_calls = Arc::new(AtomicBool::new(false));
+        let mut tool_done_state = SseDoneState::default();
+        let tool_chunk = Bytes::from_static(
+            br#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read","arguments":""}}]}}]}
+data: [DONE]
+"#,
+        );
+        let tool_output = append_and_parse_sse(
+            &mut tool_buffer,
+            &mut tool_remainder,
+            &tool_chunk,
+            &prompt_tokens,
+            &completion_tokens,
+            &has_sse_error,
+            &tool_has_text_delta,
+            &tool_has_tool_calls,
+            Some("new-entry"),
+            &mut tool_done_state,
+        );
+        assert!(tool_has_tool_calls.load(Ordering::Relaxed));
+        assert!(tool_output.is_none());
+        assert!(!tool_done_state.appended_model_info);
+
+        let mut text_buffer = String::new();
+        let mut text_remainder = Vec::new();
+        let text_has_text_delta = Arc::new(AtomicBool::new(false));
+        let text_has_tool_calls = Arc::new(AtomicBool::new(false));
+        let mut text_done_state = SseDoneState::default();
+        let text_chunk = Bytes::from_static(
+            br#"data: {"choices":[{"delta":{"content":"final answer"}}]}
+data: [DONE]
+"#,
+        );
+        let text_output = append_and_parse_sse(
+            &mut text_buffer,
+            &mut text_remainder,
+            &text_chunk,
+            &prompt_tokens,
+            &completion_tokens,
+            &has_sse_error,
+            &text_has_text_delta,
+            &text_has_tool_calls,
+            Some("new-entry"),
+            &mut text_done_state,
+        )
+        .expect("final text should inject exactly once");
+        let text = String::from_utf8(text_output.to_vec()).expect("valid utf8");
+        assert!(text_has_text_delta.load(Ordering::Relaxed));
+        assert!(!text_has_tool_calls.load(Ordering::Relaxed));
+        assert_eq!(text.matches("model: new-entry").count(), 1);
+        assert_eq!(text.matches("model: old-entry").count(), 0);
+    }
+
     /// Claude 直通的模型名注入：生成的应是合法 Anthropic content_block 事件，
     /// 含 `model: xxx` 文本。
     #[test]
@@ -3080,8 +3312,18 @@ data: [DONE]\n"
     }
 
     #[test]
+    fn model_info_label_appends_channel_name_when_available() {
+        assert_eq!(
+            model_info_label("deepseek-ai/deepseek-v4-pro", Some("渠道信息")),
+            "deepseek-ai/deepseek-v4-pro/渠道信息"
+        );
+        assert_eq!(model_info_label("gpt-test", None), "gpt-test");
+        assert_eq!(model_info_label("gpt-test", Some("unknown")), "gpt-test");
+    }
+
+    #[test]
     fn model_info_delta_uses_openai_chat_completion_chunk_shape() {
-        let frame = String::from_utf8(model_info_delta("gpt-test")).expect("valid utf8");
+        let frame = String::from_utf8(model_info_delta("gpt-test/渠道信息")).expect("valid utf8");
         let payload = frame
             .strip_prefix("data: ")
             .and_then(|s| s.strip_suffix("\n\n"))
@@ -3094,11 +3336,11 @@ data: [DONE]\n"
             .starts_with("chatcmpl-"));
         assert_eq!(value["object"], "chat.completion.chunk");
         assert!(value["created"].as_u64().is_some());
-        assert_eq!(value["model"], "gpt-test");
+        assert_eq!(value["model"], "gpt-test/渠道信息");
         assert_eq!(value["choices"][0]["index"], 0);
         assert_eq!(
             value["choices"][0]["delta"]["content"],
-            "\n\nmodel: gpt-test"
+            "\n\nmodel: gpt-test/渠道信息"
         );
         assert!(value["choices"][0]["finish_reason"].is_null());
     }

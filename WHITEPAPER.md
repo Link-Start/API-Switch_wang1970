@@ -823,7 +823,14 @@ Azure 的输出边界与 OpenAI Chat 基本一致，但有一条额外限制：
 
 ### 10.2 实际命中模型名追加
 
-流式回答正常结束时，可在末尾追加实际命中模型名，便于用户确认最终命中的上游模型。该行为可在设置中关闭。
+流式回答正常结束时，可在末尾追加实际命中模型名，便于用户确认 API Switch 本轮路由实际命中的上游条目模型（`entry.model`，不是上游厂商内部不可验证的真实执行模型）。当命中条目带有有效渠道名时，可见标记使用 `model: <entry.model>/<channel_name>`；渠道名为空或 `unknown` 时退回 `model: <entry.model>`。该行为可在设置中关闭。
+
+注入规则：
+
+- 仅对最终普通文本回答追加 `model: xxx`，保证下游即使不展示协议顶层 `model` 字段也能看到一次。
+- 上游实际返回 `tool_calls` / `function_call`、结构化 JSON 输出、空输出、Responses 调用方时不追加，避免污染工具循环、JSON 正文或 `response.output_text`。
+- 转发上游前会清理历史 assistant 消息末尾由本代理追加的 `model: xxx` 行，防止 agent 客户端把上一轮可见标记回放给模型后在 tool-call 循环中重复出现。
+- 清理只作用于历史 assistant 文本尾行；不处理 user/tool 消息、不处理正文中间的 `model:`，也不处理未闭合代码块内文本。
 
 ### 10.3 流式错误分类
 

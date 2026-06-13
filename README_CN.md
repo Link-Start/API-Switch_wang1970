@@ -1,141 +1,224 @@
 # API Switch
 
-> 个人 AI API 管理与转发中心
-> 多渠道路由 · 自动故障转移 · 一键测速 · 桌面便携
+> 绿色便携的个人 AI 网关：多渠道路由、五协议转换、智能容错，一站管理所有 AI 服务。
 
-管理多个 AI API 渠道，统一入口，自动故障转移，永不宕机。
+API Switch 是一个本地优先的 AI API 管理与转发中心。它把 OpenAI-compatible、OpenAI Responses、Claude、Gemini、Azure OpenAI 等不同上游接入到同一个本地入口，面向桌面、Web Admin 和无头服务器场景提供统一管理、路由、日志和故障转移能力。
+
+> 定位说明：API Switch 是个人本地工具，默认信任本机环境；如要暴露到公网，需要自行增加反向代理、TLS、访问控制等安全措施。
 
 ---
 
-## ✨ 核心功能
+## 核心能力
 
-| 功能 | 说明 |
+| 能力 | 说明 |
 |------|------|
-| **多渠道路由** | 一个入口访问多个 AI 服务商，按模型自动匹配或手动指定 |
-| **永不宕机** | 模型设置为 `auto`，自动匹配最优渠道；失败自动冷却并切换到下一个可用渠道 |
-| **一键测速** | 渠道 & 模型逐个测速，成功显示绿色响应时间，失败显示红色 ✗，帮你排除不可用渠道和模型 |
-| **熔断优化** | 自动禁用不可恢复模型（401/403/410），冷却中的模型不参与路由，成功自动恢复 |
-| **渠道自动校对** | 添加渠道时一键拉取模型，自动检测 API 类型、校对 Base URL，支持中转站模型发现 |
-| **智能模型预选** | 拉取模型后自动选中 6 个月内新模型 + 已有模型，新增条目默认开启 |
-| **托盘快捷切换** | 右键系统托盘图标，直接选择模型发起对话，无需打开主窗口 |
-| **中英双语** | 界面和用户指南支持中英文切换 |
-| **绿色便携** | 单文件 EXE，数据存储在同目录，复制即用 |
+| 统一代理入口 | 客户端只需连接一个本地 OpenAI-compatible 入口，即可访问多个上游渠道。 |
+| 五协议适配 | 支持 OpenAI-compatible、OpenAI Responses、Claude Messages、Gemini、Azure OpenAI 的接入与转换。 |
+| 模型池与分组路由 | 支持手动模型、模型别名、模型分组、精确匹配、模糊匹配和 AUTO 兜底。 |
+| 智能排序 | 支持自定义顺序、最快优先、最新优先，并可结合测速与推荐分调整路由优先级。 |
+| 三级容错 | DB 模型冷却、内存熔断器、渠道级冷冻逐层兜底，失败后自动尝试下一个可用条目。 |
+| 空流保护 | HTTP 200 但流式响应长期无有效输出时视为失败，避免上游挂死后客户端一直等待。 |
+| 使用日志与看板 | 记录请求、成功率、Token、模型分布、错误路径和敏感信息脱敏后的排障数据。 |
+| Desktop / Web Admin 共用 UI | 同一套 React 页面同时服务 Tauri 桌面端和浏览器管理端。 |
+| Headless 运行 | 支持无 GUI 场景，仅启动后端代理与管理服务，适合服务器、NAS 或远程主机。 |
+| 连接应用 | 支持为 OpenCode CLI、Codex CLI、Claude Code、Zed 等工具生成或写入连接配置。 |
 
 ---
 
-## 🚀 快速开始
+## 支持的协议与上游
 
-1. 从 [Releases](https://github.com/wang1970/API-Switch/releases) 下载对应平台版本
-2. 运行 — 数据库自动创建在同目录下
-3. 进入 **渠道管理** 添加 API 渠道，拉取并选择模型
-4. 进入 **API 管理** 查看和启用模型
-5. 将客户端 API 地址指向 `http://127.0.0.1:9090`，模型名设为 `auto` 或指定模型名
+| 类型 | 认证方式 | 典型路径 / 行为 |
+|------|----------|----------------|
+| OpenAI-compatible | Bearer Token | `/v1/chat/completions`、`/v1/models` |
+| OpenAI Responses | Bearer Token | `/v1/responses` 兼容层，支持 text、function tools、streaming 和 Chat fallback |
+| Claude Messages | `x-api-key` | Claude Messages 与 OpenAI Chat 主链路转换 |
+| Gemini | query `key` / OpenAI 兼容路径 | 支持 Gemini OpenAI-compatible endpoint 与部分原生端点 |
+| Azure OpenAI | `api-key` header | 通过 deployment 名参与路由和上游请求构造 |
+| Custom | Bearer Token | 面向第三方 OpenAI-compatible 服务或中转站 |
+
+说明：当前内部转换仍以 OpenAI Chat Completions 作为主要中间层。对 Responses、Claude、Gemini 的高级语义，项目会按目标协议白名单做边界收口，避免不支持字段误透传。
+
+---
+
+## 运行模式
+
+### Desktop
+
+Tauri v2 桌面应用，包含：
+
+- React 管理界面
+- 本地代理服务
+- Tauri IPC 命令
+- 系统托盘
+- 本地窗口与设置管理
+
+### Web Admin
+
+Web Admin 使用同一套 React 页面，通过 HTTP Admin API 管理后端：
+
+- 默认用于浏览器访问管理界面
+- 使用 Bearer Token 登录与鉴权
+- 与桌面端共享渠道、模型池、令牌、日志、设置等业务能力
+
+### Headless / Server-only
+
+无 GUI 环境可只启动后端能力：
+
+```bash
+api-switch --headless
+# 或
+API_SWITCH_HEADLESS=1 api-switch
+```
+
+适合服务器、NAS、远程主机或只需要代理服务的场景。
+
+### Android / Mobile
+
+Android 当前作为同一产品的移动构建壳与编译分支处理，不是单独产品线。目标是复用同一套核心逻辑和响应式 UI；真机代理监听、WebView 生命周期、loopback/cleartext 策略仍属于后续验证范围。
+
+---
+
+## 快速开始
+
+### 下载运行
+
+1. 到 [Releases](https://github.com/wang1970/API-Switch/releases) 下载对应平台构建。
+2. 启动 API Switch。
+3. 在 **渠道管理** 添加上游 API Base URL 与 API Key。
+4. 拉取模型，或在 **API 管理** 手动添加模型。
+5. 在客户端中把 Base URL 指向 API Switch 本地代理端口。
 
 ### 客户端配置
 
-```
+默认代理端口：`9090`。
+
+```text
 API Base URL: http://127.0.0.1:9090
-API Key: 任意（可在设置中开启强制验证）
-Model: auto（智能匹配）或指定模型名
+API Key: 任意值；如开启强制 Access Key，则填写 API Switch 中创建的客户端令牌
+Model: auto 或具体模型名 / 分组名
 ```
 
-### 路由规则
+常见用法：
 
-| 模式 | 行为 |
-|------|------|
-| `model: auto` | 从已启用且未冷却的条目中，按优先级自动选择 |
-| `model: gpt-4o` | 精确匹配同名条目，失败时 fallback 到 auto 流程 |
-| 托盘右键 | 随时切换优先模型 |
-
----
-
-## 📦 下载
-
-| 平台 | 文件 |
-|------|------|
-| Windows x64 | `api-switch-*-windows-x64.exe` |
-| macOS Intel | `api-switch-*-macos-x64` |
-| macOS Apple Silicon | `api-switch-*-macos-arm64` |
-| Linux x64 | `api-switch-*-linux-x64` |
-
-访问 [Releases](https://github.com/wang1970/API-Switch/releases) 获取最新版本。
+| 模型参数 | 行为 |
+|----------|------|
+| `auto` | 从 AUTO 组中选择已启用、未冷却的条目。 |
+| 具体模型名 | 优先精确匹配，失败后按规则进入模糊匹配或 AUTO fallback。 |
+| 分组名 | 可把多个上游模型归入同一逻辑组，让客户端使用稳定名称。 |
 
 ---
 
-## 🔧 支持的 API 类型
+## 路由与容错
 
-| 类型 | 认证方式 | 说明 |
-|------|---------|------|
-| OpenAI | Bearer Token | 标准 OpenAI API |
-| Anthropic | x-api-key | Claude 系列模型，完整格式转换 |
-| Google Gemini | Query Parameter | OpenAI 兼容端点 |
-| Azure OpenAI | api-key Header | Deployment 名称路由 |
-| Custom | Bearer Token | 任何 OpenAI 兼容的第三方服务（CODING PLAN、硅基流动等） |
+API Switch 的核心请求链路：
 
-### CODING PLAN / 中转站
+```text
+Client / AI Tool
+  -> API Switch Proxy Endpoint
+  -> protocol parser / compatibility layer
+  -> router / failover / cooldown
+  -> upstream provider
+  -> response converter / stream relay
+  -> usage log / dashboard stats
+```
 
-中转站（如 CODING PLAN）通常不提供标准的 `/models` 接口。API Switch 通过以下方式支持：
+容错机制：
 
-1. API 类型选择 **Custom**，填入 Base URL 和 API Key
-2. 点击 **拉取模型** — 自动检测多种协议和路径作为 Fallback
-3. 如果模型列表接口不可用，到 **API 管理** → **添加模型** 手动输入模型名称
-4. 内置模型目录（`models.json`）自动显示任意模型名的发布日期、能力、上下文长度等信息
-
----
-
-## 🛡️ 容错机制
-
-- **模型冷却** — 任意上游失败自动冷却 300s，冷却中的模型不参与路由
-- **自动恢复** — 请求成功后自动清除冷却状态
-- **自动禁用** — 收到 401/403/410 等状态码时自动关闭不可恢复的模型（可在设置中自定义）
-- **故障转移** — 自动尝试下一个可用渠道，全部失败返回 502
-- **用户开关神圣** — `enabled` 只由用户手动控制，系统不会自动启用已关闭的条目
+- **L1 DB 冷却（模型级）**：失败模型写入 SQLite 冷却时间，重启后仍生效。
+- **L2 内存熔断器（模型 + 渠道级）**：连续失败后短时间跳开，支持半开试探恢复。
+- **L3 渠道冷冻（渠道级）**：账号额度、密钥或通道级故障时，整条渠道临时退出路由。
+- **状态码禁用**：401 / 403 / 410 等不可恢复错误可将对应条目标记为禁用。
+- **流式空响应检测**：SSE 长时间无有效数据时触发失败处理。
+- **日志可追踪**：失败日志记录尝试路径，便于定位在哪个候选或协议转换阶段失败。
 
 ---
 
-## 📖 使用指南
+## 管理界面
 
-- [中文指南](GUIDE_CN.md)
-- [English Guide](GUIDE.md)
+主要页面：
+
+- Dashboard：请求量、成功率、Token、模型分布、趋势图。
+- 渠道管理：上游渠道、URL 探测、模型拉取、协议识别。
+- API 管理：模型池、分组、排序、别名、启用状态。
+- 令牌管理：客户端 Access Key。
+- 使用日志：分页、筛选、展开详情、错误排查。
+- 系统设置：端口、鉴权、冷却、主题、语言、Web Admin 等。
+- 连接应用：为常见 AI 工具生成或写入配置。
 
 ---
 
-## ⚙️ 配置
+## 本地开发
 
-代理默认监听端口 `9090`，可在 **设置 → 代理设置** 中修改。
+环境要求：
 
-冷却恢复时间默认 600s（可在 **设置 → 熔断** 中通过滑块调整，范围 300-1800s）。
+- Node.js / pnpm
+- Rust 1.85+
+- Tauri v2 依赖环境
+
+常用命令：
+
+```bash
+pnpm install
+pnpm dev              # 构建 Web Admin 后启动桌面开发模式
+pnpm build            # 桌面构建
+pnpm build:web-admin  # 构建 Web Admin 前端
+pnpm typecheck        # TypeScript 类型检查
+```
+
+Android 相关命令保留为移动构建分支使用：
+
+```bash
+pnpm android:init
+pnpm android:dev
+pnpm android:build
+```
 
 ---
 
-## 🏗️ 技术栈
+## 技术栈
 
 | 层级 | 技术 |
 |------|------|
-| 桌面框架 | Tauri v2（Rust + Web） |
-| 后端 | Rust + Axum + SQLite（WAL 模式） |
-| 前端 | React 19 + TypeScript + Tailwind CSS v4 |
-| 协议适配 | 5 种独立适配器模块，互不影响 |
+| 桌面框架 | Tauri v2 |
+| 后端 | Rust、axum、reqwest |
+| 数据库 | SQLite / rusqlite，WAL 模式 |
+| 前端 | React 19、TypeScript、Vite |
+| UI | Radix UI、Tailwind CSS v4 |
+| 状态管理 | TanStack React Query |
+| 图表 | Recharts |
+| 国际化 | i18next / react-i18next |
 
 ---
 
-## 📁 文件结构
+## 数据与安全
 
-```
-api-switch.exe          # 主程序（绿色便携版）
-api-switch.db           # 数据库（首次运行自动创建）
-```
-
-所有数据存储在程序同目录下。删除这两个文件即可完全卸载。
-
----
-
-## 📜 License
-
-[MIT License](LICENSE)
+- 数据默认存储在本地 SQLite 数据库中。
+- 上游 API Key 与客户端 Access Key 分离。
+- Web Admin 使用登录与 Bearer Token。
+- 日志展示会对敏感信息做脱敏处理。
+- 本项目不是公网多租户网关；公网使用需自行加固。
 
 ---
 
-## ⭐ Star
+## 文档
 
-如果觉得有用，欢迎在 [GitHub](https://github.com/wang1970/API-Switch) 上点个 Star！
+- [中文使用指南](GUIDE_CN.md)
+- [English Guide](GUIDE.md)
+- [项目计划书](PLAN.md)
+- [技术白皮书](WHITEPAPER.md)
+
+---
+
+## 项目状态
+
+API Switch 当前面向个人本地使用持续迭代。后续重点包括：中立内部协议 IR、Capability Router、Gemini 原生端点补全、Responses / Claude / Gemini 高级语义保真、Web Admin 闭环优化等。
+
+---
+
+如果这个项目对你有帮助，欢迎在 [GitHub](https://github.com/wang1970/API-Switch) 点 Star。
+
+## 💬 交流群
+
+欢迎加入微信交流群，扫码添加：
+
+![微信群](wx1.jpg)

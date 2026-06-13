@@ -1,5 +1,6 @@
 /**
- * pre-commit hook: 每次本地提交自动递增 patch 版本号
+ * Manual release/version bump helper.
+ * 日常提交不自动运行；仅在发布、打包或明确要求升级版本时手动执行。
  * 同步更新 package.json / Cargo.toml / tauri.conf.json
  */
 const fs = require('fs');

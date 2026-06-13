@@ -1,140 +1,224 @@
 # API Switch
 
-> Personal AI API Management & Forwarding Hub
+> A portable personal AI gateway: multi-provider routing, five-protocol conversion, smart failover, and one place to manage AI services.
 
-Manage multiple AI API providers through a single endpoint with automatic failover — never go down.
+API Switch is a local-first AI API management and forwarding hub. It gives your tools one local endpoint while managing multiple upstream providers and protocols, including OpenAI-compatible APIs, OpenAI Responses, Claude, Gemini, and Azure OpenAI.
 
----
-
-## ✨ Features
-
-| Feature | Description |
-|---------|-------------|
-| **Multi-Provider Routing** | One endpoint for multiple AI providers, auto-match or manually specify models |
-| **Never Goes Down** | Set model to `auto` for optimal channel matching; auto-cooldown on failure and switch to next available |
-| **One-Click Speed Test** | Test all channels & models sequentially — green response time for success, red ✗ for failure |
-| **Smart Circuit Breaker** | Auto-disable unrecoverable models (401/403/410), cooldown skips failed models, auto-recover on success |
-| **Auto Channel Calibration** | One-click model fetch with auto API type detection, Base URL correction, relay station model discovery |
-| **Smart Model Pre-selection** | Auto-select models released within 6 months + existing models; new entries enabled by default |
-| **System Tray** | Right-click tray icon to reprioritize top AUTO-group entries without opening the main window |
-| **Bilingual** | UI and user guide support Chinese/English |
-| **Portable** | Single EXE file, data stored alongside the executable, copy and run anywhere |
+> Scope note: API Switch is designed as a personal local tool. It trusts the local machine by default and is not a public multi-tenant security boundary. If you expose it to the internet, add your own reverse proxy, TLS, authentication, and access controls.
 
 ---
 
-## 🚀 Quick Start
+## Core Capabilities
 
-1. Download from [Releases](https://github.com/wang1970/API-Switch/releases)
-2. Run — database is auto-created in the same directory
-3. Go to **Channels** to add API providers, fetch and select models
-4. Go to **API Management** to view and enable models
-5. Point your client's API base URL to `http://127.0.0.1:9090`, set model to `auto` or any specific name
+| Capability | Description |
+|------------|-------------|
+| Unified proxy endpoint | Point clients to one local OpenAI-compatible endpoint and route requests to many upstream providers. |
+| Five protocol families | OpenAI-compatible, OpenAI Responses, Claude Messages, Gemini, and Azure OpenAI adapters. |
+| Model pool and group routing | Manual models, aliases, groups, exact match, fuzzy match, and AUTO fallback. |
+| Smart ordering | Custom order, fastest-first, newest-first, speed tests, and recommendation scores. |
+| Three-layer resilience | Persistent model cooldown, in-memory circuit breaker, and channel-level freeze. |
+| Empty-stream protection | Treats HTTP 200 streams with no valid output as failures instead of letting clients wait forever. |
+| Logs and dashboard | Request volume, success rate, token usage, model distribution, failure path, and redacted diagnostics. |
+| Shared Desktop / Web Admin UI | One React codebase for the Tauri desktop app and browser-based Web Admin. |
+| Headless mode | Run only the backend proxy and admin services on a server, NAS, or remote host. |
+| App connectors | Generate or write configuration for tools such as OpenCode CLI, Codex CLI, Claude Code, and Zed. |
 
-### Client Setup
+---
 
+## Supported Protocols and Upstreams
+
+| Type | Authentication | Typical behavior |
+|------|----------------|------------------|
+| OpenAI-compatible | Bearer Token | `/v1/chat/completions`, `/v1/models` |
+| OpenAI Responses | Bearer Token | `/v1/responses` compatibility layer with text, function tools, streaming, and Chat fallback |
+| Claude Messages | `x-api-key` | Main-path conversion between Claude Messages and OpenAI Chat |
+| Gemini | query `key` / OpenAI-compatible paths | Gemini OpenAI-compatible endpoint and selected native endpoints |
+| Azure OpenAI | `api-key` header | Deployment-name-based routing and upstream request construction |
+| Custom | Bearer Token | Third-party OpenAI-compatible services and relay providers |
+
+Note: the current implementation still uses OpenAI Chat Completions as the primary internal compatibility layer. For advanced Responses, Claude, and Gemini semantics, API Switch narrows output through protocol-specific allowlists to avoid leaking unsupported fields.
+
+---
+
+## Runtime Modes
+
+### Desktop
+
+The Tauri v2 desktop app includes:
+
+- React management UI
+- Local proxy server
+- Tauri IPC commands
+- System tray
+- Local window and settings management
+
+### Web Admin
+
+Web Admin uses the same React pages through HTTP Admin APIs:
+
+- Browser-based management UI
+- Bearer-token login and authentication
+- Shared channel, model-pool, token, log, and settings management
+
+### Headless / Server-only
+
+For environments without a GUI, start only the backend services:
+
+```bash
+api-switch --headless
+# or
+API_SWITCH_HEADLESS=1 api-switch
 ```
+
+This is useful for servers, NAS devices, remote machines, or any setup that only needs the proxy and admin services.
+
+### Android / Mobile
+
+Android is treated as another build shell / compile branch of the same product, not a separate product line. The direction is to reuse the shared core and responsive UI. Real-device proxy listening, WebView lifecycle, loopback/cleartext behavior, and client integration are still future verification areas.
+
+---
+
+## Quick Start
+
+### Download and Run
+
+1. Download a build from [Releases](https://github.com/wang1970/API-Switch/releases).
+2. Start API Switch.
+3. Add upstream API Base URLs and API keys in **Channels**.
+4. Fetch models, or manually add models in **API Management**.
+5. Point your client to the local API Switch proxy endpoint.
+
+### Client Configuration
+
+Default proxy port: `9090`.
+
+```text
 API Base URL: http://127.0.0.1:9090
-API Key: anything (enforce validation in Settings if needed)
-Model: auto (smart match) or any specific model name
+API Key: any value; if Access Key enforcement is enabled, use a client token created in API Switch
+Model: auto, a concrete model name, or a group name
 ```
 
-### Routing Rules
+Common routing inputs:
 
-| Mode | Behavior |
-|------|----------|
-| `model: auto` | Automatically select from enabled, non-cooled AUTO-group entries by priority |
-| `model: coding` | First try case-insensitive group exact match, then model-name fuzzy match, then fall back to the AUTO group |
-| Tray right-click | Reprioritize existing AUTO-group entries only; it does not switch groups |
-
----
-
-## 📦 Downloads
-
-| Platform | File |
-|----------|------|
-| Windows x64 | `api-switch-*-windows-x64.exe` |
-| macOS Intel | `api-switch-*-macos-x64` |
-| macOS Apple Silicon | `api-switch-*-macos-arm64` |
-| Linux x64 | `api-switch-*-linux-x64` |
-
-Visit [Releases](https://github.com/wang1970/API-Switch/releases) for the latest version.
+| Model value | Behavior |
+|-------------|----------|
+| `auto` | Selects from enabled, non-cooled entries in the AUTO group. |
+| Concrete model name | Prefers exact match, then fuzzy/group matching and AUTO fallback according to routing rules. |
+| Group name | Maps several upstream models behind one stable client-facing name. |
 
 ---
 
-## 🔧 Supported Providers
+## Routing and Resilience
 
-| Type | Auth Method | Description |
-|------|-------------|-------------|
-| OpenAI | Bearer Token | Standard OpenAI API |
-| Anthropic | x-api-key | Claude series models, full format conversion |
-| Google Gemini | Query Parameter | OpenAI-compatible endpoint |
-| Azure OpenAI | api-key Header | Deployment name routing |
-| Custom | Bearer Token | Any OpenAI-compatible third-party service (CODING PLAN, SiliconFlow, etc.) |
+Main request path:
 
-### CODING PLAN / Relay Stations
+```text
+Client / AI Tool
+  -> API Switch Proxy Endpoint
+  -> protocol parser / compatibility layer
+  -> router / failover / cooldown
+  -> upstream provider
+  -> response converter / stream relay
+  -> usage log / dashboard stats
+```
 
-Relay stations (like CODING PLAN) often don't expose a standard `/models` endpoint. API Switch supports these via:
+Resilience layers:
 
-1. Set API type to **Custom**, enter the base URL and API key
-2. Click **Fetch Models** — auto-detection tries multiple protocols and paths as fallback
-3. If the model list API is unavailable, go to **API Management** → **Add Model** to manually enter model names
-4. Built-in model catalog (`models.json`) auto-displays release date, capabilities, context length for any model name
-
----
-
-## 🛡️ Fault Tolerance
-
-- **Model Cooldown** — Any upstream failure triggers 300s cooldown; cooled models are skipped in routing
-- **Auto Recovery** — Successful request automatically clears cooldown state
-- **Auto Disable** — Auto-disable entries on 401/403/410 status codes (configurable in Settings)
-- **Failover** — Automatically try the next available channel; returns 502 if all fail
-- **User Controls Are Sacred** — `enabled` toggle is only controlled by the user; the system never auto-enables
+- **L1 DB cooldown (model-level)**: failed entries are cooled down in SQLite and remain cooled after restart.
+- **L2 in-memory circuit breaker (model + channel)**: repeated failures open a short-lived breaker with half-open recovery probes.
+- **L3 channel freeze (channel-level)**: account quota, key, or upstream channel failures can temporarily remove the whole channel from routing.
+- **Status-code disable**: unrecoverable statuses such as 401 / 403 / 410 can disable the affected entry.
+- **Streaming empty-output detection**: long-running SSE streams with no valid output trigger failure handling.
+- **Traceable logs**: failure logs include attempt paths to show which candidates and conversion steps were tried.
 
 ---
 
-## 📖 User Guide
+## Management UI
 
-- [English Guide](GUIDE.md)
-- [中文指南](GUIDE_CN.md)
+Main pages:
+
+- Dashboard: request count, success rate, token usage, model distribution, trend charts.
+- Channels: upstream channels, URL probing, model fetching, protocol detection.
+- API Management: model pool, groups, ordering, aliases, enabled state.
+- Tokens: client Access Keys.
+- Logs: pagination, filters, expanded details, failure diagnostics.
+- Settings: ports, authentication, cooldown, theme, language, Web Admin.
+- App Connectors: generate or write configuration for common AI tools.
 
 ---
 
-## ⚙️ Configuration
+## Local Development
 
-Proxy listens on port `9090` by default, configurable in **Settings → Proxy**.
+Requirements:
 
-Cooldown recovery time defaults to 600s (adjustable via slider in **Settings → Circuit Breaker**, range 300-1800s).
+- Node.js / pnpm
+- Rust 1.85+
+- Tauri v2 prerequisites
+
+Common commands:
+
+```bash
+pnpm install
+pnpm dev              # build Web Admin, then start desktop dev mode
+pnpm build            # desktop build
+pnpm build:web-admin  # build Web Admin frontend
+pnpm typecheck        # TypeScript type check
+```
+
+Android commands are kept for the mobile build branch:
+
+```bash
+pnpm android:init
+pnpm android:dev
+pnpm android:build
+```
 
 ---
 
-## 🏗️ Tech Stack
+## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
-| Desktop | Tauri v2 (Rust + Web) |
-| Backend | Rust + Axum + SQLite (WAL mode) |
-| Frontend | React 19 + TypeScript + Tailwind CSS v4 |
-| Protocol Adapters | 5 independent adapter modules, isolated from each other |
+|-------|------------|
+| Desktop | Tauri v2 |
+| Backend | Rust, axum, reqwest |
+| Database | SQLite / rusqlite, WAL mode |
+| Frontend | React 19, TypeScript, Vite |
+| UI | Radix UI, Tailwind CSS v4 |
+| State | TanStack React Query |
+| Charts | Recharts |
+| i18n | i18next / react-i18next |
 
 ---
 
-## 📁 File Structure
+## Data and Security
 
-```
-api-switch.exe          # Main program (portable)
-api-switch.db           # Database (auto-created on first run)
-```
-
-All data is stored alongside the executable. Delete both files to completely remove.
-
----
-
-## 📜 License
-
-[MIT License](LICENSE)
+- Data is stored locally in SQLite.
+- Upstream API keys and client Access Keys are separated.
+- Web Admin uses login plus Bearer Token authentication.
+- Logs redact sensitive values before display.
+- This project is not a public multi-tenant gateway; harden it yourself before public exposure.
 
 ---
 
-## ⭐ Star
+## Documentation
 
-If you find it useful, consider giving it a Star on [GitHub](https://github.com/wang1970/API-Switch)!
+- [English Guide](GUIDE.md)
+- [中文使用指南](GUIDE_CN.md)
+- [Project Plan](PLAN.md)
+- [Technical Whitepaper](WHITEPAPER.md)
+
+---
+
+## Project Status
+
+API Switch is actively evolving for personal local use. Planned work includes a neutral internal representation, capability-based routing, more native Gemini endpoints, better preservation of advanced Responses / Claude / Gemini semantics, and Web Admin completion work.
+
+---
+
+If API Switch helps you, consider giving it a Star on [GitHub](https://github.com/wang1970/API-Switch).
+
+## 💬 Community
+
+Join our WeChat group:
+
+![WeChat Group](wx1.jpg)

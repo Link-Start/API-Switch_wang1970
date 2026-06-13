@@ -749,7 +749,7 @@ Responses hosted tools 在 Chat fallback 中无法等价表示时，当前止血
 这里必须明确区分两类注入：
 
 - 能力降级注入：只用于 `下游 Responses -> 上游 Chat/non-Responses`，目的是告诉模型当前路由不具备 server-side hosted tools，要求其改用纯对话或显式 function tools 完成任务。
-- 模型名展示注入：`forwarder.rs` 在部分非 Responses 下游末尾追加 `model: xxx` 仅用于显示命中模型，不能进入 `Responses` 原生输出；`CallerKind::Responses` 必须禁用该注入，避免污染 `response.output_text`。
+- 模型名展示注入：`forwarder.rs` 在流式普通文本完成时追加 `model: xxx`，仅用于显示 API Switch 实际命中条目；Chat/转换路径使用 Chat chunk，Claude 直通使用 Anthropic content block，Responses 直通使用 Responses 原生 `response.output_text.delta`。
 
 为定位这条降级链路上的 high risk / 拒绝来源，系统新增 `record_raw_protocol_data` 调试设置：
 
@@ -828,7 +828,7 @@ Azure 的输出边界与 OpenAI Chat 基本一致，但有一条额外限制：
 注入规则：
 
 - 仅对最终普通文本回答追加 `model: xxx`，保证下游即使不展示协议顶层 `model` 字段也能看到一次。
-- 上游实际返回 `tool_calls` / `function_call`、结构化 JSON 输出、空输出、Responses 调用方时不追加，避免污染工具循环、JSON 正文或 `response.output_text`。
+- 上游实际返回 `tool_calls` / `function_call`、结构化 JSON 输出、空输出时不追加，避免污染工具循环或 JSON 正文。Responses 直通不再因调用方类型禁用，而是在开关开启时使用 Responses 原生 delta 注入。
 - 转发上游前会清理历史 assistant 消息末尾由本代理追加的 `model: xxx` 行，防止 agent 客户端把上一轮可见标记回放给模型后在 tool-call 循环中重复出现。
 - 清理只作用于历史 assistant 文本尾行；不处理 user/tool 消息、不处理正文中间的 `model:`，也不处理未闭合代码块内文本。
 

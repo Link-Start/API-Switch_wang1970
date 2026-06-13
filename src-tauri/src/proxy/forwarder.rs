@@ -1091,15 +1091,9 @@ async fn forward_single(
     if is_stream {
         let needs_transform =
             !is_responses_passthrough && !is_claude_passthrough && adapter.needs_sse_transform();
-        // Claude 直通也要显示实际命中的模型名（AUTO 场景刚需）；用 Anthropic 原生
-        // 注入，不影响转发。Responses 直通仍不注入（会污染 output_text）。
-        let append_model_info = if is_responses_passthrough {
-            false
-        } else if is_claude_passthrough {
-            should_append_model_info(state, body, caller_kind)
-        } else {
-            should_append_model_info(state, body, caller_kind)
-        };
+        // 同协议直通也要遵守模型标记开关：AUTO 场景需要看到 API Switch 实际命中的条目。
+        // Responses / Claude 直通分别使用各自原生 SSE 事件注入，不强制依赖下游展示顶层 model 字段。
+        let append_model_info = should_append_model_info(state, body, caller_kind);
         let mut response = build_streaming_response(
             state,
             entry,
@@ -1113,6 +1107,7 @@ async fn forward_single(
             request_start,
             prior_attempts,
             append_model_info,
+            is_responses_passthrough,
             is_claude_passthrough,
             raw_protocol_request.clone(),
             middleware,
@@ -1349,14 +1344,10 @@ fn request_uses_tool_calling(body: &Value) -> bool {
 fn should_append_model_info(
     state: &ProxyState,
     body: &Value,
-    caller_kind: &super::middleware::CallerKind,
+    _caller_kind: &super::middleware::CallerKind,
 ) -> bool {
-    // Responses 协议自带原生 `response.model` 字段，绝不能向 output_text 正文
-    // 追加 `model: xxx`，否则会污染客户端的 output_text。P5 修复。
-    if matches!(caller_kind, super::middleware::CallerKind::Responses) {
-        return false;
-    }
-
+    // 调试开关开启时，Responses 调用方也需要可见模型标记。
+    // 直通流走 Responses 原生 output_text.delta 注入；非直通转换路径仍由下游边界决定。
     let setting_enabled = state
         .settings
         .try_read()
@@ -1389,6 +1380,7 @@ fn build_streaming_response(
     request_start: std::time::Instant,
     prior_attempts: Vec<AttemptInfo>,
     append_model_info: bool,
+    is_responses_passthrough: bool,
     is_claude_passthrough: bool,
     raw_protocol: Option<Value>,
     middleware: &[Arc<dyn super::middleware::ForwarderMiddleware>],
@@ -1653,6 +1645,32 @@ fn build_streaming_response(
                             cx.waker().wake_by_ref();
                             return Poll::Pending;
                         }
+                    } else if is_responses_passthrough {
+                        // Responses 原生直通流：扫描事件，在 response.completed 前注入一次
+                        // output_text.delta 模型标记。开关关闭、工具调用或无文本输出时不注入。
+                        let saw_completed = scan_responses_passthrough_chunk(
+                            &chunk,
+                            &has_sse_error,
+                            &has_text_delta,
+                            &has_tool_calls,
+                            &prompt_tokens,
+                            &completion_tokens,
+                        );
+                        let should_inject = should_inject_responses_model_info(
+                            append_model_info,
+                            saw_completed,
+                            has_text_delta.load(Ordering::Relaxed),
+                            has_tool_calls.load(Ordering::Relaxed),
+                            done_state.appended_model_info,
+                        );
+                        if should_inject {
+                            done_state.appended_model_info = true;
+                            return Poll::Ready(Some(Ok(inject_responses_model_info_chunk(
+                                &chunk,
+                                model_info.as_str(),
+                            ))));
+                        }
+                        return Poll::Ready(Some(Ok(chunk)));
                     } else if is_claude_passthrough {
                         // Claude 原生直通流：扫描事件，在 message_stop 前注入一次
                         // 模型名（Anthropic 格式）。有工具调用则跳过，防 CALL 循环刷屏。
@@ -2180,6 +2198,43 @@ fn model_info_delta(model: &str) -> Vec<u8> {
     format!("data: {payload}\n\n").into_bytes()
 }
 
+/// 为 Responses 同协议直通流生成“模型名”注入事件（Responses 原生 SSE 格式）。
+///
+/// 不依赖下游展示顶层 `response.model`，而是追加一段 output_text.delta，
+/// 让开启调试开关的用户能在正文里看到本轮 API Switch 实际命中的条目。
+fn responses_model_info_event(model: &str) -> Vec<u8> {
+    let payload = serde_json::json!({
+        "type": "response.output_text.delta",
+        "delta": format!("\n\nmodel: {model}"),
+    });
+    format!("event: response.output_text.delta\ndata: {payload}\n\n").into_bytes()
+}
+
+fn should_inject_responses_model_info(
+    append_model_info: bool,
+    saw_completed: bool,
+    has_text_delta: bool,
+    has_tool_calls: bool,
+    already_appended: bool,
+) -> bool {
+    append_model_info && saw_completed && has_text_delta && !has_tool_calls && !already_appended
+}
+
+fn inject_responses_model_info_chunk(chunk: &Bytes, model_info: &str) -> Bytes {
+    let marker = b"event: response.completed";
+    if let Some(pos) = chunk.windows(marker.len()).position(|w| w == marker) {
+        let mut out = Vec::with_capacity(chunk.len() + 256 + model_info.len());
+        out.extend_from_slice(&chunk[..pos]);
+        out.extend_from_slice(&responses_model_info_event(model_info));
+        out.extend_from_slice(&chunk[pos..]);
+        return Bytes::from(out);
+    }
+
+    let mut out = responses_model_info_event(model_info);
+    out.extend_from_slice(chunk);
+    Bytes::from(out)
+}
+
 /// 为 Claude 同协议直通流生成"模型名"注入事件（Anthropic 原生 SSE 格式）。
 ///
 /// AUTO 路由下用户需要知道实际命中的模型。直通流是 Anthropic 原生格式，
@@ -2293,6 +2348,61 @@ fn scan_anthropic_passthrough_chunk(
         }
     }
     saw_message_stop
+}
+
+fn scan_responses_passthrough_chunk(
+    chunk: &Bytes,
+    has_sse_error: &Arc<AtomicBool>,
+    has_text: &Arc<AtomicBool>,
+    has_tool: &Arc<AtomicBool>,
+    prompt_tokens: &Arc<AtomicI64>,
+    completion_tokens: &Arc<AtomicI64>,
+) -> bool {
+    let Ok(text) = std::str::from_utf8(chunk) else {
+        return false;
+    };
+    let mut saw_completed = false;
+
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r');
+        let Some(payload) = line
+            .strip_prefix("data: ")
+            .or_else(|| line.strip_prefix("data:"))
+        else {
+            continue;
+        };
+        let payload = payload.trim_start();
+        if payload == "[DONE]" {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(payload) else {
+            continue;
+        };
+
+        if let Some(err) = value.get("error") {
+            if !err.is_null() {
+                has_sse_error.store(true, Ordering::Relaxed);
+            }
+        }
+        if stream_chunk_has_text_delta(&value) {
+            has_text.store(true, Ordering::Relaxed);
+        }
+        if stream_chunk_has_tool_calls(&value) {
+            has_tool.store(true, Ordering::Relaxed);
+        }
+        let (prompt, completion, _reasoning) = extract_usage_tokens(&value);
+        if prompt > 0 {
+            prompt_tokens.store(prompt, Ordering::Relaxed);
+        }
+        if completion > 0 {
+            completion_tokens.store(completion, Ordering::Relaxed);
+        }
+        if value.get("type").and_then(Value::as_str) == Some("response.completed") {
+            saw_completed = true;
+        }
+    }
+
+    saw_completed
 }
 
 fn transform_sse_chunk(
@@ -3346,6 +3456,135 @@ data: [DONE]\n"
     }
 
     #[test]
+    fn responses_model_info_event_uses_responses_output_text_delta_shape() {
+        let frame =
+            String::from_utf8(responses_model_info_event("gpt-test/渠道信息")).expect("valid utf8");
+        assert!(frame.starts_with("event: response.output_text.delta\n"));
+        let payload = frame
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .expect("data frame");
+        let value: Value = serde_json::from_str(payload).expect("valid json");
+
+        assert_eq!(value["type"], "response.output_text.delta");
+        assert_eq!(value["delta"], "\n\nmodel: gpt-test/渠道信息");
+    }
+
+    #[test]
+    fn inject_responses_model_info_chunk_places_one_delta_before_completed() {
+        let chunk = Bytes::from_static(
+            br#"event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"hello"}
+
+event: response.completed
+data: {"type":"response.completed","response":{}}
+
+"#,
+        );
+
+        let injected = String::from_utf8(
+            inject_responses_model_info_chunk(&chunk, "deepseek-ai/deepseek-v4-pro/渠道信息")
+                .to_vec(),
+        )
+        .expect("valid utf8");
+
+        assert_eq!(
+            injected
+                .matches("model: deepseek-ai/deepseek-v4-pro/渠道信息")
+                .count(),
+            1
+        );
+        assert_eq!(
+            injected
+                .matches("event: response.output_text.delta")
+                .count(),
+            2
+        );
+        let model_pos = injected
+            .find("model: deepseek-ai/deepseek-v4-pro/渠道信息")
+            .expect("model marker");
+        let completed_pos = injected
+            .find("event: response.completed")
+            .expect("completed event");
+        assert!(model_pos < completed_pos);
+    }
+
+    #[test]
+    fn responses_model_info_injection_gate_skips_tool_or_duplicate() {
+        assert!(should_inject_responses_model_info(
+            true, true, true, false, false
+        ));
+        assert!(!should_inject_responses_model_info(
+            false, true, true, false, false
+        ));
+        assert!(!should_inject_responses_model_info(
+            true, false, true, false, false
+        ));
+        assert!(!should_inject_responses_model_info(
+            true, true, false, false, false
+        ));
+        assert!(!should_inject_responses_model_info(
+            true, true, true, true, false
+        ));
+        assert!(!should_inject_responses_model_info(
+            true, true, true, false, true
+        ));
+    }
+
+    #[test]
+    fn scan_responses_passthrough_chunk_detects_text_completed_and_tool_calls() {
+        let prompt_tokens = Arc::new(AtomicI64::new(0));
+        let completion_tokens = Arc::new(AtomicI64::new(0));
+        let has_sse_error = Arc::new(AtomicBool::new(false));
+        let has_text = Arc::new(AtomicBool::new(false));
+        let has_tool = Arc::new(AtomicBool::new(false));
+        let text_chunk = Bytes::from_static(
+            br#"event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"hello"}
+
+event: response.completed
+data: {"type":"response.completed","response":{"usage":{"input_tokens":2,"output_tokens":3}}}
+
+"#,
+        );
+
+        assert!(scan_responses_passthrough_chunk(
+            &text_chunk,
+            &has_sse_error,
+            &has_text,
+            &has_tool,
+            &prompt_tokens,
+            &completion_tokens,
+        ));
+        assert!(has_text.load(Ordering::Relaxed));
+        assert!(!has_tool.load(Ordering::Relaxed));
+        assert_eq!(prompt_tokens.load(Ordering::Relaxed), 2);
+        assert_eq!(completion_tokens.load(Ordering::Relaxed), 3);
+
+        let tool_chunk = Bytes::from_static(
+            br#"event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"type":"function_call","name":"read"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1}}}
+
+"#,
+        );
+        let has_text = Arc::new(AtomicBool::new(false));
+        let has_tool = Arc::new(AtomicBool::new(false));
+        assert!(scan_responses_passthrough_chunk(
+            &tool_chunk,
+            &has_sse_error,
+            &has_text,
+            &has_tool,
+            &prompt_tokens,
+            &completion_tokens,
+        ));
+        assert!(!has_text.load(Ordering::Relaxed));
+        assert!(has_tool.load(Ordering::Relaxed));
+    }
+
+    #[test]
     fn appended_model_info_frame_is_openai_compatible_before_done() {
         let mut buffer = String::new();
         let chunk = Bytes::from_static(
@@ -4098,14 +4337,14 @@ data: [DONE]\n",
     }
 
     #[test]
-    fn should_append_model_info_disables_only_responses_caller() {
+    fn should_append_model_info_allows_responses_caller_when_setting_enabled() {
         let state = test_proxy_state(true);
         let body = serde_json::json!({
             "model": "auto",
             "messages": [{"role": "user", "content": "你好"}],
         });
 
-        assert!(!should_append_model_info(
+        assert!(should_append_model_info(
             &state,
             &body,
             &CallerKind::Responses,

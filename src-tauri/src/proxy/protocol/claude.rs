@@ -1414,6 +1414,8 @@ pub struct ClaudeSSETransformer {
     /// 否则 Claude 客户端看到的 output_tokens 永远是 0。
     /// Claude 协议允许 message_delta 多次出现。）
     message_delta_emitted: bool,
+    delay_finish_until_done: bool,
+    pending_finish_reason: Option<String>,
 }
 
 fn sse_event_name_for_payload(payload: &str) -> &'static str {
@@ -1447,7 +1449,95 @@ impl ClaudeSSETransformer {
             usage_input_tokens: 0,
             usage_output_tokens: 0,
             message_delta_emitted: false,
+            delay_finish_until_done: false,
+            pending_finish_reason: None,
         }
+    }
+
+    pub fn new_with_delayed_finish(message_id: String, model: String) -> Self {
+        Self {
+            delay_finish_until_done: true,
+            ..Self::new(message_id, model)
+        }
+    }
+
+    fn claude_stop_reason(openai_finish_reason: &str) -> &str {
+        match openai_finish_reason {
+            "stop" => "end_turn",
+            "length" => "max_tokens",
+            "tool_calls" => "tool_use",
+            other => other,
+        }
+    }
+
+    fn message_delta_event(&self, stop_reason: &str) -> String {
+        let usage_json = if self.usage_output_tokens > 0 {
+            json!({
+                "output_tokens": self.usage_output_tokens
+            })
+        } else {
+            json!({
+                "output_tokens": 0
+            })
+        };
+
+        serde_json::to_string(&json!({
+            "type": "message_delta",
+            "delta": {
+                "stop_reason": stop_reason,
+                "stop_sequence": Value::Null
+            },
+            "usage": usage_json
+        }))
+        .unwrap_or_default()
+    }
+
+    pub fn finish_stream(&mut self) -> Vec<String> {
+        let mut events = Vec::new();
+        if self.text_block_open {
+            self.text_block_open = false;
+            events.push(
+                serde_json::to_string(&json!({
+                    "type": "content_block_stop",
+                    "index": self.content_block_index
+                }))
+                .unwrap_or_default(),
+            );
+            self.content_block_index += 1;
+        } else if self.thinking_block_open {
+            self.thinking_block_open = false;
+            events.push(
+                serde_json::to_string(&json!({
+                    "type": "content_block_stop",
+                    "index": self.content_block_index
+                }))
+                .unwrap_or_default(),
+            );
+            self.content_block_index += 1;
+        } else if self.in_tool_use {
+            self.in_tool_use = false;
+            events.push(
+                serde_json::to_string(&json!({
+                    "type": "content_block_stop",
+                    "index": self.content_block_index
+                }))
+                .unwrap_or_default(),
+            );
+            self.content_block_index += 1;
+        }
+
+        if let Some(fr) = self.pending_finish_reason.take() {
+            let stop_reason = Self::claude_stop_reason(&fr);
+            events.push(self.message_delta_event(stop_reason));
+            self.message_delta_emitted = true;
+            events.push(
+                serde_json::to_string(&json!({
+                    "type": "message_stop"
+                }))
+                .unwrap_or_default(),
+            );
+        }
+        events
     }
 
     /// Transform a single OpenAI SSE chunk into Claude SSE events.
@@ -1698,6 +1788,11 @@ impl ClaudeSSETransformer {
 
         // Handle finish reason
         if let Some(fr) = finish_reason {
+            if self.delay_finish_until_done {
+                self.pending_finish_reason = Some(fr.to_string());
+                return events;
+            }
+
             // Close any open content blocks
             if self.text_block_open {
                 self.text_block_open = false;
@@ -1732,35 +1827,8 @@ impl ClaudeSSETransformer {
             }
 
             // Map finish_reason -> stop_reason
-            let stop_reason = match fr {
-                "stop" => "end_turn",
-                "length" => "max_tokens",
-                "tool_calls" => "tool_use",
-                other => other,
-            };
-
-            // Build usage section for message_delta (per Claude protocol spec)
-            let usage_json = if self.usage_output_tokens > 0 {
-                json!({
-                    "output_tokens": self.usage_output_tokens
-                })
-            } else {
-                json!({
-                    "output_tokens": 0
-                })
-            };
-
-            events.push(
-                serde_json::to_string(&json!({
-                    "type": "message_delta",
-                    "delta": {
-                        "stop_reason": stop_reason,
-                        "stop_sequence": Value::Null
-                    },
-                    "usage": usage_json
-                }))
-                .unwrap_or_default(),
-            );
+            let stop_reason = Self::claude_stop_reason(fr);
+            events.push(self.message_delta_event(stop_reason));
             self.message_delta_emitted = true;
 
             events.push(
@@ -1789,7 +1857,7 @@ pub fn transform_openai_sse_to_claude_stream(
     let upstream_stream = response.into_body().into_data_stream();
 
     let message_id = format!("msg_{}", chrono::Utc::now().timestamp());
-    let transformer = ClaudeSSETransformer::new(message_id, requested_model);
+    let transformer = ClaudeSSETransformer::new_with_delayed_finish(message_id, requested_model);
     let sse_buffer = String::new();
     let sse_utf8_remainder: Vec<u8> = Vec::new();
 
@@ -1830,6 +1898,80 @@ pub fn transform_openai_sse_to_claude_stream(
                             idle_timeout,
                         ),
                     ));
+                }
+
+                while let Some(line_end) = sse_buffer.find('\n') {
+                    let mut line = sse_buffer.drain(..=line_end).collect::<String>();
+                    if line.ends_with('\n') {
+                        line.pop();
+                    }
+                    if line.ends_with('\r') {
+                        line.pop();
+                    }
+
+                    let Some(payload) = crate::proxy::sse::sse_data_payload(&line) else {
+                        continue;
+                    };
+
+                    if payload == "[DONE]" {
+                        let mut output = Vec::new();
+                        for event in transformer.finish_stream() {
+                            let event_name = sse_event_name_for_payload(&event);
+                            output.extend_from_slice(
+                                format!(
+                                    "event: {event_name}
+data: {event}
+
+"
+                                )
+                                .as_bytes(),
+                            );
+                        }
+                        output.extend_from_slice(
+                            b"data: [DONE]
+
+",
+                        );
+                        return Some((
+                            Ok::<_, std::io::Error>(Bytes::from(output)),
+                            (
+                                stream,
+                                transformer,
+                                sse_buffer,
+                                sse_utf8_remainder,
+                                streamed_bytes,
+                                idle_timeout,
+                            ),
+                        ));
+                    }
+
+                    let events = transformer.transform_chunk(payload);
+                    if !events.is_empty() {
+                        let mut output = Vec::new();
+                        for event in &events {
+                            let event_name = sse_event_name_for_payload(event);
+                            output.extend_from_slice(
+                                format!(
+                                    "event: {event_name}
+data: {event}
+
+"
+                                )
+                                .as_bytes(),
+                            );
+                        }
+                        return Some((
+                            Ok(Bytes::from(output)),
+                            (
+                                stream,
+                                transformer,
+                                sse_buffer,
+                                sse_utf8_remainder,
+                                streamed_bytes,
+                                idle_timeout,
+                            ),
+                        ));
+                    }
                 }
 
                 tokio::select! {
@@ -1883,7 +2025,7 @@ pub fn transform_openai_sse_to_claude_stream(
                     }
                 }
 
-                if let Some(line_end) = sse_buffer.find('\n') {
+                while let Some(line_end) = sse_buffer.find('\n') {
                     let mut line = sse_buffer.drain(..=line_end).collect::<String>();
                     if line.ends_with('\n') {
                         line.pop();
@@ -1892,45 +2034,53 @@ pub fn transform_openai_sse_to_claude_stream(
                         line.pop();
                     }
 
-                    if let Some(payload) = crate::proxy::sse::sse_data_payload(&line) {
-                        if payload == "[DONE]" {
-                            let output = Bytes::from("data: [DONE]\n\n");
-                            return Some((
-                                Ok::<_, std::io::Error>(output),
-                                (
-                                    stream,
-                                    transformer,
-                                    sse_buffer,
-                                    sse_utf8_remainder,
-                                    streamed_bytes,
-                                    idle_timeout,
-                                ),
-                            ));
-                        }
+                    let Some(payload) = crate::proxy::sse::sse_data_payload(&line) else {
+                        continue;
+                    };
 
-                        let events = transformer.transform_chunk(payload);
-                        if !events.is_empty() {
-                            let mut output = Vec::new();
-                            for event in &events {
-                                let event_name = sse_event_name_for_payload(event);
-                                output.extend_from_slice(
-                                    format!("event: {event_name}\ndata: {event}\n\n").as_bytes(),
-                                );
-                            }
-                            return Some((
-                                Ok(Bytes::from(output)),
-                                (
-                                    stream,
-                                    transformer,
-                                    sse_buffer,
-                                    sse_utf8_remainder,
-                                    streamed_bytes,
-                                    idle_timeout,
-                                ),
-                            ));
+                    if payload == "[DONE]" {
+                        let mut output = Vec::new();
+                        for event in transformer.finish_stream() {
+                            let event_name = sse_event_name_for_payload(&event);
+                            output.extend_from_slice(
+                                format!("event: {event_name}\ndata: {event}\n\n").as_bytes(),
+                            );
                         }
+                        output.extend_from_slice(b"data: [DONE]\n\n");
+                        return Some((
+                            Ok::<_, std::io::Error>(Bytes::from(output)),
+                            (
+                                stream,
+                                transformer,
+                                sse_buffer,
+                                sse_utf8_remainder,
+                                streamed_bytes,
+                                idle_timeout,
+                            ),
+                        ));
                     }
-                    continue;
+
+                    let events = transformer.transform_chunk(payload);
+                    if !events.is_empty() {
+                        let mut output = Vec::new();
+                        for event in &events {
+                            let event_name = sse_event_name_for_payload(event);
+                            output.extend_from_slice(
+                                format!("event: {event_name}\ndata: {event}\n\n").as_bytes(),
+                            );
+                        }
+                        return Some((
+                            Ok(Bytes::from(output)),
+                            (
+                                stream,
+                                transformer,
+                                sse_buffer,
+                                sse_utf8_remainder,
+                                streamed_bytes,
+                                idle_timeout,
+                            ),
+                        ));
+                    }
                 }
             }
         },
@@ -2743,6 +2893,40 @@ mod tests {
             "{output}"
         );
         assert!(output.contains("model: claude-3-opus"), "{output}");
+    }
+
+    #[tokio::test]
+    async fn transform_openai_sse_to_claude_stream_keeps_injected_model_before_message_stop() {
+        use http_body_util::BodyExt;
+
+        let upstream = concat!(
+            "data: {\"id\":\"chatcmpl-abc\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl-abc\",\"choices\":[{\"delta\":{\"content\":\"现在是 12:58\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"id\":\"chatcmpl-abc\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: {\"id\":\"chatcmpl-api-switch-model-info\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\n\\nmodel: gpt-5.5/I-linlong.xyz\"},\"finish_reason\":null}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let response = axum::response::Response::builder()
+            .body(Body::from(upstream))
+            .unwrap();
+
+        let transformed =
+            transform_openai_sse_to_claude_stream(response, "claude-opus-4-8".to_string()).unwrap();
+        let bytes = transformed.into_body().collect().await.unwrap().to_bytes();
+        let output = String::from_utf8(bytes.to_vec()).unwrap();
+
+        let model_pos = output.find("model: gpt-5.5/I-linlong.xyz").expect(&output);
+        let block_stop_pos = output.find("event: content_block_stop").expect(&output);
+        let delta_pos = output.find("event: message_delta").expect(&output);
+        let stop_pos = output.find("event: message_stop").expect(&output);
+
+        assert!(model_pos < block_stop_pos, "{output}");
+        assert!(model_pos < delta_pos, "{output}");
+        assert!(model_pos < stop_pos, "{output}");
+        assert!(
+            !output[..model_pos].contains("event: content_block_stop"),
+            "{output}"
+        );
     }
 
     #[test]

@@ -1504,7 +1504,8 @@ impl ClaudeSSETransformer {
                 .unwrap_or_default(),
             );
             self.content_block_index += 1;
-        } else if self.thinking_block_open {
+        }
+        if self.thinking_block_open {
             self.thinking_block_open = false;
             events.push(
                 serde_json::to_string(&json!({
@@ -1514,7 +1515,8 @@ impl ClaudeSSETransformer {
                 .unwrap_or_default(),
             );
             self.content_block_index += 1;
-        } else if self.in_tool_use {
+        }
+        if self.in_tool_use {
             self.in_tool_use = false;
             events.push(
                 serde_json::to_string(&json!({
@@ -1635,6 +1637,17 @@ impl ClaudeSSETransformer {
                     );
                     self.content_block_index += 1;
                 }
+                if self.in_tool_use {
+                    self.in_tool_use = false;
+                    events.push(
+                        serde_json::to_string(&json!({
+                            "type": "content_block_stop",
+                            "index": self.content_block_index
+                        }))
+                        .unwrap_or_default(),
+                    );
+                    self.content_block_index += 1;
+                }
                 self.thinking_block_open = true;
                 events.push(
                     serde_json::to_string(&json!({
@@ -1678,6 +1691,17 @@ impl ClaudeSSETransformer {
                             self.content_block_index += 1;
                         }
 
+                        if self.in_tool_use {
+                            self.in_tool_use = false;
+                            events.push(
+                                serde_json::to_string(&json!({
+                                    "type": "content_block_stop",
+                                    "index": self.content_block_index
+                                }))
+                                .unwrap_or_default(),
+                            );
+                            self.content_block_index += 1;
+                        }
                         // Open text content block ONCE
                         self.text_block_open = true;
                         events.push(
@@ -2865,6 +2889,36 @@ mod tests {
         let delta3: Value = serde_json::from_str(&events3[0]).unwrap();
         assert_eq!(delta3["type"], "content_block_delta");
         assert_eq!(delta3["delta"]["text"], "!");
+    }
+
+    #[test]
+    fn sse_closes_tool_use_block_before_reasoning_block() {
+        let mut transformer =
+            ClaudeSSETransformer::new("msg_test".to_string(), "claude-3-opus".to_string());
+        let tool = r#"{"id":"c","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"f","arguments":"{}"}}]},"finish_reason":null}]}"#;
+        transformer.transform_chunk(tool);
+        assert!(transformer.in_tool_use);
+        let reasoning = r#"{"id":"c","choices":[{"delta":{"reasoning_content":"thinking"},"finish_reason":null}]}"#;
+        let events = transformer.transform_chunk(reasoning);
+        let first: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+        assert_eq!(first["type"], "content_block_stop");
+        assert!(!transformer.in_tool_use);
+        assert!(transformer.thinking_block_open);
+    }
+
+    #[test]
+    fn sse_closes_tool_use_block_before_text_block2() {
+        let mut transformer =
+            ClaudeSSETransformer::new("msg_test".to_string(), "claude-3-opus".to_string());
+        let tool = r#"{"id":"c","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"f","arguments":"{}"}}]},"finish_reason":null}]}"#;
+        transformer.transform_chunk(tool);
+        assert!(transformer.in_tool_use);
+        let text = r#"{"id":"c","choices":[{"delta":{"content":"done"},"finish_reason":null}]}"#;
+        let events = transformer.transform_chunk(text);
+        let first: serde_json::Value = serde_json::from_str(&events[0]).unwrap();
+        assert_eq!(first["type"], "content_block_stop");
+        assert!(!transformer.in_tool_use);
+        assert!(transformer.text_block_open);
     }
 
     #[test]

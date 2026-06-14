@@ -2361,7 +2361,7 @@ fn scan_anthropic_passthrough_chunk(
     let text = String::from_utf8_lossy(chunk);
     let mut saw_message_stop = false;
     for line in text.lines() {
-        let Some(payload) = line.strip_prefix("data: ") else {
+        let Some(payload) = crate::proxy::sse::sse_data_payload(line) else {
             continue;
         };
         let Ok(value) = serde_json::from_str::<Value>(payload) else {
@@ -3303,6 +3303,43 @@ data: [DONE]
                 serde_json::from_str::<Value>(p).expect("data 行应为合法 JSON");
             }
         }
+    }
+
+    #[test]
+    fn scan_anthropic_passthrough_supports_data_without_space() {
+        let chunk = Bytes::from_static(
+            br#"event: message_start
+data:{"type":"message_start","message":{"usage":{"input_tokens":3}}}
+
+event: content_block_delta
+data:{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}
+
+event: message_delta
+data:{"type":"message_delta","usage":{"output_tokens":2}}
+
+event: message_stop
+data:{"type":"message_stop"}
+
+"#,
+        );
+        let has_text = Arc::new(AtomicBool::new(false));
+        let has_tool = Arc::new(AtomicBool::new(false));
+        let prompt_tokens = Arc::new(AtomicI64::new(0));
+        let completion_tokens = Arc::new(AtomicI64::new(0));
+
+        let saw_stop = scan_anthropic_passthrough_chunk(
+            &chunk,
+            &has_text,
+            &has_tool,
+            &prompt_tokens,
+            &completion_tokens,
+        );
+
+        assert!(saw_stop);
+        assert!(has_text.load(Ordering::Relaxed));
+        assert!(!has_tool.load(Ordering::Relaxed));
+        assert_eq!(prompt_tokens.load(Ordering::Relaxed), 3);
+        assert_eq!(completion_tokens.load(Ordering::Relaxed), 2);
     }
 
     #[test]

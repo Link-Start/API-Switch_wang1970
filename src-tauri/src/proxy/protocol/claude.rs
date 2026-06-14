@@ -1416,6 +1416,23 @@ pub struct ClaudeSSETransformer {
     message_delta_emitted: bool,
 }
 
+fn sse_event_name_for_payload(payload: &str) -> &'static str {
+    let Ok(value) = serde_json::from_str::<Value>(payload) else {
+        return "message_delta";
+    };
+    match value.get("type").and_then(Value::as_str).unwrap_or("") {
+        "message_start" => "message_start",
+        "content_block_start" => "content_block_start",
+        "content_block_delta" => "content_block_delta",
+        "content_block_stop" => "content_block_stop",
+        "message_delta" => "message_delta",
+        "message_stop" => "message_stop",
+        "ping" => "ping",
+        "error" => "error",
+        _ => "message_delta",
+    }
+}
+
 impl ClaudeSSETransformer {
     pub fn new(message_id: String, model: String) -> Self {
         Self {
@@ -1875,7 +1892,7 @@ pub fn transform_openai_sse_to_claude_stream(
                         line.pop();
                     }
 
-                    if let Some(payload) = line.strip_prefix("data: ") {
+                    if let Some(payload) = crate::proxy::sse::sse_data_payload(&line) {
                         if payload == "[DONE]" {
                             let output = Bytes::from("data: [DONE]\n\n");
                             return Some((
@@ -1895,7 +1912,10 @@ pub fn transform_openai_sse_to_claude_stream(
                         if !events.is_empty() {
                             let mut output = Vec::new();
                             for event in &events {
-                                output.extend_from_slice(format!("data: {event}\n\n").as_bytes());
+                                let event_name = sse_event_name_for_payload(event);
+                                output.extend_from_slice(
+                                    format!("event: {event_name}\ndata: {event}\n\n").as_bytes(),
+                                );
                             }
                             return Some((
                                 Ok(Bytes::from(output)),
@@ -2683,6 +2703,46 @@ mod tests {
         let delta3: Value = serde_json::from_str(&events3[0]).unwrap();
         assert_eq!(delta3["type"], "content_block_delta");
         assert_eq!(delta3["delta"]["text"], "!");
+    }
+
+    #[test]
+    fn openai_to_claude_stream_event_names_for_model_info_delta() {
+        let mut transformer =
+            ClaudeSSETransformer::new("msg_test".to_string(), "claude-3-opus".to_string());
+
+        let chunk = r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":"model: claude-3-opus"},"finish_reason":null}]}"#;
+        let events = transformer.transform_chunk(chunk);
+
+        assert_eq!(
+            sse_event_name_for_payload(&events[0]),
+            "content_block_start"
+        );
+        assert_eq!(
+            sse_event_name_for_payload(&events[1]),
+            "content_block_delta"
+        );
+    }
+
+    #[tokio::test]
+    async fn transform_openai_sse_to_claude_stream_wraps_model_info_delta_with_event_name() {
+        use http_body_util::BodyExt;
+
+        let upstream = "data:{\"id\":\"chatcmpl-abc\",\"choices\":[{\"delta\":{\"content\":\"model: claude-3-opus\"},\"finish_reason\":null}]}\n\n";
+        let response = axum::response::Response::builder()
+            .body(Body::from(upstream))
+            .unwrap();
+
+        let transformed =
+            transform_openai_sse_to_claude_stream(response, "claude-3-opus".to_string()).unwrap();
+        let bytes = transformed.into_body().collect().await.unwrap().to_bytes();
+        let output = String::from_utf8(bytes.to_vec()).unwrap();
+
+        assert!(output.contains("event: content_block_delta\n"), "{output}");
+        assert!(
+            output.contains("\"type\":\"content_block_delta\""),
+            "{output}"
+        );
+        assert!(output.contains("model: claude-3-opus"), "{output}");
     }
 
     #[test]

@@ -1666,6 +1666,18 @@ impl ClaudeSSETransformer {
             if let Value::String(text) = content_val {
                 if !text.is_empty() {
                     if !self.text_block_open {
+                        if self.thinking_block_open {
+                            self.thinking_block_open = false;
+                            events.push(
+                                serde_json::to_string(&json!({
+                                    "type": "content_block_stop",
+                                    "index": self.content_block_index
+                                }))
+                                .unwrap_or_default(),
+                            );
+                            self.content_block_index += 1;
+                        }
+
                         // Open text content block ONCE
                         self.text_block_open = true;
                         events.push(
@@ -2853,6 +2865,35 @@ mod tests {
         let delta3: Value = serde_json::from_str(&events3[0]).unwrap();
         assert_eq!(delta3["type"], "content_block_delta");
         assert_eq!(delta3["delta"]["text"], "!");
+    }
+
+    #[test]
+    fn sse_closes_thinking_block_before_text_block() {
+        let mut transformer =
+            ClaudeSSETransformer::new("msg_test".to_string(), "claude-3-opus".to_string());
+
+        let thinking = r#"{"id":"chatcmpl-abc","choices":[{"delta":{"reasoning_content":"think"},"finish_reason":null}]}"#;
+        let text = r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":"OK"},"finish_reason":null}]}"#;
+
+        let thinking_events = transformer.transform_chunk(thinking);
+        assert_eq!(thinking_events.len(), 2);
+
+        let text_events = transformer.transform_chunk(text);
+        assert_eq!(text_events.len(), 3);
+
+        let thinking_stop: Value = serde_json::from_str(&text_events[0]).unwrap();
+        assert_eq!(thinking_stop["type"], "content_block_stop");
+        assert_eq!(thinking_stop["index"], 0);
+
+        let text_start: Value = serde_json::from_str(&text_events[1]).unwrap();
+        assert_eq!(text_start["type"], "content_block_start");
+        assert_eq!(text_start["index"], 1);
+        assert_eq!(text_start["content_block"]["type"], "text");
+
+        let text_delta: Value = serde_json::from_str(&text_events[2]).unwrap();
+        assert_eq!(text_delta["type"], "content_block_delta");
+        assert_eq!(text_delta["index"], 1);
+        assert_eq!(text_delta["delta"]["type"], "text_delta");
     }
 
     #[test]

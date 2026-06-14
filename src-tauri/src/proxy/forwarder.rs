@@ -121,15 +121,19 @@ fn is_decode_timeout_after_stream_started(
 }
 
 /// 判断客户端断开的流是否算成功。
-/// 修复: 原逻辑要求 prompt_tokens > 0 || completion_tokens > 0，但很多上游 API 在流式响应中
-/// 不返回 usage 信息，导致客户端断开时即使模型正常工作也被误判为失败。
-/// 只要 status_code == 200 就算成功（客户端断开不代表模型故障）。
+///
+/// 下游主动断开本身不是上游故障；但 HTTP 200 不能单独证明模型已有效输出。
+/// 对 dropped stream，只有观测到文本 delta、工具调用，或输出 token，才记为成功。
+/// 这避免 `200 + IN/OUT 0 + has_valid_output=false` 被 success=1 掩盖。
 fn is_dropped_stream_success(
     status_code: i32,
-    _prompt_tokens: i64,
-    _completion_tokens: i64,
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    has_text_delta: bool,
+    has_tool_calls: bool,
 ) -> bool {
-    status_code == 200
+    let _ = prompt_tokens; // prompt_tokens 是输入消耗，不代表下游收到有效输出。
+    status_code == 200 && (has_text_delta || has_tool_calls || completion_tokens > 0)
 }
 
 #[derive(Debug, Clone)]
@@ -551,6 +555,8 @@ struct StreamLogGuard {
     requested_model: String,
     prompt_tokens: Arc<AtomicI64>,
     completion_tokens: Arc<AtomicI64>,
+    has_text_delta: Arc<AtomicBool>,
+    has_tool_calls: Arc<AtomicBool>,
     first_token_ms: Arc<AtomicI64>,
     chunk_count: Arc<AtomicI64>,
     streamed_bytes: Arc<AtomicI64>,
@@ -572,9 +578,16 @@ impl Drop for StreamLogGuard {
             let chunk_total = self.chunk_count.load(Ordering::SeqCst);
             let byte_total = self.streamed_bytes.load(Ordering::SeqCst);
             let first_token_ms = self.first_token_ms.load(Ordering::SeqCst);
+            let has_text_delta = self.has_text_delta.load(Ordering::SeqCst);
+            let has_tool_calls = self.has_tool_calls.load(Ordering::SeqCst);
             let latency_ms = self.start.elapsed().as_millis() as i64;
-            let success =
-                is_dropped_stream_success(self.status_code, prompt_tokens, completion_tokens);
+            let success = is_dropped_stream_success(
+                self.status_code,
+                prompt_tokens,
+                completion_tokens,
+                has_text_delta,
+                has_tool_calls,
+            );
             let attempt_path = attempt_path_with_current(
                 &self.prior_attempts,
                 &self.entry,
@@ -596,8 +609,8 @@ impl Drop for StreamLogGuard {
                 latency_ms,
                 prompt_tokens,
                 completion_tokens,
-                false,
-                false,
+                has_text_delta,
+                has_tool_calls,
                 false,
                 Some(success),
             );
@@ -1440,6 +1453,8 @@ fn build_streaming_response(
         requested_model: requested_model.clone(),
         prompt_tokens: prompt_tokens.clone(),
         completion_tokens: completion_tokens.clone(),
+        has_text_delta: has_text_delta.clone(),
+        has_tool_calls: has_tool_calls.clone(),
         first_token_ms: first_token_ms.clone(),
         chunk_count: chunk_count.clone(),
         streamed_bytes: streamed_bytes.clone(),
@@ -3656,9 +3671,19 @@ data: [DONE]\n",
     }
 
     #[test]
-    fn dropped_stream_success_only_depends_on_status_code() {
-        assert!(is_dropped_stream_success(200, 0, 0));
-        assert!(!is_dropped_stream_success(500, 999, 999));
+    fn dropped_stream_success_requires_valid_output_on_http_200() {
+        assert!(
+            !is_dropped_stream_success(200, 0, 0, false, false),
+            "HTTP 200 + IN/OUT 0 + no observed output must not be logged as success"
+        );
+        assert!(
+            !is_dropped_stream_success(200, 1048570, 0, false, false),
+            "prompt_tokens are input only; prompt-only streams still have no valid output"
+        );
+        assert!(is_dropped_stream_success(200, 0, 1, false, false));
+        assert!(is_dropped_stream_success(200, 0, 0, true, false));
+        assert!(is_dropped_stream_success(200, 0, 0, false, true));
+        assert!(!is_dropped_stream_success(500, 999, 999, true, true));
     }
 
     #[test]

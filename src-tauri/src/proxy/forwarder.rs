@@ -136,6 +136,23 @@ fn is_dropped_stream_success(
     status_code == 200 && (has_text_delta || has_tool_calls || completion_tokens > 0)
 }
 
+fn should_persist_raw_protocol_for_log(
+    success: bool,
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    has_text_delta: bool,
+    has_tool_calls: bool,
+) -> bool {
+    // 用户明确要求：错误的 IN/OUT 0/无有效输出场景必须保留原始记录，
+    // 便于复现调试；正常 200 成功不保留，避免日志膨胀。
+    if success {
+        return false;
+    }
+
+    let has_valid_output = has_text_delta || has_tool_calls || completion_tokens > 0;
+    prompt_tokens == 0 || completion_tokens == 0 || !has_valid_output
+}
+
 #[derive(Debug, Clone)]
 struct AttemptInfo {
     entry_id: String,
@@ -621,7 +638,15 @@ impl Drop for StreamLogGuard {
             let requested_model = self.requested_model.clone();
             let status_code = self.status_code;
             let empty_stream_cooldown_secs = self.empty_stream_cooldown_secs;
-            let raw_protocol = self.raw_protocol.clone();
+            let raw_protocol = should_persist_raw_protocol_for_log(
+                success,
+                prompt_tokens,
+                completion_tokens,
+                has_text_delta,
+                has_tool_calls,
+            )
+            .then(|| self.raw_protocol.clone())
+            .flatten();
             tokio::spawn(async move {
                 log_usage(
                     &db,
@@ -1048,20 +1073,20 @@ async fn forward_single(
         request = request.header("Accept-Encoding", "identity");
     }
 
-    let raw_protocol_request = settings.record_raw_protocol_data.then(|| {
-        build_raw_protocol_request_log(
-            caller_kind,
-            requested_model,
-            entry,
-            &channel.api_type,
-            &url,
-            is_stream,
-            is_responses_passthrough,
-            is_claude_passthrough,
-            body,
-            &upstream_body,
-        )
-    });
+    // 始终在本次请求内临时构造 raw protocol 上下文；是否写入 DB 由失败/空输出
+    // 场景决定。这样错误 IN/OUT 0 能复现，正常 200 成功不会持久化 raw。
+    let raw_protocol_request = Some(build_raw_protocol_request_log(
+        caller_kind,
+        requested_model,
+        entry,
+        &channel.api_type,
+        &url,
+        is_stream,
+        is_responses_passthrough,
+        is_claude_passthrough,
+        body,
+        &upstream_body,
+    ));
 
     // Start timer BEFORE sending request — this measures true TTFB
     let request_start = std::time::Instant::now();
@@ -1497,19 +1522,31 @@ fn build_streaming_response(
                     let ct = completion_tokens.load(Ordering::SeqCst);
                     let ft = first_token_ms.load(Ordering::SeqCst);
                     let lat = start.elapsed().as_millis() as i64;
-                    let raw_stream_snapshot =
-                        raw_protocol.as_ref().map(|_| raw_stream_buffer.clone());
-                    let raw_protocol_log = raw_protocol.clone().map(|raw| {
-                        with_raw_protocol_stream_capture(
-                            raw,
-                            504,
-                            &response_headers,
-                            "stream_idle_timeout",
-                            Some(StreamEndReason::Timeout),
-                            "stream idle timeout",
-                            raw_stream_snapshot.as_deref(),
-                        )
-                    });
+                    let has_text_output = has_text_delta.load(Ordering::SeqCst);
+                    let has_tool_output = has_tool_calls.load(Ordering::SeqCst);
+                    let raw_protocol_log = if should_persist_raw_protocol_for_log(
+                        false,
+                        pt,
+                        ct,
+                        has_text_output,
+                        has_tool_output,
+                    ) {
+                        let raw_stream_snapshot =
+                            raw_protocol.as_ref().map(|_| raw_stream_buffer.clone());
+                        raw_protocol.clone().map(|raw| {
+                            with_raw_protocol_stream_capture(
+                                raw,
+                                504,
+                                &response_headers,
+                                "stream_idle_timeout",
+                                Some(StreamEndReason::Timeout),
+                                "stream idle timeout",
+                                raw_stream_snapshot.as_deref(),
+                            )
+                        })
+                    } else {
+                        None
+                    };
                     tokio::spawn(async move {
                         log_usage(
                             &db2,
@@ -1586,19 +1623,31 @@ fn build_streaming_response(
                             let ct = completion_tokens.load(Ordering::SeqCst);
                             let ft = first_token_ms.load(Ordering::SeqCst);
                             let lat = start.elapsed().as_millis() as i64;
-                            let raw_stream_snapshot =
-                                raw_protocol.as_ref().map(|_| raw_stream_buffer.clone());
-                            let raw_protocol_log = raw_protocol.clone().map(|raw| {
-                                with_raw_protocol_stream_capture(
-                                    raw,
-                                    413,
-                                    &response_headers,
-                                    "stream_buffer_exceeded",
-                                    Some(StreamEndReason::Dropped),
-                                    "stream buffer exceeds 10MB limit",
-                                    raw_stream_snapshot.as_deref(),
-                                )
-                            });
+                            let has_text_output = has_text_delta.load(Ordering::SeqCst);
+                            let has_tool_output = has_tool_calls.load(Ordering::SeqCst);
+                            let raw_protocol_log = if should_persist_raw_protocol_for_log(
+                                false,
+                                pt,
+                                ct,
+                                has_text_output,
+                                has_tool_output,
+                            ) {
+                                let raw_stream_snapshot =
+                                    raw_protocol.as_ref().map(|_| raw_stream_buffer.clone());
+                                raw_protocol.clone().map(|raw| {
+                                    with_raw_protocol_stream_capture(
+                                        raw,
+                                        413,
+                                        &response_headers,
+                                        "stream_buffer_exceeded",
+                                        Some(StreamEndReason::Dropped),
+                                        "stream buffer exceeds 10MB limit",
+                                        raw_stream_snapshot.as_deref(),
+                                    )
+                                })
+                            } else {
+                                None
+                            };
                             tokio::spawn(async move {
                                 log_usage(
                                     &db2,
@@ -1812,19 +1861,29 @@ fn build_streaming_response(
                         let ak2 = access_key.clone();
                         let e2 = entry.clone();
                         let rm2 = requested_model.clone();
-                        let raw_stream_snapshot =
-                            raw_protocol.as_ref().map(|_| raw_stream_buffer.clone());
-                        let raw_protocol_log = raw_protocol.clone().map(|raw| {
-                            with_raw_protocol_stream_capture(
-                                raw,
-                                502,
-                                &response_headers,
-                                "stream_read_error",
-                                Some(stream_end_reason),
-                                error_message.as_str(),
-                                raw_stream_snapshot.as_deref(),
-                            )
-                        });
+                        let raw_protocol_log = if should_persist_raw_protocol_for_log(
+                            false,
+                            pt,
+                            ct,
+                            has_text_output,
+                            has_tool_output,
+                        ) {
+                            let raw_stream_snapshot =
+                                raw_protocol.as_ref().map(|_| raw_stream_buffer.clone());
+                            raw_protocol.clone().map(|raw| {
+                                with_raw_protocol_stream_capture(
+                                    raw,
+                                    502,
+                                    &response_headers,
+                                    "stream_read_error",
+                                    Some(stream_end_reason),
+                                    error_message.as_str(),
+                                    raw_stream_snapshot.as_deref(),
+                                )
+                            })
+                        } else {
+                            None
+                        };
                         tokio::spawn(async move {
                             log_usage(
                                 &db2,
@@ -1930,9 +1989,13 @@ fn build_streaming_response(
                         let eid = entry_id.clone();
                         let sdb = settings_cache.clone();
                         let eah = entries_app_handle.clone();
-                        let raw_protocol_log = if success {
-                            None
-                        } else {
+                        let raw_protocol_log = if should_persist_raw_protocol_for_log(
+                            success,
+                            pt,
+                            ct,
+                            has_text_output,
+                            has_tool_output,
+                        ) {
                             let raw_stream_snapshot =
                                 raw_protocol.as_ref().map(|_| raw_stream_buffer.clone());
                             raw_protocol.clone().map(|raw| {
@@ -1946,6 +2009,8 @@ fn build_streaming_response(
                                     raw_stream_snapshot.as_deref(),
                                 )
                             })
+                        } else {
+                            None
                         };
                         tokio::spawn(async move {
                             log_usage(
@@ -3291,6 +3356,31 @@ data: [DONE]
         assert_eq!(capture["gateway_body"], gateway_body);
         assert_eq!(capture["upstream_body"], upstream_body);
         assert_eq!(capture["upstream_response_body"], response_body);
+    }
+
+    #[test]
+    fn raw_protocol_persist_policy_keeps_only_failed_empty_output() {
+        assert!(should_persist_raw_protocol_for_log(
+            false, 0, 0, false, false
+        ));
+        assert!(should_persist_raw_protocol_for_log(
+            false, 1048570, 0, false, false
+        ));
+        assert!(should_persist_raw_protocol_for_log(
+            false, 10, 0, false, false
+        ));
+        assert!(!should_persist_raw_protocol_for_log(
+            false, 10, 3, true, false
+        ));
+        assert!(should_persist_raw_protocol_for_log(
+            false, 10, 0, false, true
+        ));
+        assert!(!should_persist_raw_protocol_for_log(
+            true, 0, 0, false, false
+        ));
+        assert!(!should_persist_raw_protocol_for_log(
+            true, 10, 0, false, false
+        ));
     }
 
     #[test]

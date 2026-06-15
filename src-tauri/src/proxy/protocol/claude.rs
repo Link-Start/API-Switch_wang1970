@@ -2927,7 +2927,8 @@ mod tests {
             ClaudeSSETransformer::new("msg_test".to_string(), "claude-3-opus".to_string());
 
         let thinking = r#"{"id":"chatcmpl-abc","choices":[{"delta":{"reasoning_content":"think"},"finish_reason":null}]}"#;
-        let text = r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":"OK"},"finish_reason":null}]}"#;
+        let text =
+            r#"{"id":"chatcmpl-abc","choices":[{"delta":{"content":"OK"},"finish_reason":null}]}"#;
 
         let thinking_events = transformer.transform_chunk(thinking);
         assert_eq!(thinking_events.len(), 2);

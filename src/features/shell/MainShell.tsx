@@ -125,7 +125,7 @@ export function MainShell({
   );
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <div className="safe-area-shell flex flex-col overflow-hidden bg-background">
       {updateInfo && (
         <div className="flex shrink-0 items-center justify-center gap-2 bg-primary/10 px-3 py-1.5 text-xs text-primary">
           <span className="truncate">{t('update.newVersion', { version: updateInfo.latest })}</span>

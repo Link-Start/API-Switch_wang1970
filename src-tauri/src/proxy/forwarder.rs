@@ -6,11 +6,13 @@ use super::server::ProxyState;
 use crate::database::{AccessKey, ApiEntry, AppSettings, Database};
 use crate::services::api_key_utils::primary_api_key;
 use axum::body::Body;
-use axum::http::{HeaderMap, HeaderValue};
+use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures::Stream;
+use once_cell::sync::Lazy;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::error::Error;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -21,13 +23,192 @@ use tokio::time::sleep;
 
 const STREAMING_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 const STREAMING_PING_INTERVAL: Duration = Duration::from_secs(10);
-const RAW_RESPONSES_REQUEST_FIELD: &str = "__as_raw_responses_req";
-const RESPONSES_PASSTHROUGH_HEADER: &str = "x-api-switch-responses-passthrough";
-/// 同协议直通：入口把原始 Claude 请求体存进此字段，forwarder 在上游同为
-/// Claude/Anthropic 时还原直送，避免 Claude→OpenAI→Claude 双重翻译损耗
-/// （含 mid-conversation system 的位置语义）。
-const RAW_CLAUDE_REQUEST_FIELD: &str = "__as_raw_claude_req";
-const CLAUDE_PASSTHROUGH_HEADER: &str = "x-api-switch-claude-passthrough";
+
+// ============================================================================
+// 统一同协议直穿配置（Phase 1: Core Abstraction）
+// ============================================================================
+
+/// 协议直穿配置
+///
+/// 定义单个协议的直穿行为：判定条件、字段名、响应头、中间件策略等。
+/// 所有协议使用统一的直穿机制，新增协议只需在配置表中添加一项。
+#[derive(Debug, Clone)]
+struct PassthroughConfig {
+    /// 调用方类型（入口协议）
+    caller_kind: CallerKind,
+
+    /// 上游协议类型列表（支持多个，如 Claude 支持 "claude" 和 "anthropic"）
+    upstream_types: &'static [&'static str],
+
+    /// 原始请求暂存字段名（如 "__as_raw_claude_req"）
+    raw_field: &'static str,
+
+    /// 响应头标记名（如 "x-api-switch-claude-passthrough"）
+    header_name: HeaderName,
+
+    /// 是否跳过中间件注入
+    ///
+    /// 语义说明：
+    /// - true: 跳过所有 ForwarderMiddleware（如 StreamOptionsMiddleware）
+    ///   典型场景：上游不认识 OpenAI 专有字段（如 Claude 不支持 stream_options）
+    /// - false: 执行所有中间件
+    ///   典型场景：上游原生兼容 OpenAI（如 OpenAI/Azure/Custom 支持 stream_options）
+    ///
+    /// 注意：未来如需细粒度控制（如只跳过某个中间件），需扩展为位图或枚举集合
+    skip_middleware: bool,
+}
+
+impl PassthroughConfig {
+    /// 检查响应头是否匹配此配置
+    fn matches_header(&self, header_value: &str) -> bool {
+        self.header_name.as_str() == header_value
+    }
+}
+
+/// 协议直穿配置表
+///
+/// 以 CallerKind 为 key，存储每个协议的直穿配置。
+/// 新增协议直穿只需在此表中添加一项，无需修改核心逻辑。
+static PASSTHROUGH_CONFIGS: Lazy<HashMap<CallerKind, PassthroughConfig>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+
+    // Responses API 直穿配置
+    m.insert(CallerKind::Responses, PassthroughConfig {
+        caller_kind: CallerKind::Responses,
+        upstream_types: &["responses"],
+        raw_field: "__as_raw_responses_req",
+        header_name: HeaderName::from_static("x-api-switch-responses-passthrough"),
+        skip_middleware: true,  // Responses 专有字段，跳过 OpenAI 中间件
+    });
+
+    // Claude Messages 直穿配置
+    // 注意：数据库层会将 "claude" 规范化为 "anthropic"，因此只需匹配 "anthropic"
+    m.insert(CallerKind::ClaudeMessages, PassthroughConfig {
+        caller_kind: CallerKind::ClaudeMessages,
+        upstream_types: &["anthropic"],  // 已包含 claude（规范化后）
+        raw_field: "__as_raw_claude_req",
+        header_name: HeaderName::from_static("x-api-switch-claude-passthrough"),
+        skip_middleware: true,  // Claude 不认识 stream_options
+    });
+
+    // OpenAI Chat 直穿配置
+    // 注意：数据库层会将 "custom" 规范化为 "openai"，因此只需匹配 "openai"
+    m.insert(CallerKind::OpenAiChat, PassthroughConfig {
+        caller_kind: CallerKind::OpenAiChat,
+        upstream_types: &["openai"],  // 已包含 custom（规范化后）
+        raw_field: "__as_raw_openai_req",
+        header_name: HeaderName::from_static("x-api-switch-openai-passthrough"),
+        skip_middleware: false,  // 不跳过，stream_options 是 OpenAI 原生字段
+    });
+
+    // Gemini Native 直穿配置
+    m.insert(CallerKind::GeminiNative, PassthroughConfig {
+        caller_kind: CallerKind::GeminiNative,
+        upstream_types: &["gemini"],
+        raw_field: "__as_raw_gemini_req",
+        header_name: HeaderName::from_static("x-api-switch-gemini-passthrough"),
+        skip_middleware: true,  // Gemini native 不认识 stream_options
+    });
+
+    // Azure Chat 直穿配置
+    m.insert(CallerKind::AzureChat, PassthroughConfig {
+        caller_kind: CallerKind::AzureChat,
+        upstream_types: &["azure"],
+        raw_field: "__as_raw_azure_req",
+        header_name: HeaderName::from_static("x-api-switch-azure-passthrough"),
+        skip_middleware: false,  // 不跳过，Azure 兼容 OpenAI
+    });
+
+    m
+});
+
+/// 判断是否启用同协议直穿
+///
+/// 检查三个条件：
+/// 1. 调用方类型在配置表中
+/// 2. 上游协议类型匹配配置
+/// 3. 请求体中存在原始请求暂存字段
+///
+/// 返回匹配的配置，或 None（不启用直穿）
+fn should_passthrough(
+    caller_kind: &CallerKind,
+    upstream_api_type: &str,
+    body: &Value,
+) -> Option<&'static PassthroughConfig> {
+    let config = PASSTHROUGH_CONFIGS.get(caller_kind)?;
+
+    // 检查上游类型是否匹配
+    if !config.upstream_types.contains(&upstream_api_type) {
+        return None;
+    }
+
+    // 检查是否存在原始请求暂存字段
+    body.get(config.raw_field)?;
+
+    Some(config)
+}
+
+/// 从响应头标记反查协议直穿配置
+///
+/// 用于流式处理：根据响应头判断协议类型，避免硬编码字符串比较。
+/// 返回匹配的配置，或 None（非直穿响应）。
+fn passthrough_config_from_header(header_value: &str) -> Option<&'static PassthroughConfig> {
+    PASSTHROUGH_CONFIGS
+        .values()
+        .find(|config| config.matches_header(header_value))
+}
+
+/// 从中间态恢复原始请求体，并注入实际模型名
+///
+/// 用于同协议直穿：从中间态的暂存字段中恢复原始请求，
+/// 同时注入路由解析后的实际模型名（支持 AUTO 场景）。
+///
+/// 注意：如果暂存字段不存在（理论上不应出现，因为 should_passthrough 已检查），
+/// 则 fallback 到原始 body，但这表明配置逻辑存在漏洞。
+fn restore_raw_request(
+    body: &Value,
+    config: &PassthroughConfig,
+    actual_model: &str,
+) -> Value {
+    let mut raw = body
+        .get(config.raw_field)
+        .cloned()
+        .unwrap_or_else(|| body.clone());
+
+    if let Some(obj) = raw.as_object_mut() {
+        // 注入实际模型名（关键：支持 AUTO 场景）
+        obj.insert("model".to_string(), Value::String(actual_model.to_string()));
+        // 移除暂存字段
+        obj.remove(config.raw_field);
+    }
+
+    raw
+}
+
+/// 清理所有已知的暂存字段
+///
+/// 遍历配置表，移除所有协议的暂存字段，防止泄漏到上游。
+/// 新增协议后自动包含，无需手动维护清理列表。
+fn clean_all_raw_fields(body: &mut Value) {
+    if let Some(obj) = body.as_object_mut() {
+        for config in PASSTHROUGH_CONFIGS.values() {
+            obj.remove(config.raw_field);
+        }
+    }
+}
+
+/// 为响应添加直穿标记头
+///
+/// 用于告知上层（handler）这是直穿响应，无需二次转换。
+fn mark_passthrough_response(
+    response: &mut axum::response::Response,
+    config: &PassthroughConfig,
+) {
+    response.headers_mut().insert(
+        config.header_name.clone(),
+        HeaderValue::from_static("true"),
+    );
+}
 
 #[derive(Debug, Default)]
 struct SseDoneState {
@@ -282,8 +463,7 @@ fn build_raw_protocol_request_log(
     channel_api_type: &str,
     url: &str,
     is_stream: bool,
-    is_responses_passthrough: bool,
-    is_claude_passthrough: bool,
+    passthrough_header: Option<&str>,
     gateway_body: &Value,
     upstream_body: &Value,
 ) -> Value {
@@ -299,8 +479,7 @@ fn build_raw_protocol_request_log(
         "channel_api_type": channel_api_type,
         "url": url,
         "is_stream": is_stream,
-        "is_responses_passthrough": is_responses_passthrough,
-        "is_claude_passthrough": is_claude_passthrough,
+        "passthrough_header": passthrough_header,
         "gateway_body": gateway_body,
         "upstream_body": upstream_body,
     })
@@ -979,61 +1158,46 @@ async fn forward_single(
 
     let adapter = get_adapter(&channel.api_type);
     let url = adapter.build_chat_url(&channel.base_url, &entry.model);
-    let is_responses_passthrough = matches!(caller_kind, CallerKind::Responses)
-        && channel.api_type == "responses"
-        && body.get(RAW_RESPONSES_REQUEST_FIELD).is_some();
-    // 同协议直通：客户端说 Claude、上游也是 Claude/Anthropic 时，原样转发原始体，
-    // 跳过有损的 Claude→OpenAI→Claude 双重翻译。能力不匹配（如老模型拒收 mid-system）
-    // 由 forward_with_retry 的失败转移自然兜底。
-    let is_claude_passthrough = matches!(caller_kind, CallerKind::ClaudeMessages)
-        && (channel.api_type == "claude" || channel.api_type == "anthropic")
-        && body.get(RAW_CLAUDE_REQUEST_FIELD).is_some();
 
-    let mut upstream_body = if is_responses_passthrough {
-        let mut raw = body
-            .get(RAW_RESPONSES_REQUEST_FIELD)
-            .cloned()
-            .unwrap_or_else(|| body.clone());
-        if let Some(obj) = raw.as_object_mut() {
-            obj.insert("model".to_string(), Value::String(entry.model.clone()));
-            obj.remove(RAW_RESPONSES_REQUEST_FIELD);
-        }
-        raw
-    } else if is_claude_passthrough {
-        let mut raw = body
-            .get(RAW_CLAUDE_REQUEST_FIELD)
-            .cloned()
-            .unwrap_or_else(|| body.clone());
-        if let Some(obj) = raw.as_object_mut() {
-            obj.insert("model".to_string(), Value::String(entry.model.clone()));
-            obj.remove(RAW_CLAUDE_REQUEST_FIELD);
-        }
-        raw
+    // 统一直穿判定（Phase 2: 替换现有实现）
+    let passthrough_config = should_passthrough(caller_kind, &channel.api_type, body);
+
+    // 处理 disable_reasoning
+    // 设计说明：直穿场景下也应用 disable_reasoning，因为这是用户全局设置，
+    // 不应因协议直穿而绕过。直穿只是避免协议转换损耗，不是跳过业务逻辑。
+    let body_for_transform = if settings.disable_reasoning {
+        let mut modified = body.clone();
+        apply_disable_reasoning(&mut modified);
+        modified
     } else {
-        let mut converted = body.clone();
+        body.clone()
+    };
+
+    let mut upstream_body = if let Some(config) = passthrough_config {
+        // 统一恢复逻辑：先恢复原始请求，再应用 disable_reasoning
+        let mut restored = restore_raw_request(body, config, &entry.model);
+        if settings.disable_reasoning {
+            apply_disable_reasoning(&mut restored);
+        }
+        restored
+    } else {
+        let mut converted = body_for_transform.clone();
         adapter.transform_request(&mut converted, &entry.model);
         converted
     };
 
-    if let Some(obj) = upstream_body.as_object_mut() {
-        obj.remove(RAW_RESPONSES_REQUEST_FIELD);
-        obj.remove(RAW_CLAUDE_REQUEST_FIELD);
-    }
+    // 统一清理所有暂存字段
+    clean_all_raw_fields(&mut upstream_body);
 
     clean_model_info_from_inbound_body(&mut upstream_body);
-
-    if settings.disable_reasoning {
-        apply_disable_reasoning(&mut upstream_body);
-    }
 
     // Call middleware on_request
     let ctx = RequestContext {
         caller_kind: caller_kind.clone(),
         requested_model: Arc::<str>::from(requested_model.to_string()),
     };
-    // 直通分支跳过中间件：StreamOptionsMiddleware 会注入 OpenAI 专有的
-    // stream_options，不能塞进原样的 Claude 请求体。
-    if !is_claude_passthrough {
+    // 根据配置决定是否跳过中间件
+    if !passthrough_config.is_some_and(|c| c.skip_middleware) {
         for mw in middleware.iter() {
             mw.on_request(&mut upstream_body, &ctx);
         }
@@ -1051,7 +1215,8 @@ async fn forward_single(
     // mid-conversation-system）。否则上游回退旧行为，拒收 messages 数组中的
     // role:"system" → 400。注意：不透传 authorization（鉴权用渠道自己的 api_key），
     // 也不透传 host/content-length/connection 等逐跳/长度相关头。
-    if is_claude_passthrough {
+    // 暂时保留 Claude 特殊处理（P1 再配置化）
+    if matches!(passthrough_config.map(|c| c.caller_kind), Some(CallerKind::ClaudeMessages)) {
         const PASSTHROUGH_HEADER_PREFIXES: &[&str] = &["x-stainless-", "x-claude-code-"];
         // 注意：不含 anthropic-version —— apply_auth 已设置（reqwest 的 header() 是
         // 追加而非覆盖，重复透传会产生重复头）。仅透传 apply_auth 未设置的身份/能力头。
@@ -1082,9 +1247,8 @@ async fn forward_single(
         &channel.api_type,
         &url,
         is_stream,
-        is_responses_passthrough,
-        is_claude_passthrough,
-        body,
+        passthrough_config.map(|c| c.header_name.as_str()),
+        &body,
         &upstream_body,
     ));
 
@@ -1128,10 +1292,8 @@ async fn forward_single(
 
     if is_stream {
         let needs_transform =
-            !is_responses_passthrough && !is_claude_passthrough && adapter.needs_sse_transform();
-        // 同协议直通也要遵守模型标记开关：AUTO 场景需要看到 API Switch 实际命中的条目。
-        // Responses / Claude 直通分别使用各自原生 SSE 事件注入，不强制依赖下游展示顶层 model 字段。
-        let append_model_info = should_append_model_info(state, body, caller_kind);
+            passthrough_config.is_none() && adapter.needs_sse_transform();
+        let append_model_info = should_append_model_info(state, &body, caller_kind);
         let mut response = build_streaming_response(
             state,
             entry,
@@ -1145,22 +1307,14 @@ async fn forward_single(
             request_start,
             prior_attempts,
             append_model_info,
-            is_responses_passthrough,
-            is_claude_passthrough,
+            passthrough_config.map(|c| c.header_name.as_str()),
             raw_protocol_request.clone(),
             middleware,
             &ctx,
         );
-        if is_responses_passthrough {
-            response.headers_mut().insert(
-                RESPONSES_PASSTHROUGH_HEADER,
-                HeaderValue::from_static("true"),
-            );
-        }
-        if is_claude_passthrough {
-            response
-                .headers_mut()
-                .insert(CLAUDE_PASSTHROUGH_HEADER, HeaderValue::from_static("true"));
+        // 统一添加直穿响应头
+        if let Some(config) = passthrough_config {
+            mark_passthrough_response(&mut response, config);
         }
         Ok(ForwardResult {
             response,
@@ -1184,7 +1338,7 @@ async fn forward_single(
             ForwardError::new(message, 502, raw_protocol)
         })?;
 
-        if !is_responses_passthrough && !is_claude_passthrough {
+        if passthrough_config.is_none() {
             adapter.transform_response(&mut response_body);
 
             // Normalize reasoning fields in response messages (reasoning_content ↔ reasoning_text)
@@ -1206,10 +1360,13 @@ async fn forward_single(
         let (prompt_tokens, completion_tokens, reasoning_tokens) =
             extract_usage_tokens(&response_body);
 
-        let has_valid_output = if is_responses_passthrough {
-            responses_response_has_valid_output(&response_body)
-        } else if is_claude_passthrough {
-            claude_response_has_valid_output(&response_body)
+        // 验证输出有效性（根据协议类型）
+        let has_valid_output = if let Some(config) = passthrough_config {
+            match config.caller_kind {
+                CallerKind::Responses => responses_response_has_valid_output(&response_body),
+                CallerKind::ClaudeMessages => claude_response_has_valid_output(&response_body),
+                _ => nonstream_response_has_valid_output(&response_body),
+            }
         } else {
             nonstream_response_has_valid_output(&response_body)
         };
@@ -1222,16 +1379,9 @@ async fn forward_single(
         }
 
         let mut response = axum::Json(response_body).into_response();
-        if is_responses_passthrough {
-            response.headers_mut().insert(
-                RESPONSES_PASSTHROUGH_HEADER,
-                HeaderValue::from_static("true"),
-            );
-        }
-        if is_claude_passthrough {
-            response
-                .headers_mut()
-                .insert(CLAUDE_PASSTHROUGH_HEADER, HeaderValue::from_static("true"));
+        // 统一添加直穿响应头
+        if let Some(config) = passthrough_config {
+            mark_passthrough_response(&mut response, config);
         }
 
         Ok(ForwardResult {
@@ -1418,8 +1568,7 @@ fn build_streaming_response(
     request_start: std::time::Instant,
     prior_attempts: Vec<AttemptInfo>,
     append_model_info: bool,
-    is_responses_passthrough: bool,
-    is_claude_passthrough: bool,
+    passthrough_header: Option<&str>,
     raw_protocol: Option<Value>,
     middleware: &[Arc<dyn super::middleware::ForwarderMiddleware>],
     ctx: &RequestContext,
@@ -1445,6 +1594,16 @@ fn build_streaming_response(
     let seen_first_chunk = Arc::new(AtomicBool::new(false));
     let logged = Arc::new(AtomicBool::new(false));
     let model_info = model_info_label(entry.model.as_str(), entry.channel_name.as_deref());
+
+    // 判定协议类型（用于流式处理分支）
+    // 通过响应头反查配置，避免硬编码字符串
+    let passthrough_protocol = passthrough_header.and_then(passthrough_config_from_header);
+    let is_responses_passthrough = passthrough_protocol
+        .map(|c| matches!(c.caller_kind, CallerKind::Responses))
+        .unwrap_or(false);
+    let is_claude_passthrough = passthrough_protocol
+        .map(|c| matches!(c.caller_kind, CallerKind::ClaudeMessages))
+        .unwrap_or(false);
     let mut sse_buffer = String::new();
     let mut sse_utf8_remainder: Vec<u8> = Vec::new();
     let mut raw_stream_buffer = String::new();
@@ -2963,8 +3122,7 @@ fn split_raw_protocol_for_usage_log(raw_protocol: Option<&Value>) -> (String, St
     if let Some(obj) = raw_out.as_object_mut() {
         obj.remove("gateway_body");
         obj.remove("upstream_body");
-        obj.remove("is_responses_passthrough");
-        obj.remove("is_claude_passthrough");
+        obj.remove("passthrough_header");
     }
 
     let has_out = raw_protocol
@@ -3378,8 +3536,7 @@ data:{"type":"message_stop"}
             "responses",
             "https://example.com/v1/responses?api_key=raw",
             false,
-            true,
-            false,
+            Some("x-api-switch-responses-passthrough"),
             &gateway_body,
             &upstream_body,
         );
@@ -3435,8 +3592,7 @@ data:{"type":"message_stop"}
             "channel_api_type": "responses",
             "url": "https://example.com/v1/responses?api_key=raw",
             "is_stream": false,
-            "is_responses_passthrough": true,
-            "is_claude_passthrough": false,
+            "passthrough_header": "x-api-switch-responses-passthrough",
             "gateway_body": {"model": "auto", "input": "原始入口请求"},
             "upstream_body": {"model": "gpt-5.5", "input": "原始上游请求"},
             "status_code": 200,

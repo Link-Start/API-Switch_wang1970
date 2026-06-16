@@ -804,7 +804,131 @@ Azure 的输出边界与 OpenAI Chat 基本一致，但有一条额外限制：
 
 - 请求体中不应保留 `model`，因为 deployment 已经在 URL 中表达。
 
-除此之外，仍按“OpenAI Chat 标准字段白名单 + 显式扩展字段白名单 + 语义翻译表”执行收口。
+除此之外，仍按"OpenAI Chat 标准字段白名单 + 显式扩展字段白名单 + 语义翻译表"执行收口。
+
+### 9.10 同协议直穿优化
+
+当入口协议与上游协议一致时（如 Claude → Claude、OpenAI → OpenAI），API Switch 支持**同协议直穿**，跳过中间协议转换，直接转发原始请求，减少协议转换损耗和信息损失。
+
+#### 9.10.1 设计原则
+
+- **最小侵入**：直穿是可选优化路径，不影响转换路径的正确性
+- **配置驱动**：所有协议的直穿行为由统一配置表定义，新增协议只需添加配置项
+- **业务逻辑保留**：直穿只跳过协议转换，不跳过路由、认证、冷却、日志等核心业务逻辑
+- **全局设置优先**：用户全局设置（如 `disable_reasoning`）在直穿场景下仍然生效
+
+#### 9.10.2 统一配置表模型
+
+协议直穿通过 `PassthroughConfig` 配置表驱动，每个协议定义一个配置项：
+
+```rust
+struct PassthroughConfig {
+    caller_kind: CallerKind,           // 入口协议类型
+    upstream_types: &[&str],           // 匹配的上游协议类型（支持多个别名）
+    raw_field: &str,                   // 原始请求暂存字段名
+    header_name: HeaderName,           // 响应头标记名
+    skip_middleware: bool,             // 是否跳过中间件（如 stream_options 注入）
+}
+```
+
+当前支持的协议直穿配置：
+
+| 入口协议 | 上游类型 | 暂存字段 | 响应头标记 | 跳过中间件 |
+|---------|---------|---------|-----------|----------|
+| OpenAI Chat | `openai` | `__as_raw_openai_req` | `x-api-switch-openai-passthrough` | 否 |
+| Claude Messages | `anthropic` | `__as_raw_claude_req` | `x-api-switch-claude-passthrough` | 是 |
+| Gemini Native | `gemini` | `__as_raw_gemini_req` | `x-api-switch-gemini-passthrough` | 是 |
+| Azure Chat | `azure` | `__as_raw_azure_req` | `x-api-switch-azure-passthrough` | 否 |
+| Responses | `responses` | `__as_raw_responses_req` | `x-api-switch-responses-passthrough` | 是 |
+
+注：数据库层将 `"custom"` 规范化为 `"openai"`，将 `"claude"` 规范化为 `"anthropic"`，因此配置表只需匹配规范化后的值。
+
+#### 9.10.3 直穿判定条件
+
+同时满足以下三个条件时启用直穿：
+
+1. **入口协议在配置表中** - `PASSTHROUGH_CONFIGS.get(caller_kind)` 存在
+2. **上游类型匹配** - `channel.api_type` 在配置的 `upstream_types` 列表中
+3. **原始请求已暂存** - 请求体中存在对应的 `raw_field` 字段
+
+判定逻辑在 `should_passthrough()` 函数中实现。
+
+#### 9.10.4 执行流程
+
+**请求路径**：
+
+1. handlers 层保存原始请求到暂存字段（如 `__as_raw_claude_req`）
+2. 按标准流程将请求转换为中间协议（用于路由判断）
+3. forwarder 层判定是否启用直穿
+4. 如启用直穿：
+   - 从暂存字段恢复原始请求
+   - 注入实际模型名（支持 AUTO 路由）
+   - 应用全局设置（如 `disable_reasoning`）
+   - 根据配置决定是否跳过中间件
+   - 清理所有暂存字段
+   - 直接发送到上游
+5. 如不启用直穿：
+   - 使用中间协议进行标准转换
+   - 执行所有中间件
+   - 清理暂存字段后发送
+
+**响应路径**：
+
+1. forwarder 在响应头注入直穿标记（如 `x-api-switch-claude-passthrough: true`）
+2. 流式处理通过响应头反查配置，避免硬编码协议判定
+3. 响应体按原协议格式返回，不经过中间协议转换
+
+#### 9.10.5 中间件跳过策略
+
+`skip_middleware` 字段控制是否跳过 ForwarderMiddleware：
+
+- **true（跳过）**：上游不认识 OpenAI 专有字段
+  - 场景：Claude 不支持 `stream_options`，Gemini 原生端点不支持 `stream_options`
+  - 避免向上游注入无效字段导致请求失败
+  
+- **false（不跳过）**：上游原生兼容 OpenAI
+  - 场景：OpenAI/Azure/Custom 支持 `stream_options`
+  - 保留标准中间件注入，确保功能完整
+
+未来如需细粒度控制（只跳过特定中间件），可扩展为位图或枚举集合。
+
+#### 9.10.6 与转换路径的关系
+
+- **直穿路径**：入口协议 → 暂存原始请求 → 恢复原始请求 → 直接转发
+- **转换路径**：入口协议 → 中间协议 → 目标协议适配器 → 转发
+
+两条路径共享：
+- 路由逻辑（模型池、冷却、熔断）
+- 认证逻辑（API Key、Access Token）
+- 日志记录（usage_logs）
+- 全局设置（`disable_reasoning`、模型名注入）
+
+直穿路径特有：
+- 跳过协议转换损耗
+- 保留原始协议的高阶语义（如 Claude thinking、Responses reasoning）
+- 避免中间协议压扁风险
+
+#### 9.10.7 扩展新协议
+
+新增协议直穿只需三步：
+
+1. **handlers 层**：保存原始请求到暂存字段
+   ```rust
+   body_with_raw.insert("__as_raw_newprotocol_req", body.clone());
+   ```
+
+2. **配置表**：添加配置项
+   ```rust
+   m.insert(CallerKind::NewProtocol, PassthroughConfig {
+       caller_kind: CallerKind::NewProtocol,
+       upstream_types: &["newprotocol"],
+       raw_field: "__as_raw_newprotocol_req",
+       header_name: HeaderName::from_static("x-api-switch-newprotocol-passthrough"),
+       skip_middleware: true,  // 根据实际情况设置
+   });
+   ```
+
+3. **验证**：forwarder 核心逻辑自动处理，无需修改
 
 ---
 

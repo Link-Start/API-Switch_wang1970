@@ -34,7 +34,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 /// 调用方类型：标识代理被哪个入口 handler 调用
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CallerKind {
     OpenAiChat,
     ClaudeMessages,

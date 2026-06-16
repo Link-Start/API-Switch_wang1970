@@ -39,6 +39,15 @@ fn normalize_requested_model(model: Option<&str>) -> String {
     }
 }
 
+/// 识别 forwarder 返回的 Gemini 同协议直穿响应。
+/// 直穿响应已经是 Gemini 原生 JSON/SSE，handler 不应再做 OpenAI→Gemini 转换。
+fn is_gemini_passthrough_response(resp: &axum::response::Response) -> bool {
+    resp.headers()
+        .get("x-api-switch-gemini-passthrough")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("true"))
+}
+
 async fn load_sorted_entries(
     state: &ProxyState,
 ) -> Result<Vec<crate::database::ApiEntry>, ProxyError> {
@@ -245,12 +254,19 @@ pub async fn handle_chat_completions(
         .await
         .map_err(|e| ProxyError::Internal(format!("Failed to read body: {e}")))?;
 
-    let mut body: Value = serde_json::from_slice(&body_bytes)
+    let body: Value = serde_json::from_slice(&body_bytes)
         .map_err(|e| ProxyError::Internal(format!("Failed to parse JSON: {e}")))?;
 
-    let requested_model = normalize_requested_model(body.get("model").and_then(|m| m.as_str()));
+    // 保存原始 OpenAI 请求（用于同协议直穿）
+    let mut body_with_raw = body.clone();
+    if let Some(obj) = body_with_raw.as_object_mut() {
+        obj.insert("__as_raw_openai_req".to_string(), body.clone());
+    }
 
-    let is_stream = body
+    let requested_model =
+        normalize_requested_model(body_with_raw.get("model").and_then(|m| m.as_str()));
+
+    let is_stream = body_with_raw
         .get("stream")
         .and_then(|s| s.as_bool())
         .unwrap_or(false);
@@ -282,7 +298,7 @@ pub async fn handle_chat_completions(
     forwarder::forward_with_retry(
         &state,
         &resolved,
-        &body,
+        &body_with_raw,
         headers,
         &requested_model,
         access_key.as_ref(),
@@ -536,7 +552,13 @@ async fn handle_gemini_generate_content(
         .map_err(|e| ProxyError::Internal(format!("Failed to parse JSON: {e}")))?;
 
     let openai_body = gemini_to_openai_request(&body);
+
+    // 保存原始 Gemini 请求（用于同协议直穿）
     let mut openai_body = openai_body;
+    if let Some(obj) = openai_body.as_object_mut() {
+        obj.insert("__as_raw_gemini_req".to_string(), body.clone());
+    }
+
     openai_body["model"] = json!(model);
 
     let requested_model = normalize_requested_model(Some(model));
@@ -574,6 +596,10 @@ async fn handle_gemini_generate_content(
     )
     .await?;
 
+    if is_gemini_passthrough_response(&response) {
+        return Ok(response);
+    }
+
     let body_bytes = axum::body::to_bytes(response.into_body(), 32 * 1024 * 1024)
         .await
         .map_err(|e| ProxyError::Internal(format!("Failed to read response: {e}")))?;
@@ -609,7 +635,13 @@ async fn handle_gemini_stream_generate_content(
         .map_err(|e| ProxyError::Internal(format!("Failed to parse JSON: {e}")))?;
 
     let openai_body = gemini_to_openai_request(&body);
+
+    // 保存原始 Gemini 请求（用于同协议直穿）
     let mut openai_body = openai_body;
+    if let Some(obj) = openai_body.as_object_mut() {
+        obj.insert("__as_raw_gemini_req".to_string(), body.clone());
+    }
+
     openai_body["model"] = json!(model);
     openai_body["stream"] = json!(true);
 
@@ -647,6 +679,10 @@ async fn handle_gemini_stream_generate_content(
         caller_kind,
     )
     .await?;
+
+    if is_gemini_passthrough_response(&response) {
+        return Ok(response);
+    }
 
     // 将 forwarder 返回的 OpenAI SSE 流转换为 Gemini 原生 SSE 流
     transform_openai_sse_to_gemini_stream(response).map_err(ProxyError::from)
@@ -701,6 +737,12 @@ pub async fn handle_azure_chat(
         .map_err(|e| ProxyError::Internal(format!("Failed to parse JSON: {e}")))?;
 
     let openai_body = azure_to_openai_request(&body, &deployment);
+
+    // 保存原始 Azure 请求（用于同协议直穿）
+    let mut openai_body = openai_body;
+    if let Some(obj) = openai_body.as_object_mut() {
+        obj.insert("__as_raw_azure_req".to_string(), body.clone());
+    }
 
     let requested_model =
         normalize_requested_model(openai_body.get("model").and_then(|m| m.as_str()));
@@ -812,6 +854,21 @@ mod tests {
         assert_eq!(value["id"], "claude-3-5-sonnet");
         assert_eq!(value["display_name"], "Claude Sonnet");
         assert_eq!(value["created_at"], "2023-11-14T22:13:20+00:00");
+    }
+
+    #[test]
+    fn gemini_passthrough_response_header_requires_true_value() {
+        let response = axum::response::Response::builder()
+            .header("x-api-switch-gemini-passthrough", "true")
+            .body(axum::body::Body::empty())
+            .expect("response");
+        assert!(is_gemini_passthrough_response(&response));
+
+        let response = axum::response::Response::builder()
+            .header("x-api-switch-gemini-passthrough", "false")
+            .body(axum::body::Body::empty())
+            .expect("response");
+        assert!(!is_gemini_passthrough_response(&response));
     }
 
     #[test]

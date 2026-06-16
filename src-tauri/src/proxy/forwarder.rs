@@ -73,51 +73,66 @@ static PASSTHROUGH_CONFIGS: Lazy<HashMap<CallerKind, PassthroughConfig>> = Lazy:
     let mut m = HashMap::new();
 
     // Responses API 直穿配置
-    m.insert(CallerKind::Responses, PassthroughConfig {
-        caller_kind: CallerKind::Responses,
-        upstream_types: &["responses"],
-        raw_field: "__as_raw_responses_req",
-        header_name: HeaderName::from_static("x-api-switch-responses-passthrough"),
-        skip_middleware: true,  // Responses 专有字段，跳过 OpenAI 中间件
-    });
+    m.insert(
+        CallerKind::Responses,
+        PassthroughConfig {
+            caller_kind: CallerKind::Responses,
+            upstream_types: &["responses"],
+            raw_field: "__as_raw_responses_req",
+            header_name: HeaderName::from_static("x-api-switch-responses-passthrough"),
+            skip_middleware: true, // Responses 专有字段，跳过 OpenAI 中间件
+        },
+    );
 
     // Claude Messages 直穿配置
     // 注意：数据库层会将 "claude" 规范化为 "anthropic"，因此只需匹配 "anthropic"
-    m.insert(CallerKind::ClaudeMessages, PassthroughConfig {
-        caller_kind: CallerKind::ClaudeMessages,
-        upstream_types: &["anthropic"],  // 已包含 claude（规范化后）
-        raw_field: "__as_raw_claude_req",
-        header_name: HeaderName::from_static("x-api-switch-claude-passthrough"),
-        skip_middleware: true,  // Claude 不认识 stream_options
-    });
+    m.insert(
+        CallerKind::ClaudeMessages,
+        PassthroughConfig {
+            caller_kind: CallerKind::ClaudeMessages,
+            upstream_types: &["anthropic"], // 已包含 claude（规范化后）
+            raw_field: "__as_raw_claude_req",
+            header_name: HeaderName::from_static("x-api-switch-claude-passthrough"),
+            skip_middleware: true, // Claude 不认识 stream_options
+        },
+    );
 
     // OpenAI Chat 直穿配置
     // 注意：数据库层会将 "custom" 规范化为 "openai"，因此只需匹配 "openai"
-    m.insert(CallerKind::OpenAiChat, PassthroughConfig {
-        caller_kind: CallerKind::OpenAiChat,
-        upstream_types: &["openai"],  // 已包含 custom（规范化后）
-        raw_field: "__as_raw_openai_req",
-        header_name: HeaderName::from_static("x-api-switch-openai-passthrough"),
-        skip_middleware: false,  // 不跳过，stream_options 是 OpenAI 原生字段
-    });
+    m.insert(
+        CallerKind::OpenAiChat,
+        PassthroughConfig {
+            caller_kind: CallerKind::OpenAiChat,
+            upstream_types: &["openai"], // 已包含 custom（规范化后）
+            raw_field: "__as_raw_openai_req",
+            header_name: HeaderName::from_static("x-api-switch-openai-passthrough"),
+            skip_middleware: false, // 不跳过，stream_options 是 OpenAI 原生字段
+        },
+    );
 
     // Gemini Native 直穿配置
-    m.insert(CallerKind::GeminiNative, PassthroughConfig {
-        caller_kind: CallerKind::GeminiNative,
-        upstream_types: &["gemini"],
-        raw_field: "__as_raw_gemini_req",
-        header_name: HeaderName::from_static("x-api-switch-gemini-passthrough"),
-        skip_middleware: true,  // Gemini native 不认识 stream_options
-    });
+    m.insert(
+        CallerKind::GeminiNative,
+        PassthroughConfig {
+            caller_kind: CallerKind::GeminiNative,
+            upstream_types: &["gemini"],
+            raw_field: "__as_raw_gemini_req",
+            header_name: HeaderName::from_static("x-api-switch-gemini-passthrough"),
+            skip_middleware: true, // Gemini native 不认识 stream_options
+        },
+    );
 
     // Azure Chat 直穿配置
-    m.insert(CallerKind::AzureChat, PassthroughConfig {
-        caller_kind: CallerKind::AzureChat,
-        upstream_types: &["azure"],
-        raw_field: "__as_raw_azure_req",
-        header_name: HeaderName::from_static("x-api-switch-azure-passthrough"),
-        skip_middleware: false,  // 不跳过，Azure 兼容 OpenAI
-    });
+    m.insert(
+        CallerKind::AzureChat,
+        PassthroughConfig {
+            caller_kind: CallerKind::AzureChat,
+            upstream_types: &["azure"],
+            raw_field: "__as_raw_azure_req",
+            header_name: HeaderName::from_static("x-api-switch-azure-passthrough"),
+            skip_middleware: false, // 不跳过，Azure 兼容 OpenAI
+        },
+    );
 
     m
 });
@@ -165,11 +180,7 @@ fn passthrough_config_from_header(header_value: &str) -> Option<&'static Passthr
 ///
 /// 注意：如果暂存字段不存在（理论上不应出现，因为 should_passthrough 已检查），
 /// 则 fallback 到原始 body，但这表明配置逻辑存在漏洞。
-fn restore_raw_request(
-    body: &Value,
-    config: &PassthroughConfig,
-    actual_model: &str,
-) -> Value {
+fn restore_raw_request(body: &Value, config: &PassthroughConfig, actual_model: &str) -> Value {
     let mut raw = body
         .get(config.raw_field)
         .cloned()
@@ -200,14 +211,10 @@ fn clean_all_raw_fields(body: &mut Value) {
 /// 为响应添加直穿标记头
 ///
 /// 用于告知上层（handler）这是直穿响应，无需二次转换。
-fn mark_passthrough_response(
-    response: &mut axum::response::Response,
-    config: &PassthroughConfig,
-) {
-    response.headers_mut().insert(
-        config.header_name.clone(),
-        HeaderValue::from_static("true"),
-    );
+fn mark_passthrough_response(response: &mut axum::response::Response, config: &PassthroughConfig) {
+    response
+        .headers_mut()
+        .insert(config.header_name.clone(), HeaderValue::from_static("true"));
 }
 
 #[derive(Debug, Default)]
@@ -1216,7 +1223,10 @@ async fn forward_single(
     // role:"system" → 400。注意：不透传 authorization（鉴权用渠道自己的 api_key），
     // 也不透传 host/content-length/connection 等逐跳/长度相关头。
     // 暂时保留 Claude 特殊处理（P1 再配置化）
-    if matches!(passthrough_config.map(|c| c.caller_kind), Some(CallerKind::ClaudeMessages)) {
+    if matches!(
+        passthrough_config.map(|c| c.caller_kind),
+        Some(CallerKind::ClaudeMessages)
+    ) {
         const PASSTHROUGH_HEADER_PREFIXES: &[&str] = &["x-stainless-", "x-claude-code-"];
         // 注意：不含 anthropic-version —— apply_auth 已设置（reqwest 的 header() 是
         // 追加而非覆盖，重复透传会产生重复头）。仅透传 apply_auth 未设置的身份/能力头。
@@ -1291,8 +1301,7 @@ async fn forward_single(
     let status_code = status as i32;
 
     if is_stream {
-        let needs_transform =
-            passthrough_config.is_none() && adapter.needs_sse_transform();
+        let needs_transform = passthrough_config.is_none() && adapter.needs_sse_transform();
         let append_model_info = should_append_model_info(state, &body, caller_kind);
         let mut response = build_streaming_response(
             state,
@@ -1365,6 +1374,7 @@ async fn forward_single(
             match config.caller_kind {
                 CallerKind::Responses => responses_response_has_valid_output(&response_body),
                 CallerKind::ClaudeMessages => claude_response_has_valid_output(&response_body),
+                CallerKind::GeminiNative => gemini_response_has_valid_output(&response_body),
                 _ => nonstream_response_has_valid_output(&response_body),
             }
         } else {
@@ -1464,6 +1474,51 @@ fn nonstream_response_has_valid_output(body: &Value) -> bool {
             });
 
             has_content || has_tool_calls || has_function_call || has_reasoning
+        })
+}
+
+/// 校验直通的 Gemini 原生非流式响应是否有有效输出。
+/// Gemini generateContent 响应形如 `{"candidates":[{"content":{"parts":[...]}}]}`，
+/// 与 OpenAI 的 `choices[]` 结构不同，需独立判断。
+fn gemini_response_has_valid_output(body: &Value) -> bool {
+    body.get("candidates")
+        .and_then(Value::as_array)
+        .is_some_and(|candidates| {
+            candidates.iter().any(|candidate| {
+                candidate
+                    .pointer("/content/parts")
+                    .and_then(Value::as_array)
+                    .is_some_and(|parts| {
+                        parts.iter().any(|part| {
+                            let has_text = part
+                                .get("text")
+                                .and_then(Value::as_str)
+                                .is_some_and(|text| !text.is_empty());
+                            let has_function_call =
+                                part.get("functionCall").is_some_and(|v| !v.is_null());
+                            let has_inline_data =
+                                part.get("inlineData").is_some_and(|v| !v.is_null());
+                            let has_file_data = part.get("fileData").is_some_and(|v| !v.is_null());
+
+                            // 未知/未来 Gemini part 类型：保守视为有效，避免误判直通响应无效。
+                            let has_unknown_nonempty_part = part.as_object().is_some_and(|obj| {
+                                obj.iter().any(|(key, value)| {
+                                    key != "text"
+                                        && key != "functionCall"
+                                        && key != "inlineData"
+                                        && key != "fileData"
+                                        && !value.is_null()
+                                })
+                            });
+
+                            has_text
+                                || has_function_call
+                                || has_inline_data
+                                || has_file_data
+                                || has_unknown_nonempty_part
+                        })
+                    })
+            })
         })
 }
 
@@ -4391,6 +4446,51 @@ data: [DONE]\n",
         assert!(is_completed_stream_success(200, false, false, false, 5));
         assert!(!is_completed_stream_success(200, true, true, false, 5));
         assert!(!is_completed_stream_success(502, false, true, false, 5));
+    }
+
+    #[test]
+    fn gemini_passthrough_response_accepts_native_output_parts() {
+        let text = serde_json::json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": "ok"}],
+                    "role": "model"
+                },
+                "finishReason": "STOP"
+            }]
+        });
+        assert!(gemini_response_has_valid_output(&text));
+
+        let function_call = serde_json::json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "functionCall": {
+                            "name": "lookup",
+                            "args": {"q": "x"}
+                        }
+                    }],
+                    "role": "model"
+                }
+            }]
+        });
+        assert!(gemini_response_has_valid_output(&function_call));
+    }
+
+    #[test]
+    fn gemini_passthrough_response_rejects_empty_native_output() {
+        let empty_text = serde_json::json!({
+            "candidates": [{
+                "content": {"parts": [{"text": ""}], "role": "model"},
+                "finishReason": "STOP"
+            }]
+        });
+        assert!(!gemini_response_has_valid_output(&empty_text));
+
+        let no_parts = serde_json::json!({
+            "candidates": [{"content": {"parts": []}}]
+        });
+        assert!(!gemini_response_has_valid_output(&no_parts));
     }
 
     #[test]

@@ -12,6 +12,32 @@ API Switch 是一个本地优先的 AI API 管理与转发中心。它把 OpenAI
 
 ---
 
+## 界面预览
+
+<table>
+  <tr>
+    <td width="50%"><img src="ui-desktop.png" alt="API Switch 桌面端界面" /></td>
+    <td width="50%"><img src="ui-web.png" alt="API Switch Web Admin 界面" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>桌面端</b></td>
+    <td align="center"><b>Web Admin</b></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td width="50%"><img src="ui-phone.jpg" alt="API Switch Android App 界面" /></td>
+    <td width="50%"><img src="ui-phone-web.jpg" alt="API Switch 手机 Web Admin 界面" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Android App</b></td>
+    <td align="center"><b>手机 Web Admin</b></td>
+  </tr>
+</table>
+
+---
+
 ## 核心能力
 
 | 能力 | 说明 |

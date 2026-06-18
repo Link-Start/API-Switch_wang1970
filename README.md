@@ -12,6 +12,32 @@ API Switch is a local-first AI API management and forwarding hub. It gives your 
 
 ---
 
+## UI Preview
+
+<table>
+  <tr>
+    <td width="50%"><img src="ui-desktop.png" alt="API Switch desktop UI" /></td>
+    <td width="50%"><img src="ui-web.png" alt="API Switch Web Admin UI" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Desktop</b></td>
+    <td align="center"><b>Web Admin</b></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td width="50%"><img src="ui-phone.jpg" alt="API Switch Android app UI" /></td>
+    <td width="50%"><img src="ui-phone-web.jpg" alt="API Switch mobile Web Admin UI" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Android App</b></td>
+    <td align="center"><b>Mobile Web Admin</b></td>
+  </tr>
+</table>
+
+---
+
 ## Core Capabilities
 
 | Capability | Description |

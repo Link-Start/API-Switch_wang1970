@@ -63,7 +63,7 @@ pub fn list_entries(
     app: crate::AppEventHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<ApiEntry>, AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.list_entries()
 }
 
@@ -77,7 +77,7 @@ pub fn list_entries_paginated(
     search: Option<String>,
     channel_id: Option<String>,
 ) -> Result<PaginatedResult<ApiEntry>, AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.list_entries_paginated(
         page,
         page_size,
@@ -95,7 +95,7 @@ pub async fn toggle_entry(
     enabled: bool,
     pin_to_top: Option<bool>,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.toggle_entry(&id, enabled, pin_to_top.unwrap_or(false))
 }
 
@@ -108,7 +108,7 @@ pub async fn batch_toggle_entries(
     ids: Vec<String>,
     enabled: bool,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.batch_toggle_entries(&ids, enabled)
 }
 
@@ -118,7 +118,7 @@ pub async fn reorder_entries(
     state: State<'_, AppState>,
     ordered_ids: Vec<String>,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.reorder_entries(&ordered_ids)
 }
 
@@ -128,7 +128,7 @@ pub async fn delete_entry(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.delete_entry(&id)
 }
 
@@ -138,7 +138,7 @@ pub async fn create_entry(
     state: State<'_, AppState>,
     params: CreateEntryParams,
 ) -> Result<ApiEntry, AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.create_entry(params.into())
 }
 
@@ -148,7 +148,7 @@ pub async fn backfill_entry_catalog_meta(
     state: State<'_, AppState>,
     items: Vec<EntryCatalogMetaUpdate>,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     let items: Vec<pool_service::CatalogMetaUpdate> = items
         .into_iter()
         .map(|item| pool_service::CatalogMetaUpdate {
@@ -170,7 +170,7 @@ pub async fn test_entry_latency(
     entry_id: String,
     model_score: f64,
 ) -> Result<TestResult, AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     let result = api.test_entry_latency(&entry_id, model_score).await?;
     Ok(TestResult {
         status: result.status,
@@ -187,7 +187,7 @@ pub async fn update_entry_response_ms(
     entry_id: String,
     response_ms: String,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.update_entry_response_ms(&entry_id, &response_ms)
 }
 
@@ -196,7 +196,7 @@ pub fn get_all_groups(
     app: crate::AppEventHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.get_all_groups()
 }
 
@@ -207,7 +207,7 @@ pub async fn update_entry_display_name(
     id: String,
     display_name: String,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.update_entry_display_name(&id, &display_name)
 }
 
@@ -218,6 +218,6 @@ pub async fn update_entry_group(
     id: String,
     group_name: String,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.update_entry_group(&id, &group_name)
 }

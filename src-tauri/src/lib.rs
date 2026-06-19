@@ -125,7 +125,7 @@ fn run_gui(runtime_mode: RuntimeMode) {
                 let settings = app_state.settings.read().await.clone();
                 let admin_router = admin::build_combined_router(
                     &settings,
-                    admin::AdminState::new_runtime(app_state.inner().clone(), handle.clone()),
+                    admin::AdminState::new_runtime(app_state.inner().clone(), Some(handle.clone())),
                 );
                 if settings.proxy_enabled {
                     let port = settings.listen_port;
@@ -151,7 +151,7 @@ fn run_gui(runtime_mode: RuntimeMode) {
 
                 if let Err(e) = admin::start_admin_if_enabled(
                     app_state.inner().clone(),
-                    handle.clone(),
+                    Some(handle.clone()),
                     app_state.admin.clone(),
                 )
                 .await

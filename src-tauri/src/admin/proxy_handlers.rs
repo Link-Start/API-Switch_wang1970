@@ -20,12 +20,10 @@ fn server_api_from_admin(state: &AdminState) -> Result<ServerApi, AdminError> {
         .as_ref()
         .ok_or_else(|| AdminError::Internal("AdminState missing runtime".to_string()))?
         .clone();
-    let app_handle = state
-        .app_handle
-        .as_ref()
-        .ok_or_else(|| AdminError::Internal("AdminState missing app handle".to_string()))?
-        .clone();
-    Ok(ServerApi::new(runtime, app_handle))
+    Ok(ServerApi::new(
+            runtime,
+            state.app_handle.clone(),
+        ))
 }
 
 /// Get the current proxy status.

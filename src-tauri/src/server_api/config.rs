@@ -17,7 +17,7 @@ impl ServerApi {
 
     /// 完整更新设置，触发 proxy/admin 重载等副作用。
     pub async fn update_settings(&self, settings: AppSettings) -> Result<AppSettings, AppError> {
-        config::update_settings_from_state(self.app.clone(), self.state(), settings).await
+        config::update_settings_from_state(self.app.clone().unwrap_or_default(), self.state(), settings).await
     }
 
     /// 完整更新设置（异步重载），返回重启信息。
@@ -28,8 +28,7 @@ impl ServerApi {
         settings: AppSettings,
         restart_async: bool,
     ) -> Result<Option<crate::admin::RestartInfo>, AppError> {
-        config::apply_settings_update_with_restart(
-            self.app.clone(),
+        config::apply_settings_update_with_restart(self.app.clone().unwrap_or_default(),
             self.state(),
             settings,
             restart_async,
@@ -41,6 +40,6 @@ impl ServerApi {
     ///
     /// 注意：`web_admin_password` 保护逻辑（空密码时保持原值）由调用方负责。
     pub async fn patch_settings(&self, patch: serde_json::Value) -> Result<AppSettings, AppError> {
-        config::patch_settings_from_state(self.app.clone(), self.state(), patch).await
+        config::patch_settings_from_state(self.app.clone().unwrap_or_default(), self.state(), patch).await
     }
 }

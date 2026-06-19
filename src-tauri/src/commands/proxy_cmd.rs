@@ -36,7 +36,7 @@ pub async fn start_proxy_from_state(
     );
     let admin_router = crate::admin::build_combined_router(
         &settings,
-        crate::admin::AdminState::new_runtime(state.clone(), app.clone()),
+        crate::admin::AdminState::new_runtime(state.clone(), Some(app.clone())),
     );
     server
         .start_with_admin(admin_router)
@@ -96,13 +96,13 @@ pub async fn start_proxy(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ProxyStatus, AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.start_proxy().await
 }
 
 #[tauri::command]
 pub async fn stop_proxy(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.stop_proxy().await
 }
 
@@ -111,6 +111,6 @@ pub async fn get_proxy_status(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ProxyStatus, AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.proxy_status().await
 }

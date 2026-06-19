@@ -94,7 +94,7 @@ pub fn update_channel(
     state: State<'_, AppState>,
     params: crate::services::channel_service::UpdateChannelParams,
 ) -> Result<Channel, AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.update_channel(params)
 }
 
@@ -104,7 +104,7 @@ pub fn update_channel_response_ms(
     state: State<'_, AppState>,
     params: UpdateResponseMsParams,
 ) -> Result<(), AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.update_channel_response_ms(&params.channel_id, &params.response_ms)
 }
 
@@ -113,7 +113,7 @@ pub fn list_channels(
     app: crate::AppEventHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<Channel>, AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.list_channels()
 }
 
@@ -124,7 +124,7 @@ pub fn list_channels_paginated(
     page: i32,
     page_size: i32,
 ) -> Result<PaginatedResult<Channel>, AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.list_channels_paginated(page, page_size)
 }
 
@@ -134,7 +134,7 @@ pub async fn create_channel(
     state: State<'_, AppState>,
     params: CreateChannelParams,
 ) -> Result<Channel, AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.create_channel(channel_service::CreateChannelParams {
         name: params.name,
         api_type: params.api_type,
@@ -150,7 +150,7 @@ pub async fn delete_channel(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.delete_channel(id)
 }
 
@@ -169,7 +169,7 @@ pub async fn test_channel(
     state: State<'_, AppState>,
     channel_id: String,
 ) -> Result<TestChannelResult, AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.test_channel(&channel_id).await
 }
 
@@ -197,7 +197,7 @@ pub async fn fetch_models(
     state: State<'_, AppState>,
     channel_id: String,
 ) -> Result<FetchModelsResult, AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.fetch_channel_models(channel_id).await
 }
 
@@ -221,7 +221,7 @@ pub async fn select_models(
             model_meta_en: item.model_meta_en,
         })
         .collect();
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.select_channel_models(&channel_id, &model_names, &available_models, &catalog_meta)
 }
 
@@ -448,6 +448,6 @@ pub async fn save_channel_with_models(
     state: State<'_, AppState>,
     params: channel_service::SaveChannelWithModelsParams,
 ) -> Result<channel_service::SaveChannelWithModelsResult, AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.save_channel_with_models(params)
 }

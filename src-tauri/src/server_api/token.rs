@@ -35,7 +35,7 @@ impl ServerApi {
 
     /// 删除指定 access key。
     pub fn delete_access_key(&self, id: &str) -> Result<(), AppError> {
-        crate::services::token_service::delete_access_key(&self.state().db, id, Some(self.app()))
+        crate::services::token_service::delete_access_key(&self.state().db, id, self.app.as_ref())
     }
 
     /// 切换 access key 的启用状态。
@@ -44,7 +44,7 @@ impl ServerApi {
             &self.state().db,
             id,
             enabled,
-            Some(self.app()),
+            self.app.as_ref(),
         )
     }
 }

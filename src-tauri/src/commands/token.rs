@@ -10,7 +10,7 @@ pub fn list_access_keys(
     app: crate::AppEventHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<AccessKey>, AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.list_access_keys()
 }
 
@@ -21,7 +21,7 @@ pub fn list_access_keys_paginated(
     page: i32,
     page_size: i32,
 ) -> Result<PaginatedResult<AccessKey>, AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.list_access_keys_paginated(page, page_size)
 }
 
@@ -31,7 +31,7 @@ pub fn create_access_key(
     state: State<'_, AppState>,
     name: String,
 ) -> Result<AccessKey, AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.create_access_key(&name)
 }
 
@@ -41,7 +41,7 @@ pub async fn delete_access_key(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.delete_access_key(&id)
 }
 
@@ -52,6 +52,6 @@ pub async fn toggle_access_key(
     id: String,
     enabled: bool,
 ) -> Result<(), AppError> {
-    let api = ServerApi::new(state.inner().clone(), app);
+    let api = ServerApi::new(state.inner().clone(), Some(app));
     api.toggle_access_key(&id, enabled)
 }

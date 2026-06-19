@@ -39,20 +39,20 @@ impl ServerApi {
     /// 创建新 channel。
     pub fn create_channel(&self, params: CreateChannelParams) -> Result<Channel, AppError> {
         let channel = channel_service::create_channel(&self.state().db, params)?;
-        crate::event::emit(self.app(), "channels-changed");
+        self.emit_event("channels-changed");
         Ok(channel)
     }
 
     /// 更新 channel，同时触发前端事件。
     pub fn update_channel(&self, params: UpdateChannelParams) -> Result<Channel, AppError> {
-        channel_service::update_channel(&self.state().db, Some(self.app()), params)
+        channel_service::update_channel(&self.state().db, self.app.as_ref(), params)
     }
 
     /// 删除 channel，同时触发前端事件。
     pub fn delete_channel(&self, id: String) -> Result<(), AppError> {
-        let result = channel_service::delete_channel(&self.state().db, Some(self.app()), id);
+        let result = channel_service::delete_channel(&self.state().db, self.app.as_ref(), id);
         if result.is_ok() {
-            crate::event::emit(self.app(), "entries-changed");
+            self.emit_event("entries-changed");
         }
         result
     }
@@ -71,7 +71,7 @@ impl ServerApi {
             },
         );
         if result.is_ok() {
-            crate::event::emit(self.app(), "channels-changed");
+            self.emit_event("channels-changed");
         }
         result
     }
@@ -94,8 +94,8 @@ impl ServerApi {
         )?;
         crate::state_version::bump("channel");
         crate::state_version::bump("pool");
-        crate::event::emit(self.app(), "channels-changed");
-        crate::event::emit(self.app(), "entries-changed");
+        self.emit_event("channels-changed");
+        self.emit_event("entries-changed");
         Ok(())
     }
 
@@ -125,7 +125,7 @@ impl ServerApi {
                 .update_channel_response_ms(channel_id, &result.latency_ms.to_string());
             let _ = channel_service::update_channel(
                 &self.state().db,
-                Some(self.app()),
+                self.app.as_ref(),
                 UpdateChannelParams {
                     id: channel_id.to_string(),
                     name: None,
@@ -139,7 +139,7 @@ impl ServerApi {
         } else {
             let _ = self.state().db.disable_channel(channel_id);
             crate::state_version::bump("channel");
-            crate::event::emit(self.app(), "channels-changed");
+            self.emit_event("channels-changed");
         }
 
         Ok(result)
@@ -150,6 +150,6 @@ impl ServerApi {
         &self,
         params: SaveChannelWithModelsParams,
     ) -> Result<SaveChannelWithModelsResult, AppError> {
-        channel_service::save_channel_with_models(&self.state().db, Some(self.app()), params)
+        channel_service::save_channel_with_models(&self.state().db, self.app.as_ref(), params)
     }
 }

@@ -29,14 +29,14 @@ pub struct AdminState {
 }
 
 impl AdminState {
-    pub fn new_runtime(runtime: AppState, app_handle: crate::AppEventHandle) -> Self {
+    pub fn new_runtime(runtime: AppState, app_handle: Option<crate::AppEventHandle>) -> Self {
         Self {
             db: runtime.db.clone(),
             settings: runtime.settings.clone(),
             login_sessions: Arc::new(RwLock::new(HashMap::new())),
             login_failures: Arc::new(Mutex::new(HashMap::new())),
             runtime: Some(runtime),
-            app_handle: Some(app_handle),
+            app_handle,
         }
     }
 
@@ -58,11 +58,7 @@ impl AdminState {
             .runtime
             .as_ref()
             .ok_or_else(|| AdminError::Internal("AdminState missing runtime".to_string()))?;
-        let app_handle = self
-            .app_handle
-            .as_ref()
-            .ok_or_else(|| AdminError::Internal("AdminState missing app handle".to_string()))?;
-        Ok(ServerApi::new(runtime.clone(), app_handle.clone()))
+        Ok(ServerApi::new(runtime.clone(), self.app_handle.clone()))
     }
 
     pub fn mark_token_dirty(&self) {
@@ -117,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn server_api_requires_app_handle() {
+    fn server_api_allows_missing_app_handle_for_headless_business_api() {
         let base = test_admin_state(None, None);
         let runtime = AppState {
             db: base.db.clone(),
@@ -130,11 +126,8 @@ mod tests {
         };
         let state = test_admin_state(Some(runtime), None);
 
-        let err = match state.server_api() {
-            Ok(_) => panic!("missing app handle should fail"),
-            Err(err) => err,
-        };
-
-        assert!(format!("{err:?}").contains("AdminState missing app handle"));
+        state
+            .server_api()
+            .expect("headless business API must not require an app shell handle");
     }
 }

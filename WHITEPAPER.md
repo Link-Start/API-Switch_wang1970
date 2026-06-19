@@ -123,6 +123,11 @@ Server-only 模式用于无 GUI 环境运行。启动参数或环境变量可绕
 
 该模式适合服务器、NAS、远程主机或只需要代理/API 管理服务的场景。
 
+Headless 构建不依赖 Tauri 壳层（	auri::AppHandle），使用零大小 stand-in AppEventHandle（#[derive(Clone, Default)]）。ServerApi 的 pp 字段为 Option<AppEventHandle>：
+- GUI 模式传入 Some(handle)，业务变更时通过 mit_event 向前端推送事件
+- Headless 模式传入 None，mit_event 静默跳过，所有业务逻辑（导入/导出/CRUD/设置）通过 ServerApi 正常执行，不受影响
+- AdminState::server_api() 不再要求 pp_handle 非空，headless 可直接构建 ServerApi
+
 ### 2.4 Android Mobile 构建基线
 
 Android 基线使用 Tauri v2 mobile 工程生成 Android 壳，当前只要求能完成工程生成和 APK 构建；真机代理监听、WebView 生命周期、cleartext/loopback 策略和 Android 客户端联调属于后续真机验证。

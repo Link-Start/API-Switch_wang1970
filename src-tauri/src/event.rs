@@ -9,7 +9,7 @@
 pub type AppEventHandle = tauri::AppHandle;
 
 #[cfg(not(feature = "gui"))]
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct AppEventHandle;
 
 /// Emit a frontend event. No-op when the handle is absent or in headless builds.

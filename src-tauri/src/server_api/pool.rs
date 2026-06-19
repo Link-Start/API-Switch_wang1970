@@ -47,7 +47,7 @@ impl ServerApi {
             pin_to_top,
         );
         if result.is_ok() {
-            crate::event::emit(self.app(), "entries-changed");
+            self.emit_event("entries-changed");
         }
         result
     }
@@ -61,7 +61,7 @@ impl ServerApi {
             enabled,
         );
         if result.is_ok() {
-            crate::event::emit(self.app(), "entries-changed");
+            self.emit_event("entries-changed");
         }
         result
     }
@@ -70,7 +70,7 @@ impl ServerApi {
     pub fn reorder_entries(&self, ordered_ids: &[String]) -> Result<(), AppError> {
         let result = pool_service::reorder_entries(&self.state().db, ordered_ids);
         if result.is_ok() {
-            crate::event::emit(self.app(), "entries-changed");
+            self.emit_event("entries-changed");
         }
         result
     }
@@ -79,7 +79,7 @@ impl ServerApi {
     pub fn delete_entry(&self, id: &str) -> Result<(), AppError> {
         let result = pool_service::delete_entry(&self.state().db, id);
         if result.is_ok() {
-            crate::event::emit(self.app(), "entries-changed");
+            self.emit_event("entries-changed");
         }
         result
     }
@@ -87,7 +87,7 @@ impl ServerApi {
     /// 创建新 API 入口。
     pub fn create_entry(&self, params: CreateEntryParams) -> Result<ApiEntry, AppError> {
         let entry = pool_service::create_entry(&self.state().db, params)?;
-        crate::event::emit(self.app(), "entries-changed");
+        self.emit_event("entries-changed");
         Ok(entry)
     }
 
@@ -98,7 +98,7 @@ impl ServerApi {
     ) -> Result<(), AppError> {
         let result = pool_service::backfill_entry_catalog_meta(&self.state().db, items);
         if result.is_ok() {
-            crate::event::emit(self.app(), "entries-changed");
+            self.emit_event("entries-changed");
         }
         result
     }
@@ -112,7 +112,7 @@ impl ServerApi {
         let result =
             pool_service::test_entry_latency(&self.state().db, entry_id, model_score).await;
         if result.is_ok() {
-            crate::event::emit(self.app(), "entries-changed");
+            self.emit_event("entries-changed");
         }
         result
     }
@@ -126,7 +126,7 @@ impl ServerApi {
         let result =
             pool_service::update_entry_response_ms(&self.state().db, entry_id, response_ms);
         if result.is_ok() {
-            crate::event::emit(self.app(), "entries-changed");
+            self.emit_event("entries-changed");
         }
         result
     }
@@ -140,7 +140,7 @@ impl ServerApi {
     pub fn update_entry_display_name(&self, id: &str, display_name: &str) -> Result<(), AppError> {
         let result = pool_service::update_entry_display_name(&self.state().db, id, display_name);
         if result.is_ok() {
-            crate::event::emit(self.app(), "entries-changed");
+            self.emit_event("entries-changed");
         }
         result
     }
@@ -149,7 +149,7 @@ impl ServerApi {
     pub fn update_entry_group(&self, id: &str, group_name: &str) -> Result<(), AppError> {
         let result = pool_service::update_entry_group(&self.state().db, id, group_name);
         if result.is_ok() {
-            crate::event::emit(self.app(), "entries-changed");
+            self.emit_event("entries-changed");
         }
         result
     }

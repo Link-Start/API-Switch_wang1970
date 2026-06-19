@@ -38,8 +38,8 @@ impl ServerApi {
 
         crate::state_version::bump("channel");
         crate::state_version::bump("pool");
-        crate::event::emit(self.app(), "channels-changed");
-        crate::event::emit(self.app(), "entries-changed");
+        self.emit_event("channels-changed");
+        self.emit_event("entries-changed");
 
         Ok(ImportResult {
             success: true,

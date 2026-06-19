@@ -26,7 +26,7 @@ async fn restart_proxy_if_running(
 
     let admin_router = crate::admin::build_combined_router(
         &settings,
-        crate::admin::AdminState::new_runtime(state.clone(), app.clone()),
+        crate::admin::AdminState::new_runtime(state.clone(), Some(app.clone())),
     );
     let new_server = crate::proxy::ProxyServer::new(
         settings.listen_port,
@@ -50,7 +50,7 @@ async fn restart_proxy_if_running(
         );
         let rollback_admin_router = crate::admin::build_combined_router(
             &restored_settings,
-            crate::admin::AdminState::new_runtime(state.clone(), app.clone()),
+            crate::admin::AdminState::new_runtime(state.clone(), Some(app.clone())),
         );
         rollback_server
             .start_with_admin(rollback_admin_router)
@@ -255,7 +255,7 @@ pub async fn apply_settings_update_with_restart(
 
             if let Err(e) = crate::admin::restart_admin(
                 state_for_restart.clone(),
-                app_for_restart.clone(),
+                Some(app_for_restart.clone()),
                 state_for_restart.admin.clone(),
             )
             .await
@@ -331,7 +331,7 @@ pub async fn update_settings(
     state: State<'_, AppState>,
     settings: AppSettings,
 ) -> Result<(), AppError> {
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.update_settings(settings).await?;
     Ok(())
 }
@@ -350,7 +350,7 @@ pub async fn patch_settings(
         merged.web_admin_password = current.web_admin_password;
     }
 
-    let api = crate::server_api::ServerApi::new(state.inner().clone(), app);
+    let api = crate::server_api::ServerApi::new(state.inner().clone(), Some(app));
     api.update_settings(merged).await
 }
 

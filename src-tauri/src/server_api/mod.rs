@@ -23,15 +23,15 @@ use crate::AppState;
 #[derive(Clone)]
 pub struct ServerApi {
     state: AppState,
-    app: crate::AppEventHandle,
+    app: Option<crate::AppEventHandle>,
 }
 
 impl ServerApi {
     /// 创建新的 `ServerApi` 实例。
     ///
     /// - `state`: 共享应用状态
-    /// - `app`: 事件句柄（GUI 模式下为 `tauri::AppHandle`，headless 下为零大小结构体）
-    pub fn new(state: AppState, app: crate::AppEventHandle) -> Self {
+    /// - `app`: 事件句柄（GUI 模式下为 `tauri::AppHandle`，headless 下可 None）
+    pub fn new(state: AppState, app: Option<crate::AppEventHandle>) -> Self {
         Self { state, app }
     }
 
@@ -40,8 +40,10 @@ impl ServerApi {
         &self.state
     }
 
-    /// 获取内部 `AppEventHandle` 的引用。
-    pub fn app(&self) -> &crate::AppEventHandle {
-        &self.app
+    /// 安全发送前端事件；无句柄时静默跳过（headless 兼容）。
+    pub(crate) fn emit_event(&self, event: &str) {
+        if let Some(handle) = &self.app {
+            crate::event::emit(handle, event);
+        }
     }
 }

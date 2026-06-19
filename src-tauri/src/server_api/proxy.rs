@@ -24,12 +24,12 @@ impl ServerApi {
             port,
             state.db.clone(),
             state.settings.clone(),
-            Some(self.app().clone()),
+            self.app.clone(),
             state.failure_counts.clone(),
         );
         let admin_router = crate::admin::build_combined_router(
             &settings,
-            crate::admin::AdminState::new_runtime(state.clone(), self.app().clone()),
+            crate::admin::AdminState::new_runtime(state.clone(), self.app.clone()),
         );
         server
             .start_with_admin(admin_router)

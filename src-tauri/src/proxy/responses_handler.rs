@@ -132,13 +132,11 @@ pub async fn handle_responses(
 
     let all_entries = state.db.get_entries_for_routing()?;
     let auto_entries = state.db.get_enabled_entries_for_auto()?;
-    let sort_mode = state.settings.read().await.default_sort_mode.clone();
     let resolved = router::resolve(
         &requested_model,
         &all_entries,
         &auto_entries,
         &state.circuit_breakers,
-        &sort_mode,
     )
     .await;
 

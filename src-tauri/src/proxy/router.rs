@@ -111,7 +111,6 @@ pub async fn resolve(
     all_entries: &[ApiEntry],
     auto_entries: &[ApiEntry],
     circuit_breakers: &RwLock<HashMap<String, CircuitBreaker>>,
-    _sort_mode: &str,
 ) -> Vec<ApiEntry> {
     let normalized_model = normalize_model(model);
     let breakers = circuit_breakers.read().await;
@@ -243,7 +242,7 @@ mod tests {
         ];
         let auto = all.clone();
 
-        let resolved = resolve("   ", &all, &auto, &breakers, "custom").await;
+        let resolved = resolve("   ", &all, &auto, &breakers).await;
 
         assert_eq!(
             resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
@@ -260,7 +259,7 @@ mod tests {
             entry_with_group("other", "gemini-pro", true, 2, "other"),
         ];
 
-        let resolved = resolve("CoDiNg", &all, &all, &breakers, "custom").await;
+        let resolved = resolve("CoDiNg", &all, &all, &breakers).await;
 
         assert_eq!(
             resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
@@ -276,7 +275,7 @@ mod tests {
             entry_with_group("fuzzy-match", "prefix-coding-suffix", true, 1, "other"),
         ];
 
-        let resolved = resolve("coding", &all, &all, &breakers, "custom").await;
+        let resolved = resolve("coding", &all, &all, &breakers).await;
 
         assert_eq!(
             resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
@@ -296,7 +295,7 @@ mod tests {
             entry_with_group("fuzzy-second", "gpt-4o-mini", true, 1, "other"),
         ];
 
-        let resolved = resolve("gpt-4o", &all, &all, &breakers, "custom").await;
+        let resolved = resolve("gpt-4o", &all, &all, &breakers).await;
 
         // Only exact match should be returned, fuzzy excluded
         assert_eq!(
@@ -314,7 +313,7 @@ mod tests {
             entry_with_group("other", "claude-3", true, 2, "other"),
         ];
 
-        let resolved = resolve("gPt-4O", &all, &all, &breakers, "custom").await;
+        let resolved = resolve("gPt-4O", &all, &all, &breakers).await;
 
         assert_eq!(
             resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
@@ -332,7 +331,7 @@ mod tests {
         ];
         let auto = all.clone();
 
-        let resolved = resolve("missing-model", &all, &auto, &breakers, "custom").await;
+        let resolved = resolve("missing-model", &all, &auto, &breakers).await;
 
         assert_eq!(
             resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
@@ -346,7 +345,7 @@ mod tests {
         let all = vec![entry_with_group("other", "claude-3", true, 0, "other")];
         let auto = all.clone();
 
-        let resolved = resolve("missing-model", &all, &auto, &breakers, "custom").await;
+        let resolved = resolve("missing-model", &all, &auto, &breakers).await;
 
         assert!(resolved.is_empty());
     }
@@ -366,7 +365,7 @@ mod tests {
             guard.insert("open-auto".to_string(), cb);
         }
 
-        let resolved = resolve("missing-model", &all, &auto, &breakers, "custom").await;
+        let resolved = resolve("missing-model", &all, &auto, &breakers).await;
 
         assert_eq!(
             resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
@@ -383,7 +382,7 @@ mod tests {
         let all = vec![cooled, healthy.clone()];
         let auto = all.clone();
 
-        let resolved = resolve("missing-model", &all, &auto, &breakers, "custom").await;
+        let resolved = resolve("missing-model", &all, &auto, &breakers).await;
 
         assert_eq!(
             resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
@@ -436,7 +435,7 @@ mod tests {
             entry_with_group("second", "second-model", true, 1, "auto"),
         ];
 
-        let resolved = resolve("auto", &enabled, &enabled, &breakers, "custom").await;
+        let resolved = resolve("auto", &enabled, &enabled, &breakers).await;
 
         assert_eq!(
             resolved.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),

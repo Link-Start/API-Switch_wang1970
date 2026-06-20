@@ -468,8 +468,6 @@
       "themeSystem": "跟随系统",
       "defaultGroup": "默认分组",
       "defaultGroupDesc": "记住模型管理页面默认打开的分组，仅用于界面选择",
-      "defaultSortMode": "默认排序方式",
-      "defaultSortModeDesc": "模型管理页面的默认模型排序方式",
       "showConversationModel": "显示对话模型（实验）",
       "showConversationModelDesc": "流式回答结束时追加实际命中的模型名称",
       "disableReasoning": "关闭思维链",

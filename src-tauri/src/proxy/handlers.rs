@@ -276,13 +276,11 @@ pub async fn handle_chat_completions(
     // - named routes: resolution is based on group/model matching before AUTO fallback
     let all_entries = state.db.get_entries_for_routing()?;
     let auto_entries = state.db.get_enabled_entries_for_auto()?;
-    let sort_mode = state.settings.read().await.default_sort_mode.clone();
     let resolved = router::resolve(
         &requested_model,
         &all_entries,
         &auto_entries,
         &state.circuit_breakers,
-        &sort_mode,
     )
     .await;
 
@@ -357,13 +355,11 @@ pub async fn handle_messages(
     // Resolve target entries (same logic as chat completions)
     let all_entries = state.db.get_entries_for_routing()?;
     let auto_entries = state.db.get_enabled_entries_for_auto()?;
-    let sort_mode = state.settings.read().await.default_sort_mode.clone();
     let resolved = router::resolve(
         &requested_model,
         &all_entries,
         &auto_entries,
         &state.circuit_breakers,
-        &sort_mode,
     )
     .await;
 
@@ -565,13 +561,11 @@ async fn handle_gemini_generate_content(
 
     let all_entries = state.db.get_entries_for_routing()?;
     let auto_entries = state.db.get_enabled_entries_for_auto()?;
-    let sort_mode = state.settings.read().await.default_sort_mode.clone();
     let resolved = router::resolve(
         &requested_model,
         &all_entries,
         &auto_entries,
         &state.circuit_breakers,
-        &sort_mode,
     )
     .await;
 
@@ -649,13 +643,11 @@ async fn handle_gemini_stream_generate_content(
 
     let all_entries = state.db.get_entries_for_routing()?;
     let auto_entries = state.db.get_enabled_entries_for_auto()?;
-    let sort_mode = state.settings.read().await.default_sort_mode.clone();
     let resolved = router::resolve(
         &requested_model,
         &all_entries,
         &auto_entries,
         &state.circuit_breakers,
-        &sort_mode,
     )
     .await;
 
@@ -754,7 +746,6 @@ pub async fn handle_azure_chat(
 
     let all_entries = state.db.get_entries_for_routing()?;
     let auto_entries = state.db.get_enabled_entries_for_auto()?;
-    let sort_mode = state.settings.read().await.default_sort_mode.clone();
 
     let mut resolved: Vec<crate::database::ApiEntry> = {
         let deployment_lower = deployment.to_ascii_lowercase();
@@ -772,7 +763,6 @@ pub async fn handle_azure_chat(
             &all_entries,
             &auto_entries,
             &state.circuit_breakers,
-            &sort_mode,
         )
         .await;
     }

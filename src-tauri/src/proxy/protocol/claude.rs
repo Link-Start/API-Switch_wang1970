@@ -3345,4 +3345,101 @@ mod tests {
             "https://example.com/img.png"
         );
     }
+
+    // ─── 测试功能的 body 转换验证 ──────────────────────────────────────
+    // 三个 UI 测试功能（渠道编辑器测速 / 模型管理测速 / 对话测试）都构造一个
+    // OpenAI 形状的探测 body，再交给 adapter.transform_request 转成上游原生格式。
+    // 这些测试固化「转换后 body 是合法的 Anthropic 原生请求」这一行为契约：
+    //   - 单条 user 字符串 content 原样保留（Anthropic 接受裸字符串）；
+    //   - max_tokens 必须存在（Anthropic 必填）；
+    //   - 绝不以 stream:true 发往上游（流式探测在部分上游会挂起）；
+    //   - role:"system" 必须从 messages 提取到顶层 system 字段（混在 messages
+    //     里 Anthropic 原生端点会拒绝）——这是 transform 对对话测试的关键作用。
+
+    /// 渠道编辑器「模型测速」(channel_service.rs::test_channel_chat) 的 body。
+    #[test]
+    fn channel_editor_test_probe_becomes_native_claude() {
+        let mut body = json!({
+            "model": "claude-opus-4-8",
+            "messages": [{"role": "user", "content": "just say OK"}],
+            "max_tokens": 10
+        });
+        transform_request_to_anthropic(&mut body, "claude-opus-4-8");
+
+        assert_eq!(body["model"], "claude-opus-4-8");
+        assert_eq!(body["max_tokens"], 10);
+        assert_eq!(body["messages"][0]["role"], "user");
+        // 单条 user 字符串 content 原样保留（Anthropic 接受裸字符串）
+        assert_eq!(body["messages"][0]["content"], "just say OK");
+        // 关键：不能带 stream（上游对流式探测可能挂起）
+        assert!(body.get("stream").is_none(), "测速探测不应带 stream 字段");
+        // 不残留 OpenAI 专有字段
+        assert!(body.get("temperature").is_none() || body["temperature"].is_number());
+    }
+
+    /// 模型管理「测速」(pool_service.rs::test_entry_latency) 的 body。
+    /// 它显式带了 stream:false——验证转换后 stream 不为 true。
+    #[test]
+    fn pool_latency_test_probe_becomes_native_claude() {
+        let mut body = json!({
+            "model": "claude-opus-4-8",
+            "messages": [{"role": "user", "content": "Say OK"}],
+            "stream": false
+        });
+        transform_request_to_anthropic(&mut body, "claude-opus-4-8");
+
+        assert_eq!(body["model"], "claude-opus-4-8");
+        assert_eq!(body["messages"][0]["content"], "Say OK");
+        // stream:false 被透传，但绝不能是 true
+        assert_ne!(body["stream"], json!(true), "测速绝不能以流式发往上游");
+        // 未显式给 max_tokens 时，转换补默认值（Anthropic 必填）
+        assert!(body["max_tokens"].as_i64().unwrap_or(0) > 0, "Anthropic 要求 max_tokens 必填");
+    }
+
+    /// 模型管理「对话测试」(test_chat.rs::test_chat) 的 body。
+    /// messages 来自用户输入，可能含 system + 多轮。这是 transform 真正不可省的
+    /// 场景：system 必须从 messages 提取到顶层，否则 Anthropic 原生端点拒绝。
+    #[test]
+    fn test_chat_probe_with_system_becomes_native_claude() {
+        let mut body = json!({
+            "model": "claude-opus-4-8",
+            "messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hello"}
+            ],
+            "stream": false
+        });
+        transform_request_to_anthropic(&mut body, "claude-opus-4-8");
+
+        // system 消息被提取到顶层 system 字段，不再混在 messages 里
+        assert!(body["system"].is_array(), "system 应提取为顶层 content blocks");
+        assert_eq!(body["system"][0]["text"], "You are helpful.");
+        let msgs = body["messages"].as_array().expect("messages 数组");
+        assert_eq!(msgs.len(), 1, "system 已移出 messages，应只剩 user");
+        assert_eq!(msgs[0]["role"], "user");
+        assert_ne!(body["stream"], json!(true));
+        assert!(body["max_tokens"].as_i64().unwrap_or(0) > 0);
+    }
+
+    /// 行为基线：对单条 user 的最小探测 body，transform 仅做字段层面的规范化
+    /// （重命名/补默认/剔除 OpenAI 专有字段），不改写合法的字符串 content。
+    /// 固化这一点是为了说明：单纯的最小测速 body 即便不转换，对 Anthropic 也基本
+    /// 合法——真正必须 transform 的是带 system / tools / OpenAI 专有字段的场景。
+    #[test]
+    fn minimal_user_probe_transform_is_field_level_only() {
+        let raw = json!({
+            "model": "claude-opus-4-8",
+            "messages": [{"role": "user", "content": "just say OK"}],
+            "max_tokens": 10,
+            "temperature": 0.0
+        });
+        let mut transformed = raw.clone();
+        transform_request_to_anthropic(&mut transformed, "claude-opus-4-8");
+
+        // content 仍是裸字符串（未被改写）
+        assert_eq!(transformed["messages"][0]["content"], "just say OK");
+        assert_eq!(transformed["max_tokens"], 10);
+        // temperature 是 Anthropic 合法字段，被透传保留
+        assert_eq!(transformed["temperature"], json!(0.0));
+    }
 }

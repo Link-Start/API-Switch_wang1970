@@ -206,6 +206,7 @@
       "months": "{{count}} months",
       "testModels": "Test Models",
       "testingModels": "Testing...",
+      "testModelsTimeout": "Model speed test timed out",
       "tooManyModels": "Too many models ({{count}}), testing will take a long time. Please reduce the filter scope.",
       "createModel": "Create model \"{{name}}\"",
       "saveBeforeModelTest": "Save the new channel before testing models",

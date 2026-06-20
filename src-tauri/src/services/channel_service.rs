@@ -1306,7 +1306,7 @@ fn dedup_models(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
 }
 
 /// Test a channel by actually chatting with the model.
-/// Sends "璇峰彧鍥炲 OK", expects response to contain "OK" (case-insensitive).
+/// Sends "just say OK"; treats an HTTP 200 as success.
 /// Records latency and returns success/failure with HTTP status code.
 pub async fn test_channel_chat(
     base_url: &str,
@@ -1332,14 +1332,19 @@ pub async fn test_channel_chat(
     let adapter = get_adapter(api_type);
     let chat_url = adapter.build_chat_url(base_url, model);
 
-    let body = serde_json::json!({
+    // Build an OpenAI-shaped probe, then let the adapter translate it into the
+    // upstream's native format. Native-only upstreams (e.g. Anthropic
+    // /v1/messages) hang on an OpenAI-shaped body, so this translation is what
+    // makes Claude channels testable. Kept non-streaming: some upstreams stall
+    // streaming probes.
+    let mut body = serde_json::json!({
         "model": model,
         "messages": [
-            {"role": "user", "content": "璇峰彧鍥炲 OK"}
+            {"role": "user", "content": "just say OK"}
         ],
-        "max_tokens": 10,
-        "temperature": 0.0
+        "max_tokens": 10
     });
+    adapter.transform_request(&mut body, model);
 
     let req = adapter.apply_auth(
         client

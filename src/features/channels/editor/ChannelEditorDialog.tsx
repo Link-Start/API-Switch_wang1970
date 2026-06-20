@@ -54,7 +54,7 @@ export const ChannelEditorDialog: React.FC<{
   const [timeRange, setTimeRange] = useState<3 | 6 | 12>(3);
   // 模型测速状态
   const [testingModels, setTestingModels] = useState(false);
-  const [modelTestResults, setModelTestResults] = useState<Record<string, { success: boolean; latency?: number; reason?: string }>>({});
+  const [modelTestResults, setModelTestResults] = useState<Record<string, { success: boolean; latency?: number; reason?: string; statusCode?: number }>>({});
 
   const probeSeqRef = useRef(0);
   const fetchSeqRef = useRef(0);
@@ -338,14 +338,19 @@ export const ChannelEditorDialog: React.FC<{
 
   const handleTestModels = async () => {
     if (filteredModels.length > 30) {
-      toast.error(t('channel.editor.tooManyModelsToTest', '模型数量过多（{{count}}个），测速耗时较长，请减少筛选范围', { count: filteredModels.length }));
+      setModelTestResults({
+        __limit__: {
+          success: false,
+          reason: t('channel.editor.tooManyModels', '模型数量过多（{{count}}个），测速耗时较长，请减少筛选范围', { count: filteredModels.length }),
+        },
+      });
       return;
     }
 
     const seq = ++testSeqRef.current;
     setTestingModels(true);
     setModelTestResults({});
-    const results: Record<string, { success: boolean; latency?: number; reason?: string }> = {};
+    const results: Record<string, { success: boolean; latency?: number; reason?: string; statusCode?: number }> = {};
     try {
       await withTimeout(
         (async () => {
@@ -360,7 +365,7 @@ export const ChannelEditorDialog: React.FC<{
               });
               results[model.name] = result.success
                 ? { success: true, latency: result.latency_ms }
-                : { success: false, reason: result.message };
+                : { success: false, reason: result.message, statusCode: result.status_code };
             } catch (err) {
               results[model.name] = { success: false, reason: err instanceof Error ? err.message : String(err) };
             }
@@ -372,7 +377,13 @@ export const ChannelEditorDialog: React.FC<{
       );
     } catch (err) {
       if (testSeqRef.current === seq) {
-        toast.error(err instanceof Error ? err.message : String(err));
+        setModelTestResults((prev) => ({
+          ...prev,
+          __timeout__: {
+            success: false,
+            reason: err instanceof Error ? err.message : String(err),
+          },
+        }));
       }
     } finally {
       if (testSeqRef.current === seq) {
@@ -611,7 +622,7 @@ return (
                           <span className="text-xs ml-1">({(testResult.latency / 1000).toFixed(2)}s)</span>
                         )}
                         {testResult?.success === false && (
-                          <span className="text-xs ml-1">(失败)</span>
+                          <span className="text-xs ml-1">({testResult.statusCode ? `HTTP ${testResult.statusCode}` : t('channel.editor.testFailed', '失败')})</span>
                         )}
                       </span>
                       <span className="ml-auto shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
@@ -640,6 +651,12 @@ return (
               <div className="text-right text-[11px] leading-none text-muted-foreground">
                 {selectedModels.length}/{availableModels.length}
               </div>
+
+              {(modelTestResults.__limit__?.reason || modelTestResults.__timeout__?.reason) && (
+                <div className="rounded-md border border-destructive/25 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                  {modelTestResults.__limit__?.reason || modelTestResults.__timeout__?.reason}
+                </div>
+              )}
 
               {/* 模型测速按钮 - fill 宽度 */}
               <Button 

@@ -903,10 +903,11 @@ pub async fn forward_with_retry(
 ) -> Result<axum::response::Response, ProxyError> {
     let mut last_error: Option<(String, u16)> = None;
     let mut attempts: Vec<AttemptInfo> = Vec::new();
-    let retry_budget = state.settings.read().await.model_retry_count.max(0) as usize;
 
     for entry in entries {
-        // Check circuit breaker before attempting this entry
+        let start = Instant::now();
+
+        // Check circuit breaker
         {
             let breakers = state.circuit_breakers.read().await;
             if let Some(cb) = breakers.get(&entry.id) {
@@ -916,13 +917,7 @@ pub async fn forward_with_retry(
             }
         }
 
-        let mut retry_count = 0;
-
-        // Inner retry loop: attempt the same entry up to (1 + retry_budget) times
-        loop {
-            let start = Instant::now();
-
-            match forward_single(
+        match forward_single(
             state,
             entry,
             body,
@@ -998,24 +993,17 @@ pub async fn forward_with_retry(
                     raw_protocol.as_ref(),
                 );
 
-                // Step 2: Classify failure and decide retry/punish strategy
-                // ① Priority: unrecoverable (disable codes / keywords) → no retry, punish & break
-                // ② Retriable (network fluctuation: status==0/5xx) + budget left → retry, no punish yet
-                // ③ Other failures or retry exhausted → punish once & break
+                // Step 2: disable unrecoverable status codes or error messages
+                // matching disable keywords; otherwise cool down briefly.
+                // Connection failures report status=0 and must remain recoverable.
                 let disable_by_status = status > 0
                     && should_disable_entry_for_status(&settings.circuit_disable_codes, status);
-                let effective_keywords = if settings.disable_keywords.trim().is_empty() {
-                    "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized\ninsufficient_quota\nquota_exceeded_error\ntoken plan limit exhausted\nUpstream rate limit exceeded\ninvalid api key\nUnauthorized - Invalid token"
-                } else {
-                    &settings.disable_keywords
-                };
-                let disable_by_keyword =
-                    status > 0 && should_disable_entry_for_message(effective_keywords, &e);
+                let disable_by_keyword = status > 0
+                    && should_disable_entry_for_message(effective_disable_keywords(&settings), &e);
 
-                // ① Unrecoverable: disable immediately, don't retry
                 if disable_by_keyword {
                     log::info!(
-                        "Entry {} disabled by keyword match, status={}: {}",
+                        "Cooldown entry {} (keyword match), status={}: {}",
                         entry.id,
                         status,
                         e
@@ -1025,39 +1013,24 @@ pub async fn forward_with_retry(
                     } else {
                         cool_down_entry(state, entry).await;
                     }
-                    last_error = Some((e, status));
-                    break; // Exit inner loop, try next entry
                 } else if disable_by_status {
                     disable_entry(state, entry).await;
-                    last_error = Some((e, status));
-                    break;
+                } else {
+                    // 既未命中禁用状态码，也未命中已知 disable_keywords：
+                    // 记录状态码+原文，供分析后增补 disable_keywords（keyword 越健壮，
+                    // 落入重试环节的失败越少）。状态码一并记录，便于判断哪类值得重试。
+                    let status_for_log = if status > 0 { status } else { 0 };
+                    if should_record_keyword_candidate(status_for_log, &e, &settings) {
+                        keyword_log::record_unknown_failure(status_for_log, &e).await;
+                    }
+                    cool_down_entry(state, entry).await;
                 }
-
-                // ② Retriable + budget left: retry same entry (no punishment yet)
-                if is_retriable(status) && retry_count < retry_budget {
-                    retry_count += 1;
-                    log::debug!(
-                        "Entry {} retriable failure (status={}), retry {}/{}",
-                        entry.id,
-                        status,
-                        retry_count,
-                        retry_budget
-                    );
-                    last_error = Some((e, status));
-                    continue; // Retry inner loop on same entry
-                }
-
-                // ③ Not retriable OR retry exhausted: punish once & exit
-                let status_for_log = if status > 0 { status } else { 0 };
-                keyword_log::record_unknown_failure(status_for_log, &e).await;
-                cool_down_entry(state, entry).await;
 
                 last_error = Some((e, status));
-                break; // Exit inner loop, try next entry
+                continue;
             }
-        } // End of match
-        } // End of inner retry loop
-    } // End of outer entry loop
+        }
+    }
 
     Err(last_error
         .map(|(msg, status)| {
@@ -2104,6 +2077,7 @@ fn build_streaming_response(
                         let ak2 = access_key.clone();
                         let e2 = entry.clone();
                         let rm2 = requested_model.clone();
+                        let keyword_settings = settings_cache.clone();
                         let raw_protocol_log = if should_persist_raw_protocol_for_log(
                             false,
                             pt,
@@ -2147,6 +2121,10 @@ fn build_streaming_response(
                                 Some(stream_end_reason),
                                 raw_protocol_log.as_ref(),
                             );
+                            let settings = keyword_settings.read().await.clone();
+                            if should_record_keyword_candidate(502, &error_message, &settings) {
+                                keyword_log::record_unknown_failure(502, &error_message).await;
+                            }
                         });
                         if !suppress_cooldown {
                             spawn_cool_down_entry(
@@ -2231,6 +2209,7 @@ fn build_streaming_response(
                         let sfc = success_failure_counts.clone();
                         let eid = entry_id.clone();
                         let sdb = settings_cache.clone();
+                        let keyword_settings = settings_cache.clone();
                         let eah = entries_app_handle.clone();
                         let raw_protocol_log = if should_persist_raw_protocol_for_log(
                             success,
@@ -2278,6 +2257,11 @@ fn build_streaming_response(
                             if success {
                                 spawn_record_circuit_success(scb, sfc, sdb, db2.clone(), eah, eid);
                             } else {
+                                let settings = keyword_settings.read().await.clone();
+                                let status_for_log = if sc > 0 { sc as u16 } else { 0 };
+                                if should_record_keyword_candidate(status_for_log, &log_message, &settings) {
+                                    keyword_log::record_unknown_failure(status_for_log, &log_message).await;
+                                }
                                 spawn_cool_down_entry(scb, sfc, sdb, db2.clone(), eah, eid);
                             }
                         });
@@ -2945,6 +2929,22 @@ fn should_disable_entry_for_status(disable_codes: &str, status: u16) -> bool {
         .any(|rule| status_matches_rule(rule, status))
 }
 
+fn effective_disable_keywords(settings: &AppSettings) -> &str {
+    if settings.disable_keywords.trim().is_empty() {
+        "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized\ninsufficient_quota\nquota_exceeded_error\ntoken plan limit exhausted\nUpstream rate limit exceeded\ninvalid api key\nUnauthorized - Invalid token"
+    } else {
+        &settings.disable_keywords
+    }
+}
+
+fn should_record_keyword_candidate(status: u16, message: &str, settings: &AppSettings) -> bool {
+    let disable_by_status = status > 0
+        && should_disable_entry_for_status(&settings.circuit_disable_codes, status);
+    let disable_by_keyword = status > 0
+        && should_disable_entry_for_message(effective_disable_keywords(settings), message);
+    !disable_by_status && !disable_by_keyword
+}
+
 /// Check if the upstream error message contains any disable keyword.
 /// Keywords are separated by newlines and matched case-insensitively.
 fn should_disable_entry_for_message(disable_keywords: &str, message: &str) -> bool {
@@ -2957,12 +2957,6 @@ fn should_disable_entry_for_message(disable_keywords: &str, message: &str) -> bo
         .map(|k| k.trim())
         .filter(|k| !k.is_empty())
         .any(|keyword| lower_msg.contains(&keyword.to_lowercase()))
-}
-
-/// Check if a failure is retriable (network fluctuation: connection failures / 5xx).
-/// Only these should trigger same-entry retry; other failures (4xx auth/keywords) should not.
-fn is_retriable(status: u16) -> bool {
-    status == 0 || (500..=599).contains(&status)
 }
 
 async fn disable_entry(state: &ProxyState, entry: &ApiEntry) {
@@ -4013,6 +4007,22 @@ data: [DONE]\n",
         assert_eq!(value["choices"][0]["index"], 0);
         assert!(value["choices"][0]["finish_reason"].is_null());
         assert!(output.ends_with("data: [DONE]\n\n"));
+    }
+
+    #[test]
+    fn stream_failure_keyword_candidate_uses_same_front_guard_as_non_stream() {
+        let settings = AppSettings::default();
+
+        assert!(should_record_keyword_candidate(
+            200,
+            "upstream stream completed with SSE error: rate limit exceeded",
+            &settings,
+        ));
+        assert!(!should_record_keyword_candidate(
+            401,
+            "Unauthorized - Invalid token",
+            &settings,
+        ));
     }
 
     #[test]

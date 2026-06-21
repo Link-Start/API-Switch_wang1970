@@ -431,8 +431,6 @@
       "connectTimeout": "Connect Timeout (sec)",
       "connectTimeoutDesc": "Timeout for proxy connections to upstream APIs. Restart proxy to apply changes.",
       "recovery": "Cooldown Recovery (sec)",
-      "modelRetryCount": "Model Fluctuation Retry Count",
-      "modelRetryCountDesc": "Retry count for network fluctuations (connection failures/5xx) on the same model before switching. 0 = connection priority (switch immediately), 3 = model priority (retry 3 times first), range 0-5",
       "disableCodes": "Auto-Disable Status Codes",
       "disableDesc": "Immediately return error without retry or circuit-break. Supports single codes or ranges (inclusive), comma-separated",
       "retryCodes": "Auto-Retry Status Codes",

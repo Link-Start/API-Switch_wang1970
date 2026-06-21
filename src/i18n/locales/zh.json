@@ -431,8 +431,6 @@
       "connectTimeout": "连接超时(秒)",
       "connectTimeoutDesc": "代理连接上游 API 的超时时间，修改后需重启代理生效",
       "recovery": "冷却恢复时间(秒)",
-      "modelRetryCount": "模型波动重试次数",
-      "modelRetryCountDesc": "网络抖动类失败(连接失败/5xx)在同一模型上重试的次数。0 = 连接优先(任何失败立刻换模型)，3 = 模型优先(原地重试3次再换)，范围 0-5",
       "disableCodes": "自动禁用状态码",
       "disableDesc": "匹配到该状态码时立即返回错误，不重试、不熔断。支持填写单个状态码或范围（含首尾），使用逗号分隔",
       "retryCodes": "自动重试状态码",

@@ -346,26 +346,6 @@ export function SettingsEditor({
             <p className="text-xs text-muted-foreground">30s – 1800s</p>
           </div>
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>{t("settings.circuit.modelRetryCount")}</Label>
-              <span className="text-sm text-muted-foreground w-16 text-right">
-                {s.model_retry_count}
-              </span>
-            </div>
-            <Slider
-              min={0}
-              max={5}
-              step={1}
-              value={s.model_retry_count}
-              onValueChange={(value) =>
-                onChange("model_retry_count", value)
-              }
-            />
-            <p className="text-xs text-muted-foreground">
-              {t("settings.circuit.modelRetryCountDesc")}
-            </p>
-          </div>
-          <div className="space-y-2">
             <Label>{t("settings.circuit.disableCodes")}</Label>
             <Input
               value={editDisableCodes}

@@ -8,7 +8,7 @@ use serde::Deserialize;
 use tauri::State;
 
 async fn restart_proxy_if_running(
-    app: crate::AppEventHandle,
+    app: Option<crate::AppEventHandle>,
     state: &AppState,
     previous_settings: &AppSettings,
 ) -> Result<(), AppError> {
@@ -26,13 +26,13 @@ async fn restart_proxy_if_running(
 
     let admin_router = crate::admin::build_combined_router(
         &settings,
-        crate::admin::AdminState::new_runtime(state.clone(), Some(app.clone())),
+        crate::admin::AdminState::new_runtime(state.clone(), app.clone()),
     );
     let new_server = crate::proxy::ProxyServer::new(
         settings.listen_port,
         state.db.clone(),
         state.settings.clone(),
-        Some(app.clone()),
+        app.clone(),
         state.failure_counts.clone(),
     );
     if let Err(error) = new_server.start_with_admin(admin_router).await {
@@ -45,12 +45,12 @@ async fn restart_proxy_if_running(
             previous_settings.listen_port,
             state.db.clone(),
             state.settings.clone(),
-            Some(app.clone()),
+            app.clone(),
             state.failure_counts.clone(),
         );
         let rollback_admin_router = crate::admin::build_combined_router(
             &restored_settings,
-            crate::admin::AdminState::new_runtime(state.clone(), Some(app.clone())),
+            crate::admin::AdminState::new_runtime(state.clone(), app.clone()),
         );
         rollback_server
             .start_with_admin(rollback_admin_router)
@@ -197,7 +197,7 @@ pub(crate) fn merge_settings_patch(
 }
 
 pub async fn apply_settings_update(
-    app: crate::AppEventHandle,
+    app: Option<crate::AppEventHandle>,
     state: &AppState,
     settings: AppSettings,
     restart_async: bool,
@@ -207,7 +207,7 @@ pub async fn apply_settings_update(
 }
 
 pub async fn apply_settings_update_with_restart(
-    app: crate::AppEventHandle,
+    app: Option<crate::AppEventHandle>,
     state: &AppState,
     settings: AppSettings,
     restart_async: bool,
@@ -255,7 +255,7 @@ pub async fn apply_settings_update_with_restart(
 
             if let Err(e) = crate::admin::restart_admin(
                 state_for_restart.clone(),
-                Some(app_for_restart.clone()),
+                app_for_restart.clone(),
                 state_for_restart.admin.clone(),
             )
             .await
@@ -294,7 +294,7 @@ pub async fn get_settings_from_state(state: &AppState) -> Result<AppSettings, Ap
 
 /// 完整更新设置，触发 proxy/admin 重载等副作用，返回更新后的设置。
 pub async fn update_settings_from_state(
-    app: crate::AppEventHandle,
+    app: Option<crate::AppEventHandle>,
     state: &AppState,
     settings: AppSettings,
 ) -> Result<AppSettings, AppError> {
@@ -305,7 +305,7 @@ pub async fn update_settings_from_state(
 /// 局部补丁更新设置，返回更新后的设置。
 /// 注意：web_admin_password 保护逻辑由调用方（如 tauri 命令）负责。
 pub async fn patch_settings_from_state(
-    app: crate::AppEventHandle,
+    app: Option<crate::AppEventHandle>,
     state: &AppState,
     patch: serde_json::Value,
 ) -> Result<AppSettings, AppError> {

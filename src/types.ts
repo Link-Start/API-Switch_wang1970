@@ -221,6 +221,7 @@ export interface AppSettings {
   circuit_recovery_secs: number;
   circuit_disable_codes: string;
   circuit_retry_codes: string;
+  model_retry_count: number;
   disable_keywords: string;
   keyword_freeze_scope: string;
   locale: string;
@@ -271,6 +272,7 @@ export const DEFAULT_SETTINGS: VersionedAppSettings = {
   circuit_recovery_secs: 300,
   circuit_disable_codes: "401,403,410",
   circuit_retry_codes: "100-199,300-399,401-407,409-499,500-503,505-523,525-599",
+  model_retry_count: 0,
   disable_keywords: "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized\ninsufficient_quota\nquota_exceeded_error\ntoken plan limit exhausted\nUpstream rate limit exceeded\ninvalid api key\nUnauthorized - Invalid token",
   keyword_freeze_scope: "model",
   locale: "zh",

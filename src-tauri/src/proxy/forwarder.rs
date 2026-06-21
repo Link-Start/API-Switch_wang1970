@@ -1,5 +1,6 @@
 use super::circuit_breaker::CircuitBreaker;
 use super::handlers::ProxyError;
+use super::keyword_log;
 use super::middleware::{CallerKind, RequestContext};
 use super::protocol::get_adapter;
 use super::server::ProxyState;
@@ -1021,6 +1022,11 @@ pub async fn forward_with_retry(
                 } else if disable_by_status {
                     disable_entry(state, entry).await;
                 } else {
+                    // 既未命中禁用状态码，也未命中已知 disable_keywords：
+                    // 记录状态码+原文，供分析后增补 disable_keywords（keyword 越健壮，
+                    // 落入重试环节的失败越少）。状态码一并记录，便于判断哪类值得重试。
+                    let status_for_log = if status > 0 { status } else { 0 };
+                    keyword_log::record_unknown_failure(status_for_log, &e).await;
                     cool_down_entry(state, entry).await;
                 }
 

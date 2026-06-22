@@ -194,9 +194,16 @@ pub async fn test_chat(
             return Err(AppError::Network(message));
         }
     };
-    let request = adapter
+    let mut request = adapter
         .apply_auth(client.post(&url), primary_api_key(&channel.api_key))
         .json(&upstream_body);
+
+    // 当上游是 Anthropic 协议时，注入必需的身份头（muyuan.do 等上游需要识别客户端）
+    if channel.api_type == "anthropic" {
+        request = request.header("user-agent", "claude-cli/2.1.176 (external, cli)");
+        request = request.header("x-app", "cli");
+        request = request.header("anthropic-beta", "claude-code-20250219");
+    }
 
     let response = match request.send().await {
         Ok(response) => response,

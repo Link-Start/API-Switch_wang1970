@@ -640,7 +640,7 @@ async fn fetch_models_result_with_fallback(
             &candidate_base_url,
             api_key,
         ) {
-            match try_models_endpoint(&client, adapter.as_ref(), &url, api_key).await {
+            match try_models_endpoint(&client, adapter.as_ref(), &url, api_key, current_type).await {
                 Ok(models) if !models.is_empty() => {
                     merged_models.extend(models);
                 }
@@ -760,7 +760,7 @@ async fn detect_type_with_base_url(
     let mut reachable_candidate: Option<EndpointCandidate> = None;
 
     for url in &urls {
-        match try_models_endpoint(client, adapter.as_ref(), url, api_key).await {
+        match try_models_endpoint(client, adapter.as_ref(), url, api_key, api_type).await {
             Ok(models) => {
                 if !models.is_empty() {
                     if !is_authoritative_detection_success(api_type, url) {
@@ -1123,12 +1123,16 @@ async fn try_models_endpoint(
     adapter: &(dyn crate::proxy::protocol::ProtocolAdapter + Send + Sync),
     url: &str,
     api_key: &str,
+    api_type: &str,
 ) -> Result<Vec<ModelInfo>, ModelsEndpointError> {
-    let resp = adapter
-        .apply_auth(client.get(url), api_key)
-        .send()
-        .await
-        .map_err(|e| {
+    let mut req = adapter.apply_auth(client.get(url), api_key);
+    // 当上游是 Anthropic 协议时，注入必需的身份头（muyuan.do 等上游需要识别客户端）
+    if api_type == "anthropic" {
+        req = req.header("user-agent", "claude-cli/2.1.176 (external, cli)");
+        req = req.header("x-app", "cli");
+        req = req.header("anthropic-beta", "claude-code-20250219");
+    }
+    let resp = req.send().await.map_err(|e| {
             if e.is_timeout() {
                 ModelsEndpointError::Timeout(e.to_string())
             } else if e.is_connect() || e.is_request() {

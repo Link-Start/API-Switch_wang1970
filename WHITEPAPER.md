@@ -1026,6 +1026,27 @@ struct PassthroughConfig {
 
 3. **验证**：forwarder 核心逻辑自动处理，无需修改
 
+#### 9.10.8 Anthropic 上游客户端身份验证
+
+部分 Anthropic 上游（如 muyuan.do）会检查请求中的客户端身份头，识别不到就返回 `403 channel:client_restricted`。验证发现，上游要求同时存在以下三个 headers 才放行：
+
+| Header | 示例值 | 说明 |
+|--------|--------|------|
+| `user-agent` | `claude-cli/2.1.176 (external, cli)` | Claude CLI 客户端标识 |
+| `x-app` | `cli` | 应用类型标识 |
+| `anthropic-beta` | `claude-code-20250219` | Beta 功能标识 |
+
+缺少任一 headers 或值不匹配都会被识别为 `unknown` 而拒绝。
+
+**注入策略**：当上游 `api_type == "anthropic"` 时，API Switch 会自动注入这三个 headers 的默认值。如果客户端请求已携带这些 headers（如 Claude Code CLI 直连），则保留原值不覆盖。
+
+**影响范围**：此注入仅作用于 `api_type == "anthropic"` 的上游渠道，对 OpenAI、Gemini、Azure 等其他协议无影响。
+
+**实现位置**：
+- `proxy/forwarder.rs`：代理转发路径，透传/注入逻辑
+- `commands/test_chat.rs`：模型管理对话测试
+- `services/channel_service.rs`：测速、拉取模型列表
+
 ---
 
 ## 10. 流式转发

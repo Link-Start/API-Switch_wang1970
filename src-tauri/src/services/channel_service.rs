@@ -122,6 +122,7 @@ pub struct CreateChannelParams {
     pub base_url: String,
     pub api_key: String,
     pub notes: Option<String>,
+    pub upstream_headers: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -133,6 +134,7 @@ pub struct UpdateChannelParams {
     pub api_key: Option<String>,
     pub enabled: Option<bool>,
     pub notes: Option<String>,
+    pub upstream_headers: Option<Option<String>>,
 }
 
 #[derive(Deserialize)]
@@ -213,6 +215,7 @@ pub struct TestChannelDirectParams {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    pub upstream_headers: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -223,6 +226,7 @@ pub struct SaveChannelWithModelsParams {
     pub base_url: String,
     pub api_key: String,
     pub notes: Option<String>,
+    pub upstream_headers: Option<String>,
     pub enabled: Option<bool>,
     pub selected_models: Vec<String>,
     pub available_models: Vec<ModelInfo>,
@@ -266,6 +270,7 @@ pub fn create_channel(db: &Database, params: CreateChannelParams) -> Result<Chan
         &params.base_url,
         &params.api_key,
         params.notes.as_deref(),
+        params.upstream_headers.as_deref(),
     )?;
     crate::state_version::bump("channel");
     Ok(channel)
@@ -287,6 +292,7 @@ pub fn update_channel(
         params.api_key.as_deref(),
         params.enabled,
         params.notes.as_deref(),
+        params.upstream_headers.as_ref().map(|value| value.as_deref()),
     )?;
     if let Some(app) = app {
         crate::event::emit(app, "channels-changed");
@@ -430,6 +436,7 @@ pub async fn fetch_models_direct(
     base_url: String,
     api_key: String,
     verified: Option<bool>,
+    upstream_headers: Option<String>,
 ) -> Result<FetchModelsResult, AppError> {
     let base_url = normalize_base_url(&base_url);
     if base_url.is_empty() {
@@ -452,6 +459,7 @@ pub async fn fetch_models_direct(
         &base_url,
         primary_api_key(&api_key),
         verified.unwrap_or(false),
+        upstream_headers.as_deref(),
     )
     .await
     .map_err(|e| AppError::Network(e.message))
@@ -493,6 +501,7 @@ pub async fn fetch_models(
         &guess.detected_type,
         &guess.corrected_base_url,
         primary_api_key(&channel.api_key),
+        channel.upstream_headers.as_deref(),
     )
     .await
     {
@@ -559,11 +568,12 @@ async fn smart_fetch_models(
     base_url: &str,
     api_key: &str,
     _verified: bool,
+    upstream_headers: Option<&str>,
 ) -> Result<FetchModelsResult, ChannelOperationError> {
     let base_url = normalize_base_url(base_url);
     let normalized_type = normalize_api_type(api_type);
     let (models, actual_type, actual_base_url) =
-        fetch_models_result_with_fallback(normalized_type, &base_url, api_key).await?;
+        fetch_models_result_with_fallback(normalized_type, &base_url, api_key, upstream_headers).await?;
     let count = models.len();
 
     Ok(FetchModelsResult {
@@ -619,6 +629,7 @@ async fn fetch_models_result_with_fallback(
     preferred_type: &str,
     preferred_base_url: &str,
     api_key: &str,
+    upstream_headers: Option<&str>,
 ) -> Result<(Vec<ModelInfo>, &'static str, String), ChannelOperationError> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -640,7 +651,16 @@ async fn fetch_models_result_with_fallback(
             &candidate_base_url,
             api_key,
         ) {
-            match try_models_endpoint(&client, adapter.as_ref(), &url, api_key, current_type).await {
+            match try_models_endpoint(
+                &client,
+                adapter.as_ref(),
+                &url,
+                api_key,
+                current_type,
+                upstream_headers,
+            )
+            .await
+            {
                 Ok(models) if !models.is_empty() => {
                     merged_models.extend(models);
                 }
@@ -760,7 +780,7 @@ async fn detect_type_with_base_url(
     let mut reachable_candidate: Option<EndpointCandidate> = None;
 
     for url in &urls {
-        match try_models_endpoint(client, adapter.as_ref(), url, api_key, api_type).await {
+        match try_models_endpoint(client, adapter.as_ref(), url, api_key, api_type, None).await {
             Ok(models) => {
                 if !models.is_empty() {
                     if !is_authoritative_detection_success(api_type, url) {
@@ -1123,20 +1143,14 @@ async fn try_models_endpoint(
     adapter: &(dyn crate::proxy::protocol::ProtocolAdapter + Send + Sync),
     url: &str,
     api_key: &str,
-    api_type: &str,
+    _api_type: &str,
+    upstream_headers: Option<&str>,
 ) -> Result<Vec<ModelInfo>, ModelsEndpointError> {
-    let mut req = adapter.apply_auth(client.get(url), api_key);
-    // 当上游是 Anthropic 协议时，注入必需的身份头（muyuan.do 等上游需要识别客户端）
-    if api_type == "anthropic" {
-        req = req.header("user-agent", "claude-cli/2.1.176 (external, cli)");
-        req = req.header("x-app", "cli");
-        req = req.header("anthropic-beta", "claude-code-20250219");
-    }
-    // 当上游是 CODEX（new.sharedchat.cc/codex）且使用 Responses 协议时，
-    // 注入 originator 头以通过上游身份验证
-    if api_type == "responses" && url.contains("codex") {
-        req = req.header("originator", "codex_cli_rs");
-    }
+    let req = crate::services::upstream_headers::apply_upstream_headers(
+        adapter.apply_auth(client.get(url), api_key),
+        upstream_headers,
+    )
+    .map_err(|e| ModelsEndpointError::Parse(e.to_string()))?;
     let resp = req.send().await.map_err(|e| {
             if e.is_timeout() {
                 ModelsEndpointError::Timeout(e.to_string())
@@ -1322,6 +1336,7 @@ pub async fn test_channel_chat(
     api_key: &str,
     api_type: &str,
     model: &str,
+    upstream_headers: Option<&str>,
 ) -> TestChannelResult {
     let start = std::time::Instant::now();
     let client = match reqwest::Client::builder()
@@ -1361,6 +1376,18 @@ pub async fn test_channel_chat(
             .header("Content-Type", "application/json"),
         api_key,
     );
+    let req = match crate::services::upstream_headers::apply_upstream_headers(req, upstream_headers) {
+        Ok(req) => req,
+        Err(e) => {
+            let latency = start.elapsed().as_millis() as u64;
+            return TestChannelResult {
+                success: false,
+                latency_ms: latency,
+                status_code: None,
+                message: format!("Header 配置错误: {e}"),
+            };
+        }
+    };
 
     match req.json(&body).send().await {
         Ok(resp) => {
@@ -1401,6 +1428,7 @@ pub async fn test_channel_direct(params: TestChannelDirectParams) -> TestChannel
         primary_api_key(&params.api_key),
         normalize_api_type(&params.api_type),
         &params.model,
+        params.upstream_headers.as_deref(),
     )
     .await
 }
@@ -1422,6 +1450,7 @@ pub fn save_channel_with_models(
             Some(&params.api_key),
             params.enabled,
             params.notes.as_deref(),
+            Some(params.upstream_headers.as_deref()),
         )?;
         db.get_channel(id)?
     } else {
@@ -1431,6 +1460,7 @@ pub fn save_channel_with_models(
             &params.base_url,
             &params.api_key,
             params.notes.as_deref(),
+            params.upstream_headers.as_deref(),
         )?
     };
 

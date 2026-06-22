@@ -22,6 +22,7 @@ pub struct CreateChannelParams {
     pub base_url: String,
     pub api_key: String,
     pub notes: Option<String>,
+    pub upstream_headers: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -32,6 +33,7 @@ pub struct UpdateChannelParams {
     pub api_key: Option<String>,
     pub enabled: Option<bool>,
     pub notes: Option<String>,
+    pub upstream_headers: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -49,6 +51,7 @@ pub struct FetchModelsDirectParams {
     pub base_url: String,
     pub api_key: String,
     pub verified: Option<bool>,
+    pub upstream_headers: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -57,6 +60,7 @@ pub struct TestChannelDirectParams {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    pub upstream_headers: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -166,6 +170,7 @@ pub async fn create(
             base_url: payload.base_url,
             api_key: payload.api_key,
             notes: payload.notes,
+            upstream_headers: payload.upstream_headers,
         })?;
     Ok(Json(res))
 }
@@ -183,6 +188,7 @@ pub async fn update(
         api_key: payload.api_key,
         enabled: payload.enabled,
         notes: payload.notes,
+        upstream_headers: Some(payload.upstream_headers),
     };
     let chan = state.server_api()?.update_channel(params)?;
     Ok(Json(chan))
@@ -213,6 +219,7 @@ pub async fn fetch_models_direct(
         payload.base_url,
         payload.api_key,
         payload.verified,
+        payload.upstream_headers,
     )
     .await?;
     Ok(Json(ensure_fetch_models_result(res)?))
@@ -267,6 +274,7 @@ pub async fn test_channel_direct(
         base_url: payload.base_url,
         api_key: payload.api_key,
         model: payload.model,
+        upstream_headers: payload.upstream_headers,
     })
     .await;
     Ok(Json(result))

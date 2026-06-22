@@ -5,3 +5,4 @@ pub mod log_service;
 pub mod pool_service;
 pub mod token_service;
 pub mod translation_service;
+pub mod upstream_headers;

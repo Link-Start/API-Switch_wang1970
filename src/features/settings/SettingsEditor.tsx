@@ -467,6 +467,20 @@ export function SettingsEditor({
           </div>
           <div className="flex items-center justify-between">
             <div>
+              <Label>{t("settings.general.passthroughHeaderInjection")}</Label>
+              <p className="text-xs text-muted-foreground">
+                {t("settings.general.passthroughHeaderInjectionDesc")}
+              </p>
+            </div>
+            <Switch
+              checked={s.passthrough_header_injection}
+              onCheckedChange={(value) =>
+                onChange("passthrough_header_injection", value)
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
               <Label>{t("settings.general.recordRawProtocolData")}</Label>
               <p className="text-xs text-muted-foreground">
                 {t("settings.general.recordRawProtocolDataDesc")}

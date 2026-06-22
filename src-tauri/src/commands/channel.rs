@@ -67,17 +67,7 @@ pub struct CreateChannelParams {
     pub base_url: String,
     pub api_key: String,
     pub notes: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct UpdateChannelParams {
-    pub id: String,
-    pub name: Option<String>,
-    pub api_type: Option<String>,
-    pub base_url: Option<String>,
-    pub api_key: Option<String>,
-    pub enabled: Option<bool>,
-    pub notes: Option<String>,
+    pub upstream_headers: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -141,6 +131,7 @@ pub async fn create_channel(
         base_url: params.base_url,
         api_key: params.api_key,
         notes: params.notes,
+        upstream_headers: params.upstream_headers,
     })
 }
 
@@ -187,8 +178,9 @@ pub async fn fetch_models_direct(
     base_url: String,
     api_key: String,
     verified: Option<bool>,
+    upstream_headers: Option<String>,
 ) -> Result<FetchModelsResult, AppError> {
-    channel_service::fetch_models_direct(api_type, base_url, api_key, verified).await
+    channel_service::fetch_models_direct(api_type, base_url, api_key, verified, upstream_headers).await
 }
 
 #[tauri::command]

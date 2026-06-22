@@ -115,6 +115,7 @@ impl ServerApi {
             &channel.api_key,
             &channel.api_type,
             &model,
+            channel.upstream_headers.as_deref(),
         )
         .await;
 
@@ -134,6 +135,7 @@ impl ServerApi {
                     api_key: None,
                     enabled: Some(true),
                     notes: None,
+                    upstream_headers: None,
                 },
             );
         } else {

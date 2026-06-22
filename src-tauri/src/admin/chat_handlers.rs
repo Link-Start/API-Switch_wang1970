@@ -156,6 +156,37 @@ pub async fn test_chat(
     let request = adapter
         .apply_auth(client.post(&url), primary_api_key(&channel.api_key))
         .json(&upstream_body);
+    let request = crate::services::upstream_headers::apply_upstream_headers(
+        request,
+        channel.upstream_headers.as_deref(),
+    )
+    .map_err(|e| {
+        let message = format!("Header 配置错误: {e}");
+        let latency_ms = start.elapsed().as_millis() as i64;
+        insert_test_usage_log(
+            &db,
+            state.app_handle.as_ref(),
+            TestUsageLogInput {
+                entry: &entry,
+                channel: &channel,
+                operation: "test_chat",
+                log_group: "test_chat",
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                latency_ms,
+                status_code: 502,
+                success: false,
+                error_message: Some(&message),
+                request_payload: Some(&upstream_body),
+                response_payload: None,
+                error_kind: Some("header_config_error"),
+                response_ms: Some("X"),
+                error_preview: None,
+            },
+        );
+        state.mark_log_dirty();
+        AdminError::Internal(message)
+    })?;
 
     let response = match request.send().await {
         Ok(response) => response,

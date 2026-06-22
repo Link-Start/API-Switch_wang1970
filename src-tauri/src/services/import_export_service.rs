@@ -40,6 +40,8 @@ pub struct TransferChannel {
     #[serde(default)]
     pub notes: String,
     #[serde(default)]
+    pub upstream_headers: Option<String>,
+    #[serde(default)]
     pub available_models: Vec<TransferModelInfo>,
     #[serde(default)]
     pub selected_models: Vec<String>,
@@ -275,6 +277,7 @@ pub fn build_transfer(channels: &[Channel], entries: &[ApiEntry]) -> ChannelMode
                 api_key: channel.api_key.clone(),
                 enabled: channel.enabled,
                 notes: channel.notes.clone(),
+                upstream_headers: channel.upstream_headers.clone(),
                 available_models: channel
                     .available_models
                     .iter()
@@ -442,6 +445,7 @@ mod tests {
             enabled: true,
             last_fetch_at: 123456,
             notes: "主渠道".to_string(),
+            upstream_headers: None,
             response_ms: "999".to_string(),
             created_at: 1,
             updated_at: 2,
@@ -480,5 +484,16 @@ mod tests {
         assert!(!json.contains("cooldown_until"));
         assert!(!json.contains("response_ms"));
         assert!(!json.contains("last_fetch_at"));
+    }
+
+    #[test]
+    fn import_with_missing_upstream_headers_does_not_fail() {
+        let payload = valid_payload().replace(
+            "\"upstream_headers\": null,",
+            "",
+        );
+        let transfer = validate_transfer_payload(&payload)
+            .expect("缺少 upstream_headers 字段的旧文件应可导入");
+        assert!(transfer.data.channels[0].upstream_headers.is_none());
     }
 }

@@ -1245,23 +1245,13 @@ async fn forward_single(
         }
     }
 
-    // 当上游是 Anthropic 协议时，确保必需的身份头存在（注入默认值）
-    // 用于 OpenAIChat 等非 Claude Messages 协议转换到 Anthropic 上游的场景
-    // 只在非直穿场景下注入，直穿场景已由上方透传逻辑处理
-    if channel.api_type == "anthropic" && passthrough_config.is_none() {
-        request = request.header("user-agent", "claude-cli/2.1.176 (external, cli)");
-        request = request.header("x-app", "cli");
-        request = request.header("anthropic-beta", "claude-code-20250219");
-    }
-
-    // 当上游是 CODEX（new.sharedchat.cc/codex）且使用 Responses 协议时，
-    // 注入 originator 头以通过上游身份验证
-    // 只在非直穿场景下注入，直穿场景由 Codex CLI 自带身份头
-    if channel.api_type == "responses"
-        && passthrough_config.is_none()
-        && channel.base_url.contains("codex")
-    {
-        request = request.header("originator", "codex_cli_rs");
+    // 先透传客户端 Header，再按设置决定是否应用渠道 Header；同名时以渠道配置为准。
+    if passthrough_config.is_none() || settings.passthrough_header_injection {
+        request = crate::services::upstream_headers::apply_upstream_headers(
+            request,
+            channel.upstream_headers.as_deref(),
+        )
+        .map_err(|e| ForwardError::new(e.to_string(), 502, None))?;
     }
 
     if is_stream {

@@ -29,6 +29,7 @@ pub struct AppSettings {
     pub show_conversation_model: bool,
     pub disable_reasoning: bool,
     pub record_raw_protocol_data: bool,
+    pub passthrough_header_injection: bool,
     pub app_version: String,
     #[serde(skip_serializing, skip_deserializing, default)]
     pub updated_at: i64,
@@ -59,6 +60,7 @@ impl Default for AppSettings {
             show_conversation_model: false,
             disable_reasoning: true,
             record_raw_protocol_data: false,
+            passthrough_header_injection: false,
             app_version: "0.6.9".to_string(),
             locale: String::new(),
             theme: String::new(),
@@ -153,6 +155,9 @@ impl Database {
         if let Some(v) = kv.get("record_raw_protocol_data") {
             settings.record_raw_protocol_data = v == "1";
         }
+        if let Some(v) = kv.get("passthrough_header_injection") {
+            settings.passthrough_header_injection = v == "1";
+        }
         if let Some(v) = kv.get("app_version") {
             settings.app_version = v.clone();
         }
@@ -229,6 +234,14 @@ impl Database {
             (
                 "record_raw_protocol_data",
                 if updates.record_raw_protocol_data {
+                    "1"
+                } else {
+                    "0"
+                },
+            ),
+            (
+                "passthrough_header_injection",
+                if updates.passthrough_header_injection {
                     "1"
                 } else {
                     "0"

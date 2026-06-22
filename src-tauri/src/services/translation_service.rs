@@ -104,6 +104,11 @@ async fn perform_llm_call(
     let request = adapter
         .apply_auth(client.post(&url), &channel.api_key)
         .json(&upstream_body);
+    let request = crate::services::upstream_headers::apply_upstream_headers(
+        request,
+        channel.upstream_headers.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
 
     let response = request
         .send()

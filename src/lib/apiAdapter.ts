@@ -6,7 +6,7 @@ export interface ApiAdapter {
     update(params: UpdateChannelParams): Promise<Channel>;
     delete(id: string): Promise<void>;
     fetchModels(channelId: string): Promise<FetchModelsResult>;
-    fetchModelsDirect(apiType: string, baseUrl: string, apiKey: string, verified?: boolean): Promise<FetchModelsResult>;
+    fetchModelsDirect(apiType: string, baseUrl: string, apiKey: string, verified?: boolean, upstreamHeaders?: string): Promise<FetchModelsResult>;
     probeUrl(url: string, apiType?: string, apiKey?: string): Promise<ProbeResult>;
     testChannel(channelId: string): Promise<TestChannelResult>;
     testChannelDirect(params: TestChannelDirectParams): Promise<TestChannelResult>;

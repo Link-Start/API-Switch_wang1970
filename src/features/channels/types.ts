@@ -8,6 +8,7 @@
   selected_models?: string[];
   enabled: boolean;
   notes?: string;
+  upstream_headers?: string;
   response_ms?: string;
 }
 export interface CreateChannelParams {
@@ -16,6 +17,7 @@ export interface CreateChannelParams {
   base_url: string;
   api_key: string;
   notes?: string;
+  upstream_headers?: string;
 }
 export interface UpdateChannelParams {
   id: string;
@@ -25,6 +27,7 @@ export interface UpdateChannelParams {
   api_key?: string;
   enabled?: boolean;
   notes?: string;
+  upstream_headers?: string;
 }
 export interface ModelInfo {
   id: string;
@@ -101,6 +104,7 @@ export interface TestChannelDirectParams {
   base_url: string;
   api_key: string;
   model: string;
+  upstream_headers?: string;
 }
 
 
@@ -116,6 +120,7 @@ export interface SaveChannelWithModelsParams {
   available_models: ModelInfo[];
   catalog_meta?: ModelCatalogMetaUpdate[];
   response_ms?: string;
+  upstream_headers?: string;
 }
 
 export interface SaveChannelWithModelsResult {

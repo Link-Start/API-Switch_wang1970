@@ -10,6 +10,7 @@ export interface ChannelFormState {
   api_key: string;
   notes: string;
   enabled: boolean;
+  upstream_headers: string;
 }
 
 /** URL Probe 鎺㈡祴缁撴灉 */
@@ -31,6 +32,7 @@ export const DEFAULT_FORM: ChannelFormState = {
   api_key: '',
   notes: '',
   enabled: true,
+  upstream_headers: '',
 };
 
 /** API 绫诲瀷鍒楄〃 */
@@ -53,6 +55,7 @@ export function channelToForm(channel: Channel): ChannelFormState {
     notes: channel.notes ?? '',
     api_type: channel.api_type === 'custom' ? 'openai' : (channel.api_type === 'claude' ? 'anthropic' : channel.api_type),
     enabled: channel.enabled,
+    upstream_headers: channel.upstream_headers ?? '',
   };
 }
 

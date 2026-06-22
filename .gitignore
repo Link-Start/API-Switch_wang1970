@@ -149,3 +149,4 @@ HEADLESS.md
 # Skills CLI artifacts
 .agents/
 skills-lock.json
+.opencode/

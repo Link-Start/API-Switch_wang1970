@@ -472,6 +472,8 @@
       "showConversationModelDesc": "Append the resolved model name at the end of streamed replies",
       "disableReasoning": "Disable reasoning",
       "disableReasoningDesc": "When enabled, reasoning/thinking data is intercepted and not passed upstream (default: on)",
+      "passthroughHeaderInjection": "Inject channel headers in passthrough requests",
+      "passthroughHeaderInjectionDesc": "Off by default. Only affects protocol passthrough requests; normal proxy/protocol conversion requests still use channel headers. Enable only if you accept compatibility risk.",
       "recordRawProtocolData": "Record raw protocol data",
       "recordRawProtocolDataDesc": "When enabled, write raw request and upstream response data into database logs for debugging; uses more database space (default: off)",
       "currentVersion": "Version"

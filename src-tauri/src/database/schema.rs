@@ -15,6 +15,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
             enabled INTEGER DEFAULT 1,
             last_fetch_at INTEGER DEFAULT 0,
             notes TEXT,
+            upstream_headers TEXT,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         )",
@@ -182,6 +183,7 @@ pub fn create_tables(conn: &Connection) -> Result<(), AppError> {
         ("show_conversation_model", "0"),
         ("disable_reasoning", "1"),
         ("record_raw_protocol_data", "0"),
+        ("passthrough_header_injection", "0"),
         ("app_version", "0.6.9"),
     ];
 
@@ -239,6 +241,24 @@ fn ensure_api_entry_columns(conn: &Connection) -> Result<(), AppError> {
 
 fn ensure_channel_columns(conn: &Connection) -> Result<(), AppError> {
     ensure_column(conn, "channels", "response_ms", "TEXT DEFAULT ''")?;
+    ensure_column(conn, "channels", "upstream_headers", "TEXT")?;
+
+    // 旧数据迁移：将临时硬编码的 Header 落到渠道配置中
+    let claude_headers = r#"{"user-agent":"claude-cli/2.1.176 (external, cli)","x-app":"cli","anthropic-beta":"claude-code-20250219"}"#;
+    let codex_headers = r#"{"originator":"codex_cli_rs"}"#;
+
+    // api_type = 'anthropic' 的既有渠道写入 Claude CLI Header
+    conn.execute(
+        "UPDATE channels SET upstream_headers = ?1 WHERE (upstream_headers IS NULL OR TRIM(upstream_headers) = '') AND api_type = 'anthropic'",
+        rusqlite::params![claude_headers],
+    ).map_err(|e| AppError::Database(e.to_string()))?;
+
+    // api_type = 'responses' 且 base_url 包含 'codex' 的渠道写入 CODEX Header
+    conn.execute(
+        "UPDATE channels SET upstream_headers = ?1 WHERE (upstream_headers IS NULL OR TRIM(upstream_headers) = '') AND api_type = 'responses' AND base_url LIKE '%codex%'",
+        rusqlite::params![codex_headers],
+    ).map_err(|e| AppError::Database(e.to_string()))?;
+
     Ok(())
 }
 

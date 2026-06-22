@@ -15,6 +15,7 @@ pub struct Channel {
     pub enabled: bool,
     pub last_fetch_at: i64,
     pub notes: String,
+    pub upstream_headers: Option<String>,
     pub response_ms: String,
     pub created_at: i64,
     pub updated_at: i64,
@@ -41,7 +42,7 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn.prepare(
             "SELECT id, name, api_type, base_url, api_key, available_models, selected_models,
-                    enabled, last_fetch_at, notes, response_ms, created_at, updated_at
+                    enabled, last_fetch_at, notes, upstream_headers, response_ms, created_at, updated_at
              FROM channels ORDER BY created_at",
         )?;
 
@@ -63,9 +64,10 @@ impl Database {
                     enabled: enabled != 0,
                     last_fetch_at: row.get(8)?,
                     notes: row.get(9)?,
-                    response_ms: row.get(10)?,
-                    created_at: row.get(11)?,
-                    updated_at: row.get(12)?,
+                    upstream_headers: row.get(10)?,
+                    response_ms: row.get(11)?,
+                    created_at: row.get(12)?,
+                    updated_at: row.get(13)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()
@@ -88,7 +90,7 @@ impl Database {
 
         let mut stmt = conn.prepare(
             "SELECT id, name, api_type, base_url, api_key, available_models, selected_models,
-                    enabled, last_fetch_at, notes, response_ms, created_at, updated_at
+                    enabled, last_fetch_at, notes, upstream_headers, response_ms, created_at, updated_at
              FROM channels ORDER BY created_at LIMIT ?1 OFFSET ?2",
         )?;
 
@@ -110,9 +112,10 @@ impl Database {
                     enabled: enabled != 0,
                     last_fetch_at: row.get(8)?,
                     notes: row.get(9)?,
-                    response_ms: row.get(10)?,
-                    created_at: row.get(11)?,
-                    updated_at: row.get(12)?,
+                    upstream_headers: row.get(10)?,
+                    response_ms: row.get(11)?,
+                    created_at: row.get(12)?,
+                    updated_at: row.get(13)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()
@@ -133,6 +136,7 @@ impl Database {
         base_url: &str,
         api_key: &str,
         notes: Option<&str>,
+        upstream_headers: Option<&str>,
     ) -> Result<Channel, AppError> {
         let conn = lock_conn!(self.conn);
         let id = uuid::Uuid::new_v4().to_string();
@@ -141,9 +145,19 @@ impl Database {
         let normalized_api_type = normalize_channel_api_type(api_type);
 
         conn.execute(
-            "INSERT INTO channels (id, name, api_type, base_url, api_key, available_models, selected_models, enabled, last_fetch_at, notes, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, '[]', '[]', 1, 0, ?6, ?7, ?8)",
-            rusqlite::params![id, name, normalized_api_type, base_url, api_key, notes.unwrap_or(""), now, now],
+            "INSERT INTO channels (id, name, api_type, base_url, api_key, available_models, selected_models, enabled, last_fetch_at, notes, upstream_headers, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, '[]', '[]', 1, 0, ?6, ?7, ?8, ?9)",
+            rusqlite::params![
+                id,
+                name,
+                normalized_api_type,
+                base_url,
+                api_key,
+                notes.unwrap_or(""),
+                upstream_headers,
+                now,
+                now
+            ],
         )?;
 
         Ok(Channel {
@@ -157,6 +171,7 @@ impl Database {
             enabled: true,
             last_fetch_at: 0,
             notes: notes.unwrap_or("").to_string(),
+            upstream_headers: upstream_headers.map(str::to_string),
             response_ms: String::new(),
             created_at: now,
             updated_at: now,
@@ -172,6 +187,7 @@ impl Database {
         api_key: Option<&str>,
         enabled: Option<bool>,
         notes: Option<&str>,
+        upstream_headers: Option<Option<&str>>,
     ) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
         let now = chrono::Utc::now().timestamp();
@@ -179,7 +195,7 @@ impl Database {
         let current: Channel = {
             let mut stmt = conn.prepare(
                 "SELECT id, name, api_type, base_url, api_key, available_models, selected_models,
-                        enabled, last_fetch_at, notes, response_ms, created_at, updated_at
+                        enabled, last_fetch_at, notes, upstream_headers, response_ms, created_at, updated_at
                  FROM channels WHERE id = ?1",
             )?;
             stmt.query_row([id], |row| {
@@ -198,9 +214,10 @@ impl Database {
                     enabled: enabled != 0,
                     last_fetch_at: row.get(8)?,
                     notes: row.get(9)?,
-                    response_ms: row.get(10)?,
-                    created_at: row.get(11)?,
-                    updated_at: row.get(12)?,
+                    upstream_headers: row.get(10)?,
+                    response_ms: row.get(11)?,
+                    created_at: row.get(12)?,
+                    updated_at: row.get(13)?,
                 })
             })
             .map_err(|e| AppError::NotFound(format!("Channel {id}: {e}")))?
@@ -212,10 +229,13 @@ impl Database {
         let api_key = api_key.unwrap_or(&current.api_key);
         let enabled_val = enabled.unwrap_or(current.enabled) as i32;
         let notes = notes.unwrap_or(&current.notes);
+        let upstream_headers = upstream_headers
+            .map(|value| value.map(str::to_string))
+            .unwrap_or(current.upstream_headers);
 
         conn.execute(
-            "UPDATE channels SET name=?1, api_type=?2, base_url=?3, api_key=?4, enabled=?5, notes=?6, updated_at=?7
-             WHERE id=?8",
+            "UPDATE channels SET name=?1, api_type=?2, base_url=?3, api_key=?4, enabled=?5, notes=?6, upstream_headers=?7, updated_at=?8
+             WHERE id=?9",
             rusqlite::params![
                 name,
                 normalized_api_type,
@@ -223,6 +243,7 @@ impl Database {
                 api_key,
                 enabled_val,
                 notes,
+                upstream_headers,
                 now,
                 id
             ],
@@ -312,7 +333,7 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn.prepare(
             "SELECT id, name, api_type, base_url, api_key, available_models, selected_models,
-                    enabled, last_fetch_at, notes, response_ms, created_at, updated_at
+                    enabled, last_fetch_at, notes, upstream_headers, response_ms, created_at, updated_at
              FROM channels WHERE id = ?1",
         )?;
 
@@ -331,10 +352,11 @@ impl Database {
                 selected_models: serde_json::from_str(&selected_models_str).unwrap_or_default(),
                 enabled: enabled != 0,
                 last_fetch_at: row.get(8)?,
-                notes: row.get(9)?,
-                response_ms: row.get(10)?,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
+                    notes: row.get(9)?,
+                    upstream_headers: row.get(10)?,
+                    response_ms: row.get(11)?,
+                    created_at: row.get(12)?,
+                    updated_at: row.get(13)?,
             })
         })
         .map_err(|e| AppError::NotFound(format!("Channel {id}: {e}")))

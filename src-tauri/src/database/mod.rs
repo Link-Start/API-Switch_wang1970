@@ -83,6 +83,7 @@ impl Database {
             "https://open.bigmodel.cn/api/paas/v4",
             keys[pick],
             None,
+            None,
         )?;
 
         self.create_entry(

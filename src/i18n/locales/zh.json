@@ -472,6 +472,8 @@
       "showConversationModelDesc": "流式回答结束时追加实际命中的模型名称",
       "disableReasoning": "关闭思维链",
       "disableReasoningDesc": "开启后会拦截思维链相关数据，不传递到上游（默认开启）",
+      "passthroughHeaderInjection": "直穿请求也注入渠道 Header",
+      "passthroughHeaderInjectionDesc": "默认关闭。仅影响协议直穿请求；普通代理/协议转换请求仍按渠道配置注入。开启后需自行承担兼容性风险。",
       "recordRawProtocolData": "记录原始协议数据",
       "recordRawProtocolDataDesc": "开启后把请求和上游响应原始数据写入数据库日志，便于调试；会占用更多数据库空间（默认关闭）",
       "currentVersion": "当前版本"

@@ -19,6 +19,7 @@ export interface Channel {
   enabled: boolean;
   last_fetch_at: number;
   notes: string;
+  upstream_headers: string;
   response_ms: string;
   created_at: number;
   updated_at: number;
@@ -56,6 +57,7 @@ export interface CreateChannelParams {
   base_url: string;
   api_key: string;
   notes?: string;
+  upstream_headers?: string;
 }
 
 export interface UpdateChannelParams {
@@ -66,6 +68,7 @@ export interface UpdateChannelParams {
   api_key?: string;
   enabled?: boolean;
   notes?: string;
+  upstream_headers?: string;
 }
 
 // --- API Entry ---
@@ -234,6 +237,7 @@ export interface AppSettings {
   show_conversation_model: boolean;
   disable_reasoning: boolean;
   record_raw_protocol_data: boolean;
+  passthrough_header_injection: boolean;
   web_admin_enabled: boolean;
   web_admin_username: string;
   web_admin_password: string;
@@ -283,6 +287,7 @@ export const DEFAULT_SETTINGS: VersionedAppSettings = {
   show_conversation_model: false,
   disable_reasoning: true,
   record_raw_protocol_data: false,
+  passthrough_header_injection: false,
   web_admin_enabled: false,
   web_admin_username: "admin",
   web_admin_password: "admin",

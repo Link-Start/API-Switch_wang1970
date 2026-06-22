@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { RefreshCw, Save, X, Zap } from 'lucide-react';
+import { RefreshCw, Save, X, Zap, Type } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -27,6 +27,128 @@ import { buildEntryCatalogMeta, formatReleaseDate } from './utils';
 type EditorModelInfo = ModelInfo & {
   sourceProtocol: string;
   temporary?: boolean;
+};
+
+/** Header 注入控制组件 */
+const HeaderInjectionControl: React.FC<{
+  value: string;
+  onChange: (value: string) => void;
+}> = ({ value, onChange }) => {
+  const { t } = useTranslation();
+  const [mode, setMode] = useState<'custom' | 'claude' | 'codex'>('custom');
+  const [jsonText, setJsonText] = useState(value);
+  const [jsonError, setJsonError] = useState<string | null>(null);
+
+  // 预设模板
+  const templates = {
+    claude: JSON.stringify({
+      "user-agent": "claude-cli/2.1.176 (external, cli)",
+      "x-app": "cli",
+      "anthropic-beta": "claude-code-20250219"
+    }, null, 2),
+    codex: JSON.stringify({
+      "originator": "codex_cli_rs"
+    }, null, 2)
+  };
+
+  // 验证 JSON
+  const validateJson = (text: string): boolean => {
+    if (!text.trim()) {
+      setJsonError(null);
+      return true;
+    }
+    try {
+      const parsed = JSON.parse(text);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        setJsonError('必须是 JSON 对象');
+        return false;
+      }
+      if (!Object.values(parsed).every((value) => typeof value === 'string')) {
+        setJsonError('Header 名和值必须是字符串');
+        return false;
+      }
+      setJsonError(null);
+      return true;
+    } catch {
+      setJsonError('无效的 JSON 格式');
+      return false;
+    }
+  };
+
+  // 处理模式切换
+  const handleModeChange = (newMode: 'custom' | 'claude' | 'codex') => {
+    setMode(newMode);
+    if (newMode !== 'custom') {
+      const template = templates[newMode];
+      setJsonText(template);
+      onChange(template);
+      setJsonError(null);
+    } else {
+      setJsonText(value);
+      validateJson(value);
+    }
+  };
+
+  // 处理文本变化
+  const handleTextChange = (text: string) => {
+    setJsonText(text);
+    if (mode === 'custom') {
+      validateJson(text);
+      onChange(text);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="upstream-headers">Header 注入配置</Label>
+      <div className="flex gap-1">
+        <Button
+          type="button"
+          size="sm"
+          variant={mode === 'custom' ? "default" : "outline"}
+          onClick={() => handleModeChange('custom')}
+          className="flex-1"
+        >
+          自定义
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={mode === 'claude' ? "default" : "outline"}
+          onClick={() => handleModeChange('claude')}
+          className="flex-1"
+        >
+          CLAUDE
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={mode === 'codex' ? "default" : "outline"}
+          onClick={() => handleModeChange('codex')}
+          className="flex-1"
+        >
+          CODEX
+        </Button>
+      </div>
+      <textarea
+        id="upstream-headers"
+        value={jsonText}
+        onChange={(e) => handleTextChange(e.target.value)}
+        placeholder='{"x-custom": "value"}'
+        rows={4}
+        className={cn(
+          "flex min-h-20 w-full resize-y rounded-md border border-input bg-transparent px-3 py-1.5 text-sm font-mono shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+          jsonError && "border-destructive focus-visible:ring-destructive"
+        )}
+      />
+      {jsonError && (
+        <div className="text-xs text-destructive">{jsonError}</div>
+      )}
+      <div className="text-[11px] text-muted-foreground">
+        仅支持静态 JSON 对象，Header 名和值都必须是字符串。
+      </div>
+    </div>
+  );
 };
 
 /** 渠道编辑器对话框组件 */
@@ -250,7 +372,7 @@ export const ChannelEditorDialog: React.FC<{
   };
 
   const fetchModelsByProtocol = async (apiType: string): Promise<{ result: FetchModelsResult; models: EditorModelInfo[] }> => {
-    const result = await api.channels.fetchModelsDirect(apiType, form.base_url, primaryApiKey, false);
+    const result = await api.channels.fetchModelsDirect(apiType, form.base_url, primaryApiKey, false, form.upstream_headers || undefined);
     if (result.models.length > 0) {
       setAvailableProtocols(prev => Array.from(new Set([...prev, apiType])));
     }
@@ -362,6 +484,7 @@ export const ChannelEditorDialog: React.FC<{
                 base_url: form.base_url,
                 api_key: primaryApiKey,
                 model: model.name,
+                upstream_headers: form.upstream_headers || undefined,
               });
               results[model.name] = result.success
                 ? { success: true, latency: result.latency_ms }
@@ -400,6 +523,25 @@ export const ChannelEditorDialog: React.FC<{
       toast.error(t('channel.editor.requiredFieldsHint', '请确保填写有效的 Base URL 与 API Key 后再保存'));
       return;
     }
+
+    // 验证 upstream_headers JSON
+    if (form.upstream_headers.trim()) {
+      try {
+        const parsed = JSON.parse(form.upstream_headers);
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          toast.error('Header 注入配置必须是有效的 JSON 对象');
+          return;
+        }
+        if (!Object.values(parsed).every((value) => typeof value === 'string')) {
+          toast.error('Header 名和值必须是字符串');
+          return;
+        }
+      } catch {
+        toast.error('Header 注入配置包含无效的 JSON 格式');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       const keys = form.id ? [primaryApiKey] : apiKeys;
@@ -422,6 +564,7 @@ export const ChannelEditorDialog: React.FC<{
           available_models: availableModels,
           catalog_meta: selectedModels.map(buildEntryCatalogMeta),
           response_ms: urlProbe?.reachable && urlProbe.latency_ms > 0 ? String(urlProbe.latency_ms) : undefined,
+          upstream_headers: form.upstream_headers || undefined,
         };
 
         try {
@@ -562,6 +705,12 @@ return (
                 className="flex min-h-14 w-full resize-y rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
+
+            {/* Header 注入配置 */}
+            <HeaderInjectionControl
+              value={form.upstream_headers}
+              onChange={(value) => setValue('upstream_headers', value)}
+            />
 
             {/* 获取模型按钮 - fill 宽度长条按钮，位于渠道区底部 */}
             <Button 

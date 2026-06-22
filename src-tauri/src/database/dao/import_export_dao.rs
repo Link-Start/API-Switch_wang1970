@@ -31,8 +31,8 @@ impl Database {
             tx.execute(
                 "INSERT INTO channels (
                     id, name, api_type, base_url, api_key, available_models, selected_models,
-                    enabled, last_fetch_at, notes, response_ms, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, '', ?10, ?10)",
+                    enabled, last_fetch_at, notes, upstream_headers, response_ms, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, ?10, '', ?11, ?11)",
                 rusqlite::params![
                     channel_id,
                     channel.name.trim(),
@@ -43,6 +43,7 @@ impl Database {
                     selected_models,
                     if channel.enabled { 1 } else { 0 },
                     channel.notes,
+                    channel.upstream_headers,
                     now,
                 ],
             )?;
@@ -108,6 +109,7 @@ mod tests {
                 "https://old.example.com",
                 "old-key",
                 None,
+                None,
             )
             .unwrap();
         db.create_entry(
@@ -138,6 +140,7 @@ mod tests {
             enabled: true,
             last_fetch_at: 999,
             notes: "迁移渠道".to_string(),
+            upstream_headers: Some(r#"{"x-custom":"abc"}"#.to_string()),
             response_ms: "999".to_string(),
             created_at: 1,
             updated_at: 2,
@@ -191,6 +194,10 @@ mod tests {
         assert_eq!(entries[0].cooldown_until, None);
         assert_ne!(entries[0].id, "source-entry-id");
         assert_eq!(entries[0].channel_id, channels[0].id);
+        assert_eq!(
+            channels[0].upstream_headers.as_deref(),
+            Some(r#"{"x-custom":"abc"}"#)
+        );
     }
 
     #[test]
@@ -202,6 +209,7 @@ mod tests {
                 "openai",
                 "https://old.example.com",
                 "old-key-12345",
+                None,
                 None,
             )
             .unwrap();
@@ -245,6 +253,7 @@ mod tests {
             enabled: true,
             last_fetch_at: 999,
             notes: "迁移渠道".to_string(),
+            upstream_headers: None,
             response_ms: "999".to_string(),
             created_at: 1,
             updated_at: 2,

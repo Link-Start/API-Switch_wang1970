@@ -715,6 +715,12 @@ return (
               </div>
             </div>
 
+            {/* Header 注入配置 */}
+            <HeaderInjectionControl
+              value={form.upstream_headers}
+              onChange={(value) => setValue('upstream_headers', value)}
+            />
+
             <div className="space-y-2">
               <Label htmlFor="channel-notes">{t('channel.editor.notes')}</Label>
               <textarea
@@ -725,12 +731,6 @@ return (
                 className="flex min-h-14 w-full resize-y rounded-md border border-input bg-transparent px-3 py-1.5 text-sm shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
-
-            {/* Header 注入配置 */}
-            <HeaderInjectionControl
-              value={form.upstream_headers}
-              onChange={(value) => setValue('upstream_headers', value)}
-            />
 
             {/* 获取模型按钮 - fill 宽度长条按钮，位于渠道区底部 */}
             <Button 

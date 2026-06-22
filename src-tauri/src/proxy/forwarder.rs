@@ -1247,16 +1247,11 @@ async fn forward_single(
 
     // 当上游是 Anthropic 协议时，确保必需的身份头存在（注入默认值）
     // 用于 OpenAIChat 等非 Claude Messages 协议转换到 Anthropic 上游的场景
-    if channel.api_type == "anthropic" {
-        if !original_headers.contains_key("user-agent") {
-            request = request.header("user-agent", "claude-cli/2.1.176 (external, cli)");
-        }
-        if !original_headers.contains_key("x-app") {
-            request = request.header("x-app", "cli");
-        }
-        if !original_headers.contains_key("anthropic-beta") {
-            request = request.header("anthropic-beta", "claude-code-20250219");
-        }
+    // 只在非直穿场景下注入，直穿场景已由上方透传逻辑处理
+    if channel.api_type == "anthropic" && passthrough_config.is_none() {
+        request = request.header("user-agent", "claude-cli/2.1.176 (external, cli)");
+        request = request.header("x-app", "cli");
+        request = request.header("anthropic-beta", "claude-code-20250219");
     }
 
     if is_stream {

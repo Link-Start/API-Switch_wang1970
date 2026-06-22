@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { RefreshCw, Save, X, Zap, Type } from 'lucide-react';
+import { ChevronRight, RefreshCw, Save, X, Zap, Type } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -35,6 +35,7 @@ const HeaderInjectionControl: React.FC<{
   onChange: (value: string) => void;
 }> = ({ value, onChange }) => {
   const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(() => value.trim().length > 0);
   const [mode, setMode] = useState<'custom' | 'claude' | 'codex'>('custom');
   const [jsonText, setJsonText] = useState(value);
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -78,6 +79,7 @@ const HeaderInjectionControl: React.FC<{
   // 处理模式切换
   const handleModeChange = (newMode: 'custom' | 'claude' | 'codex') => {
     setMode(newMode);
+    setExpanded(true);
     if (newMode !== 'custom') {
       const template = templates[newMode];
       setJsonText(template);
@@ -100,53 +102,71 @@ const HeaderInjectionControl: React.FC<{
 
   return (
     <div className="space-y-2">
-      <Label htmlFor="upstream-headers">Header 注入配置</Label>
-      <div className="flex gap-1">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 text-sm font-medium leading-none"
+      >
+        <ChevronRight
+          className={cn(
+            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+            expanded && "rotate-90"
+          )}
+        />
+        Header 注入配置
+      </button>
+      <div className="flex rounded-md overflow-hidden border border-input">
         <Button
           type="button"
           size="sm"
-          variant={mode === 'custom' ? "default" : "outline"}
+          variant={mode === 'custom' ? "default" : "ghost"}
           onClick={() => handleModeChange('custom')}
-          className="flex-1"
+          className="flex-1 rounded-none"
         >
           自定义
         </Button>
+        <div className="w-px bg-border" />
         <Button
           type="button"
           size="sm"
-          variant={mode === 'claude' ? "default" : "outline"}
+          variant={mode === 'claude' ? "default" : "ghost"}
           onClick={() => handleModeChange('claude')}
-          className="flex-1"
+          className="flex-1 rounded-none"
         >
           CLAUDE
         </Button>
+        <div className="w-px bg-border" />
         <Button
           type="button"
           size="sm"
-          variant={mode === 'codex' ? "default" : "outline"}
+          variant={mode === 'codex' ? "default" : "ghost"}
           onClick={() => handleModeChange('codex')}
-          className="flex-1"
+          className="flex-1 rounded-none"
         >
           CODEX
         </Button>
       </div>
-      <textarea
-        id="upstream-headers"
-        value={jsonText}
-        onChange={(e) => handleTextChange(e.target.value)}
-        placeholder='{"x-custom": "value"}'
-        rows={4}
-        className={cn(
-          "flex min-h-20 w-full resize-y rounded-md border border-input bg-transparent px-3 py-1.5 text-sm font-mono shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-          jsonError && "border-destructive focus-visible:ring-destructive"
-        )}
-      />
-      {jsonError && (
-        <div className="text-xs text-destructive">{jsonError}</div>
+      {expanded && (
+        <>
+          <textarea
+            id="upstream-headers"
+            value={jsonText}
+            onChange={(e) => handleTextChange(e.target.value)}
+            placeholder='{"x-custom": "value"}'
+            rows={2}
+            className={cn(
+              "flex w-full resize-y rounded-md border border-input bg-transparent px-3 py-1.5 text-sm font-mono shadow-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+              jsonError && "border-destructive focus-visible:ring-destructive"
+            )}
+          />
+          {jsonError && (
+            <div className="text-xs text-destructive">{jsonError}</div>
+          )}
+          <div className="text-[11px] text-muted-foreground">
+            仅支持静态 JSON 对象，Header 名和值都必须是字符串。
+          </div>
+        </>
       )}
-      <div className="text-[11px] text-muted-foreground">
-        仅支持静态 JSON 对象，Header 名和值都必须是字符串。
-      </div>
     </div>
   );
 };

@@ -1132,6 +1132,11 @@ async fn try_models_endpoint(
         req = req.header("x-app", "cli");
         req = req.header("anthropic-beta", "claude-code-20250219");
     }
+    // 当上游是 CODEX（new.sharedchat.cc/codex）且使用 Responses 协议时，
+    // 注入 originator 头以通过上游身份验证
+    if api_type == "responses" && url.contains("codex") {
+        req = req.header("originator", "codex_cli_rs");
+    }
     let resp = req.send().await.map_err(|e| {
             if e.is_timeout() {
                 ModelsEndpointError::Timeout(e.to_string())

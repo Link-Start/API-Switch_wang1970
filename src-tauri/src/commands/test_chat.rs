@@ -205,6 +205,12 @@ pub async fn test_chat(
         request = request.header("anthropic-beta", "claude-code-20250219");
     }
 
+    // 当上游是 CODEX（new.sharedchat.cc/codex）且使用 Responses 协议时，
+    // 注入 originator 头以通过上游身份验证
+    if channel.api_type == "responses" && channel.base_url.contains("codex") {
+        request = request.header("originator", "codex_cli_rs");
+    }
+
     let response = match request.send().await {
         Ok(response) => response,
         Err(e) => {

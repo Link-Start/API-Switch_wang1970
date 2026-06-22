@@ -1254,6 +1254,16 @@ async fn forward_single(
         request = request.header("anthropic-beta", "claude-code-20250219");
     }
 
+    // 当上游是 CODEX（new.sharedchat.cc/codex）且使用 Responses 协议时，
+    // 注入 originator 头以通过上游身份验证
+    // 只在非直穿场景下注入，直穿场景由 Codex CLI 自带身份头
+    if channel.api_type == "responses"
+        && passthrough_config.is_none()
+        && channel.base_url.contains("codex")
+    {
+        request = request.header("originator", "codex_cli_rs");
+    }
+
     if is_stream {
         request = request.header("Accept", "text/event-stream");
         request = request.header("Accept-Encoding", "identity");

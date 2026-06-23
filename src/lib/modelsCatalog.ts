@@ -36,8 +36,10 @@ type CatalogProvider = {
 };
 
 type CatalogData = Record<string, CatalogProvider>;
+type CatalogModelMap = Record<string, CatalogModel>;
+type CatalogRoot = CatalogData | CatalogModelMap | { models?: CatalogModelMap; providers?: CatalogData };
 
-const catalog = rawCatalog as CatalogData;
+const catalog = rawCatalog as CatalogRoot;
 const modelIndex = new Map<string, CatalogModel>();
 const modelEntries: Array<{ key: string; normalized: string; model: CatalogModel }> = [];
 
@@ -138,28 +140,87 @@ function similarityScore(input: string, candidate: string): number {
   return overlap * 100 - penalty;
 }
 
-for (const provider of Object.values(catalog)) {
-  for (const [modelKey, model] of Object.entries(provider.models || {})) {
-    const enrichedModel: CatalogModel = { ...model, provider_id: provider.id };
-    const key = modelKey.toLowerCase();
-    const current = modelIndex.get(key);
-    if (!current || scoreModel(enrichedModel) > scoreModel(current)) {
-      modelIndex.set(key, enrichedModel);
-    }
-    if (enrichedModel.id && enrichedModel.id.toLowerCase() !== key) {
-      const idKey = enrichedModel.id.toLowerCase();
-      const currentById = modelIndex.get(idKey);
-      if (!currentById || scoreModel(enrichedModel) > scoreModel(currentById)) {
-        modelIndex.set(idKey, enrichedModel);
-      }
-    }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
-    for (const variant of new Set([key, enrichedModel.id?.toLowerCase()].filter(Boolean) as string[])) {
-      for (const normalized of buildKeyVariants(variant)) {
-        modelEntries.push({ key: variant, normalized, model: enrichedModel });
-      }
+function isCatalogModel(value: unknown): value is CatalogModel {
+  return isRecord(value) && typeof value.id === "string";
+}
+
+function inferProviderId(modelKey: string, model: CatalogModel, fallbackProviderId?: string): string | undefined {
+  if (fallbackProviderId) return fallbackProviderId;
+  const id = model.id || modelKey;
+  const slashIdx = id.indexOf("/");
+  if (slashIdx > 0) return id.slice(0, slashIdx).toLowerCase();
+  const keySlashIdx = modelKey.indexOf("/");
+  if (keySlashIdx > 0) return modelKey.slice(0, keySlashIdx).toLowerCase();
+  return model.provider_id;
+}
+
+function setModelIndex(key: string, model: CatalogModel): void {
+  const normalizedKey = key.toLowerCase();
+  const current = modelIndex.get(normalizedKey);
+  if (!current || scoreModel(model) > scoreModel(current)) {
+    modelIndex.set(normalizedKey, model);
+  }
+}
+
+function stripNamespace(value: string): string | null {
+  const slashIdx = value.indexOf("/");
+  if (slashIdx <= 0 || slashIdx === value.length - 1) return null;
+  return value.slice(slashIdx + 1);
+}
+
+function addCatalogModel(modelKey: string, model: CatalogModel, providerId?: string): void {
+  const inferredProviderId = inferProviderId(modelKey, model, providerId);
+  const enrichedModel: CatalogModel = { ...model, provider_id: inferredProviderId };
+  const rawVariants = new Set([modelKey, enrichedModel.id].filter(Boolean) as string[]);
+
+  for (const rawVariant of Array.from(rawVariants)) {
+    const unqualified = stripNamespace(rawVariant);
+    if (unqualified) rawVariants.add(unqualified);
+  }
+
+  for (const rawVariant of rawVariants) {
+    setModelIndex(rawVariant, enrichedModel);
+  }
+
+  for (const variant of Array.from(rawVariants, (value) => value.toLowerCase())) {
+    for (const normalized of buildKeyVariants(variant)) {
+      modelEntries.push({ key: variant, normalized, model: enrichedModel });
     }
   }
+}
+
+function addProviderCatalog(providerCatalog: CatalogData): void {
+  for (const provider of Object.values(providerCatalog)) {
+    for (const [modelKey, model] of Object.entries(provider.models || {})) {
+      addCatalogModel(modelKey, model, provider.id);
+    }
+  }
+}
+
+function addModelCatalog(modelCatalog: CatalogModelMap): void {
+  for (const [modelKey, model] of Object.entries(modelCatalog)) {
+    if (isCatalogModel(model)) addCatalogModel(modelKey, model);
+  }
+}
+
+function hasProviderEntries(value: unknown): value is CatalogData {
+  return isRecord(value) && Object.values(value).some((entry) => isRecord(entry) && isRecord(entry.models));
+}
+
+function hasModelEntries(value: unknown): value is CatalogModelMap {
+  return isRecord(value) && Object.values(value).some(isCatalogModel);
+}
+
+if (isRecord(catalog) && hasModelEntries(catalog.models)) {
+  addModelCatalog(catalog.models);
+} else if (hasProviderEntries(catalog)) {
+  addProviderCatalog(catalog);
+} else if (hasModelEntries(catalog)) {
+  addModelCatalog(catalog);
 }
 
 export function getCatalogModelExact(modelId: string): CatalogModel | null {

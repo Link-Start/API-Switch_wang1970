@@ -12,7 +12,7 @@ use crate::services::channel_service::{
     ChannelOperationError, FetchModelsResult, ProbeResult, TestChannelResult,
 };
 use axum::extract::{Json, Path, Query, State};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 // Types for request bodies 鈥?reuse the same definitions as in the Tauri commands
 #[derive(Deserialize)]
@@ -33,7 +33,16 @@ pub struct UpdateChannelParams {
     pub api_key: Option<String>,
     pub enabled: Option<bool>,
     pub notes: Option<String>,
-    pub upstream_headers: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub upstream_headers: Option<Option<String>>,
+}
+
+fn deserialize_optional_field<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Deserialize)]
@@ -188,7 +197,7 @@ pub async fn update(
         api_key: payload.api_key,
         enabled: payload.enabled,
         notes: payload.notes,
-        upstream_headers: Some(payload.upstream_headers),
+        upstream_headers: payload.upstream_headers,
     };
     let chan = state.server_api()?.update_channel(params)?;
     Ok(Json(chan))
@@ -290,7 +299,7 @@ pub async fn save_with_models(
 
 #[cfg(test)]
 mod tests {
-    use super::ProbeUrlParams;
+    use super::{ProbeUrlParams, UpdateChannelParams};
     use serde_json::json;
 
     #[test]
@@ -317,5 +326,28 @@ mod tests {
 
         assert_eq!(params.api_type.as_deref(), Some("claude"));
         assert_eq!(params.api_key.as_deref(), Some("sk-test"));
+    }
+    #[test]
+    fn update_channel_params_distinguish_missing_and_null_upstream_headers() {
+        let missing: UpdateChannelParams = serde_json::from_value(json!({
+            "name": "keep existing headers"
+        }))
+        .expect("missing upstream_headers should deserialize");
+        assert!(missing.upstream_headers.is_none());
+
+        let explicit_null: UpdateChannelParams = serde_json::from_value(json!({
+            "upstream_headers": null
+        }))
+        .expect("explicit null upstream_headers should deserialize");
+        assert!(matches!(explicit_null.upstream_headers, Some(None)));
+
+        let explicit_value: UpdateChannelParams = serde_json::from_value(json!({
+            "upstream_headers": "{\"x-app\":\"cli\"}"
+        }))
+        .expect("explicit upstream_headers value should deserialize");
+        assert_eq!(
+            explicit_value.upstream_headers,
+            Some(Some("{\"x-app\":\"cli\"}".to_string()))
+        );
     }
 }

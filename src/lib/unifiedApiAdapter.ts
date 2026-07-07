@@ -392,7 +392,7 @@ export const apiAdapter: ApiAdapter = {
     reorder: (orderedIds) =>
       useTauri()
         ? tauriCmd<void>('reorder_entries', { orderedIds })
-        : webRequest<void>('POST', '/pool/reorder', { ordered_ids: orderedIds }),
+        : webRequest<void>('POST', '/pool/reorder', { orderedIds }),
 
     create: (params) =>
       useTauri()

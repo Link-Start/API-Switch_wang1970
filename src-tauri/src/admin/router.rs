@@ -2,7 +2,6 @@ use crate::admin::auth::require_auth;
 use crate::admin::channel_handlers;
 use crate::admin::chat_handlers;
 use crate::admin::connection_apps_handlers;
-use crate::admin::cors::apply_admin_cors;
 use crate::admin::handlers;
 use crate::admin::import_export_handlers;
 use crate::admin::pool_handlers;
@@ -196,5 +195,4 @@ pub fn build_admin_router(state: AdminState) -> Router {
         .route("/admin/version", get(handlers::version))
         .merge(protected)
         .with_state(state)
-        .route_layer(middleware::from_fn(apply_admin_cors))
 }

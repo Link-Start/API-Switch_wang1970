@@ -446,6 +446,49 @@ fn sanitize_url_for_log(url: &str) -> String {
     sanitized
 }
 
+/// 为图像生成端点构建上游 URL
+///
+/// 与 `build_chat_url` 类似，但端点路径为 `/v1/images/generations`。
+/// 自定义 API 路径的渠道只替换末尾 endpoint 部分。
+fn build_image_gen_url(base_url: &str) -> String {
+    let base = base_url.trim_end_matches('/');
+    for suffix in [
+        "/v1/chat/completions",
+        "/chat/completions",
+        "/v1/responses",
+        "/responses",
+    ] {
+        if let Some(prefix) = base.strip_suffix(suffix) {
+            return format!("{prefix}/v1/images/generations");
+        }
+    }
+
+    let path = base
+        .split_once("://")
+        .map(|(_, rest)| rest.split_once('/').map(|(_, path)| path))
+        .flatten();
+    if path.is_some() {
+        format!("{base}/images/generations")
+    } else {
+        format!("{base}/v1/images/generations")
+    }
+}
+
+fn prepare_image_gen_request(body: &Value, actual_model: &str) -> Value {
+    let mut prepared = body.clone();
+    if let Some(object) = prepared.as_object_mut() {
+        object.insert("model".to_string(), Value::String(actual_model.to_string()));
+    }
+    let protocol = super::protocol::image_gen::detect_image_gen_protocol(actual_model);
+    super::protocol::image_gen::transform_image_gen_request(&mut prepared, protocol);
+    prepared
+}
+
+fn normalize_image_gen_response(body: &Value, actual_model: &str) -> Value {
+    let protocol = super::protocol::image_gen::detect_image_gen_protocol(actual_model);
+    super::protocol::image_gen::transform_image_gen_response(body, protocol)
+}
+
 fn caller_kind_label(caller_kind: &CallerKind) -> &'static str {
     match caller_kind {
         CallerKind::OpenAiChat => "openai_chat",
@@ -453,6 +496,7 @@ fn caller_kind_label(caller_kind: &CallerKind) -> &'static str {
         CallerKind::GeminiNative => "gemini_native",
         CallerKind::AzureChat => "azure_chat",
         CallerKind::Responses => "responses",
+        CallerKind::ImageGeneration => "image_generation",
     }
 }
 
@@ -1166,33 +1210,43 @@ async fn forward_single(
         .map_err(|e| ForwardError::new(format!("DB error: {e}"), 502, None))?;
 
     let adapter = get_adapter(&channel.api_type);
-    let url = adapter.build_chat_url(&channel.base_url, &entry.model);
+
+    // 图像生成端点需要不同的上游 URL 路径（/v1/images/generations 而非 /v1/chat/completions）
+    let url = if matches!(caller_kind, CallerKind::ImageGeneration) {
+        build_image_gen_url(&channel.base_url)
+    } else {
+        adapter.build_chat_url(&channel.base_url, &entry.model)
+    };
 
     // 统一直穿判定（Phase 2: 替换现有实现）
     let passthrough_config = should_passthrough(caller_kind, &channel.api_type, body);
 
-    // 处理 disable_reasoning
-    // 设计说明：直穿场景下也应用 disable_reasoning，因为这是用户全局设置，
-    // 不应因协议直穿而绕过。直穿只是避免协议转换损耗，不是跳过业务逻辑。
-    let body_for_transform = if settings.disable_reasoning {
-        let mut modified = body.clone();
-        apply_disable_reasoning(&mut modified);
-        modified
+    // 图像生成使用独立协议边界：按本次重试实际命中的 entry.model 准备请求，
+    // 不经过 Chat adapter，也不应用 disable_reasoning 等 Chat 专用业务逻辑。
+    let mut upstream_body = if matches!(caller_kind, CallerKind::ImageGeneration) {
+        prepare_image_gen_request(body, &entry.model)
     } else {
-        body.clone()
-    };
+        // 设计说明：直穿场景下也应用 disable_reasoning，因为这是用户全局设置，
+        // 不应因协议直穿而绕过。直穿只是避免协议转换损耗，不是跳过业务逻辑。
+        let body_for_transform = if settings.disable_reasoning {
+            let mut modified = body.clone();
+            apply_disable_reasoning(&mut modified);
+            modified
+        } else {
+            body.clone()
+        };
 
-    let mut upstream_body = if let Some(config) = passthrough_config {
-        // 统一恢复逻辑：先恢复原始请求，再应用 disable_reasoning
-        let mut restored = restore_raw_request(body, config, &entry.model);
-        if settings.disable_reasoning {
-            apply_disable_reasoning(&mut restored);
+        if let Some(config) = passthrough_config {
+            let mut restored = restore_raw_request(body, config, &entry.model);
+            if settings.disable_reasoning {
+                apply_disable_reasoning(&mut restored);
+            }
+            restored
+        } else {
+            let mut converted = body_for_transform;
+            adapter.transform_request(&mut converted, &entry.model);
+            converted
         }
-        restored
-    } else {
-        let mut converted = body_for_transform.clone();
-        adapter.transform_request(&mut converted, &entry.model);
-        converted
     };
 
     // 统一清理所有暂存字段
@@ -1358,7 +1412,9 @@ async fn forward_single(
             ForwardError::new(message, 502, raw_protocol)
         })?;
 
-        if passthrough_config.is_none() {
+        if matches!(caller_kind, CallerKind::ImageGeneration) {
+            response_body = normalize_image_gen_response(&response_body, &entry.model);
+        } else if passthrough_config.is_none() {
             adapter.transform_response(&mut response_body);
 
             // Normalize reasoning fields in response messages (reasoning_content ↔ reasoning_text)
@@ -1380,8 +1436,10 @@ async fn forward_single(
         let (prompt_tokens, completion_tokens, reasoning_tokens) =
             extract_usage_tokens(&response_body);
 
-        // 验证输出有效性（根据协议类型）
-        let has_valid_output = if let Some(config) = passthrough_config {
+        // 验证输出有效性（根据入口协议类型）
+        let has_valid_output = if matches!(caller_kind, CallerKind::ImageGeneration) {
+            image_gen_response_has_valid_output(&response_body)
+        } else if let Some(config) = passthrough_config {
             match config.caller_kind {
                 CallerKind::Responses => responses_response_has_valid_output(&response_body),
                 CallerKind::ClaudeMessages => claude_response_has_valid_output(&response_body),
@@ -1449,6 +1507,22 @@ fn responses_response_has_valid_output(body: &Value) -> bool {
             .get("output")
             .and_then(Value::as_array)
             .is_some_and(|output| !output.is_empty())
+}
+
+/// 图像生成响应有效性检查
+///
+/// OpenAI Images API 响应格式：`{ created, data: [...] }`
+/// 只要 `data` 数组非空，且至少一个元素包含 `url` 或 `b64_json`，就视为有效输出。
+fn image_gen_response_has_valid_output(body: &Value) -> bool {
+    body.get("data")
+        .and_then(Value::as_array)
+        .is_some_and(|data| {
+            !data.is_empty()
+                && data.iter().any(|item| {
+                    item.get("url").and_then(Value::as_str).is_some()
+                        || item.get("b64_json").and_then(Value::as_str).is_some()
+                })
+        })
 }
 
 fn nonstream_response_has_valid_output(body: &Value) -> bool {
@@ -3395,6 +3469,50 @@ mod tests {
             http_client: reqwest::Client::new(),
             response_store: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         }
+    }
+
+    #[test]
+    fn image_generation_prepares_agnes_request_from_actual_entry_model() {
+        let body = serde_json::json!({
+            "model": "auto",
+            "prompt": "a cat",
+            "response_format": "b64_json"
+        });
+
+        let prepared = prepare_image_gen_request(&body, "agnes-image-2.1-flash");
+
+        assert_eq!(prepared["model"], "agnes-image-2.1-flash");
+        assert_eq!(prepared["return_base64"], true);
+        assert_eq!(prepared["extra_body"]["response_format"], "b64_json");
+        assert!(prepared.get("response_format").is_none());
+    }
+
+    #[test]
+    fn image_generation_normalizes_agnes_response_before_validation() {
+        let upstream = serde_json::json!({
+            "images": [{"base64": "abc123"}]
+        });
+
+        let normalized = normalize_image_gen_response(&upstream, "agnes-image-2.1-flash");
+
+        assert_eq!(normalized["data"][0]["b64_json"], "abc123");
+        assert!(image_gen_response_has_valid_output(&normalized));
+    }
+
+    #[test]
+    fn image_generation_url_handles_roots_versioned_paths_and_full_chat_endpoint() {
+        assert_eq!(
+            build_image_gen_url("https://api.openai.com"),
+            "https://api.openai.com/v1/images/generations"
+        );
+        assert_eq!(
+            build_image_gen_url("https://example.com/api/v1"),
+            "https://example.com/api/v1/images/generations"
+        );
+        assert_eq!(
+            build_image_gen_url("https://example.com/v1/chat/completions"),
+            "https://example.com/v1/images/generations"
+        );
     }
 
     #[test]

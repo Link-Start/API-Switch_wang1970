@@ -726,6 +726,7 @@ DB 冷却和内存熔断器独立工作：L1 冷却到期的条目，如果 L2 �
 
 - OpenAI Chat Completions
 - OpenAI Responses API 兼容层
+- OpenAI Images API（图像生成）
 - Claude Messages
 - Gemini OpenAI-compatible endpoint
 - 部分 Gemini 原生 endpoint
@@ -1046,6 +1047,60 @@ struct PassthroughConfig {
 - `proxy/forwarder.rs`：代理转发路径，透传/注入逻辑
 - `commands/test_chat.rs`：模型管理对话测试
 - `services/channel_service.rs`：测速、拉取模型列表
+
+### 9.11 图像生成接口（Images API）
+
+P1 支持 OpenAI 兼容的图像生成端点：
+
+```http
+POST /v1/images/generations
+```
+
+#### 支持模型
+
+| 模型 | 协议类型 | 说明 |
+|------|---------|------|
+| `gpt-image-1` | OpenAI 兼容透传 | 标准 OpenAI Images API |
+| `gpt-image-2` | OpenAI 兼容透传 | 标准 OpenAI Images API |
+| `agnes-image-2.1-flash` | Agnes 专用转换 | `response_format` 移入 `extra_body`，设置 `return_base64` |
+| `dall-e-*` | OpenAI 兼容透传 | 兼容支持，非 P1 主要目标 |
+
+#### 架构
+
+图像生成复用公共认证、重试、熔断和日志，但不进入 Chat Completions 协议转换：
+
+1. 入口 handler 识别 `/v1/images/generations`，完成 Access Key 和 `prompt` 校验
+2. 路由前同时过滤全量候选和 AUTO 候选，只保留 `is_image_gen_model()` 认可的图像模型
+3. 显式模型、别名或分组不存在时直接返回无可用渠道，不得回退普通 Chat AUTO 池
+4. `forward_with_retry()` 每次重试以实际 `entry.model` 识别 OpenAI 或 Agnes 协议
+5. `prepare_image_gen_request()` 注入实际模型并在发送前完成厂商字段转换
+6. 收到非流式 JSON 后，`normalize_image_gen_response()` 先规范化为 OpenAI Images 格式，再执行有效输出校验
+
+图像入口不使用通用同协议直穿暂存字段，也不经过 Chat adapter 的 `transform_request()` / `transform_response()`；这样 AUTO、分组和别名路由不会导致协议误判，Agnes 转换也不会被原始请求恢复逻辑覆盖。
+
+#### Agnes 字段转换规则
+
+Agnes 要求 `response_format` 不能放在请求体顶层，必须放入 `extra_body`：
+
+| 请求字段 | Agnes 转换后 |
+|---------|-------------|
+| `response_format: "b64_json"` | `return_base64: true` + `extra_body.response_format: "b64_json"`，移除顶层 `response_format` |
+| `response_format: "url"` | `extra_body.response_format: "url"`，移除顶层 `response_format` |
+| 无 `response_format` | 不处理 |
+
+#### 后期扩展
+
+- P2：`/v1/images/edits`（图像编辑 / 图生图）
+- P2+：`/v1/images/variations`（图像变体）
+- 更多图像模型只需在 `image_gen` 模块增加匹配规则
+- 模型能力字段配置化
+
+#### 实现位置
+
+- `proxy/protocol/image_gen.rs`：图像生成类型定义、模型识别、字段转换
+- `proxy/handlers.rs`：入口校验、图像能力候选过滤和路由隔离
+- `proxy/forwarder.rs`：按实际 entry 构建 URL、准备请求、规范化响应并校验输出
+- `proxy/server.rs`：路由注册
 
 ---
 

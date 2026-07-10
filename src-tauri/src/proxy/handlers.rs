@@ -413,6 +413,103 @@ pub async fn handle_messages(
     }
 }
 
+fn filter_image_gen_entries(
+    entries: Vec<crate::database::ApiEntry>,
+) -> Vec<crate::database::ApiEntry> {
+    entries
+        .into_iter()
+        .filter(|entry| super::protocol::image_gen::is_image_gen_model(&entry.model))
+        .collect()
+}
+
+fn image_request_has_direct_match(
+    requested_model: &str,
+    entries: &[crate::database::ApiEntry],
+) -> bool {
+    let requested = requested_model.trim();
+    requested.is_empty()
+        || requested.eq_ignore_ascii_case("auto")
+        || entries.iter().any(|entry| {
+            entry.model.eq_ignore_ascii_case(requested)
+                || (!entry.display_name.trim().is_empty()
+                    && entry.display_name.eq_ignore_ascii_case(requested))
+                || entry
+                    .group_name
+                    .as_deref()
+                    .is_some_and(|group| group.eq_ignore_ascii_case(requested))
+        })
+}
+
+/// Handle /v1/images/generations — OpenAI 兼容图像生成端点。
+///
+/// Handler 只负责认证、基础校验和图像能力路由隔离。厂商字段转换必须在
+/// forwarder 中基于每次重试实际命中的 entry.model 执行，不能依赖请求别名。
+pub async fn handle_image_generations(
+    State(state): State<ProxyState>,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ProxyError> {
+    let (parts, body) = request.into_parts();
+    let headers = &parts.headers;
+
+    let access_key = auth::extract_access_key(headers, &state)
+        .await
+        .map_err(|err| match err {
+            crate::error::AppError::Validation(_) => ProxyError::Unauthorized,
+            other => ProxyError::from(other),
+        })?;
+
+    let body_bytes = axum::body::to_bytes(body, 32 * 1024 * 1024)
+        .await
+        .map_err(|e| ProxyError::Internal(format!("Failed to read body: {e}")))?;
+    let body: Value = serde_json::from_slice(&body_bytes)
+        .map_err(|e| ProxyError::BadRequest(format!("Failed to parse JSON: {e}")))?;
+
+    let prompt = body
+        .get("prompt")
+        .and_then(Value::as_str)
+        .filter(|prompt| !prompt.trim().is_empty())
+        .ok_or_else(|| ProxyError::BadRequest("Missing or empty 'prompt' field".to_string()))?;
+    let requested_model = normalize_requested_model(body.get("model").and_then(Value::as_str));
+
+    log::info!(
+        "Image generation request: model={}, prompt_len={}",
+        requested_model,
+        prompt.len(),
+    );
+
+    let all_entries = filter_image_gen_entries(state.db.get_entries_for_routing()?);
+    if !image_request_has_direct_match(&requested_model, &all_entries) {
+        return Err(ProxyError::NoAvailableProvider(requested_model));
+    }
+    let auto_entries = filter_image_gen_entries(state.db.get_enabled_entries_for_auto()?);
+    let resolved = router::resolve(
+        &requested_model,
+        &all_entries,
+        &auto_entries,
+        &state.circuit_breakers,
+    )
+    .await;
+
+    if resolved.is_empty() {
+        return Err(ProxyError::NoAvailableProvider(requested_model));
+    }
+
+    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> = vec![];
+    forwarder::forward_with_retry(
+        &state,
+        &resolved,
+        &body,
+        headers,
+        &requested_model,
+        access_key.as_ref(),
+        false,
+        &middleware,
+        super::middleware::CallerKind::ImageGeneration,
+    )
+    .await
+    .map_err(Into::into)
+}
+
 /// Handle /v1/models - list ALL models from the pool (including disabled).
 /// disabled only means "skip in AUTO", the model is still usable when requested by name.
 pub async fn handle_list_models(
@@ -824,6 +921,31 @@ mod tests {
             group_name: group_name.map(str::to_string),
             score: 0.0,
         }
+    }
+
+    #[test]
+    fn image_entries_exclude_chat_models() {
+        let entries = vec![
+            sample_entry("image", "gpt-image-1", "Image", Some("auto")),
+            sample_entry("chat", "gpt-4o", "Chat", Some("auto")),
+        ];
+
+        let filtered = filter_image_gen_entries(entries);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].model, "gpt-image-1");
+    }
+
+    #[test]
+    fn explicit_unknown_image_model_does_not_allow_auto_fallback() {
+        let entries = vec![sample_entry("image", "gpt-image-1", "Image", Some("auto"))];
+
+        assert!(!image_request_has_direct_match(
+            "missing-image-model",
+            &entries
+        ));
+        assert!(image_request_has_direct_match("auto", &entries));
+        assert!(image_request_has_direct_match("Image", &entries));
     }
 
     #[test]

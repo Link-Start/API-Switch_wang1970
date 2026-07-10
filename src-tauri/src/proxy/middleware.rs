@@ -41,6 +41,8 @@ pub enum CallerKind {
     GeminiNative,
     AzureChat,
     Responses,
+    /// /v1/images/generations 图像生成入口
+    ImageGeneration,
 }
 
 /// 请求上下文，传递给中间件

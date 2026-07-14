@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { cn } from '@/lib/utils';
 import { getCatalogModel, formatTokenCount } from '@/lib/modelsCatalog';
 import { useApiAdapter } from '@/lib/useApiAdapter';
-import { getChannelErrorMessage } from '../channelErrors';
+import { getChannelErrorMessage, describeTestFailure } from '../channelErrors';
 import type { ModelInfo, UpdateChannelParams, CreateChannelParams, FetchModelsResult, SaveChannelWithModelsParams } from '../types';
 import type { ChannelFormState, UrlProbeResult } from './types';
 import { DEFAULT_FORM, API_TYPES, channelToForm } from './types';
@@ -779,6 +779,10 @@ return (
               <div className="max-h-[42dvh] min-h-48 overflow-y-auto rounded-md border border-border bg-background pr-2 sm:h-[262px] sm:max-h-none">
                 {filteredModels.map((model) => {
                   const testResult = modelTestResults[model.name];
+                  const testInfo =
+                    testResult?.success === false
+                      ? describeTestFailure(testResult.statusCode, testResult.reason)
+                      : undefined;
                   return (
                     <label key={model.id || model.name} htmlFor={`model-${model.id || model.name}`} className="flex cursor-pointer items-center gap-2 border-b border-border py-2 pl-3 pr-1 text-sm last:border-b-0 hover:bg-accent">
                       <Checkbox id={`model-${model.id || model.name}`} checked={selectedModels.includes(model.name)} onCheckedChange={() => toggleModel(model.name)} />
@@ -786,13 +790,13 @@ return (
                         "truncate",
                         testResult?.success === true && "text-green-600",
                         testResult?.success === false && "text-red-500"
-                      )} title={testResult?.reason}>
+                      )} title={testInfo?.title ?? testResult?.reason}>
                         {model.name}
                         {testResult?.success === true && testResult.latency && (
                           <span className="text-xs ml-1">({(testResult.latency / 1000).toFixed(2)}s)</span>
                         )}
                         {testResult?.success === false && (
-                          <span className="text-xs ml-1">({testResult.statusCode ? `HTTP ${testResult.statusCode}` : t('channel.editor.testFailed', '失败')})</span>
+                          <span className="text-xs ml-1">({testInfo?.label ?? t('channel.editor.testFailed', '失败')})</span>
                         )}
                       </span>
                       <span className="ml-auto shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">

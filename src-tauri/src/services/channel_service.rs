@@ -600,7 +600,7 @@ async fn detect_endpoint_guess(
         .ok()?;
 
     let candidates = detect_endpoint_candidates(&client, api_type, base_url, api_key).await;
-    select_preferred_endpoint_candidate(&candidates).map(|candidate| candidate.guess)
+    select_preferred_endpoint_candidate(&candidates, Some(api_type)).map(|candidate| candidate.guess)
 }
 
 async fn detect_endpoint_and_collect(
@@ -619,7 +619,7 @@ async fn detect_endpoint_and_collect(
 
     let candidates = detect_endpoint_candidates(&client, api_type, base_url, api_key).await;
     let primary_guess =
-        select_preferred_endpoint_candidate(&candidates).map(|candidate| candidate.guess);
+        select_preferred_endpoint_candidate(&candidates, Some(api_type)).map(|candidate| candidate.guess);
     let all_found_types = collect_reachable_endpoint_types(&candidates);
 
     (primary_guess, all_found_types)
@@ -853,7 +853,10 @@ fn normalize_api_type(api_type: &str) -> &'static str {
 
 fn select_preferred_endpoint_candidate(
     candidates: &[EndpointCandidate],
+    preferred_api_type: Option<&str>,
 ) -> Option<EndpointCandidate> {
+    let normalized_preferred = preferred_api_type.map(normalize_api_type);
+
     [
         (
             EndpointCandidateScope::UserUrl,
@@ -874,10 +877,26 @@ fn select_preferred_endpoint_candidate(
     ]
     .into_iter()
     .find_map(|(scope, status)| {
-        candidates
+        let matches: Vec<&EndpointCandidate> = candidates
             .iter()
-            .find(|candidate| candidate.scope == scope && candidate.status == status)
-            .cloned()
+            .filter(|c| c.scope == scope && c.status == status)
+            .collect();
+
+        if matches.is_empty() {
+            return None;
+        }
+
+        // 同优先级下，优先选择用户选择的协议类型
+        if let Some(pref) = normalized_preferred {
+            if let Some(found) = matches.iter().find(|c| {
+                normalize_api_type(&c.guess.detected_type) == pref
+            }) {
+                return Some((*found).clone());
+            }
+        }
+
+        // 否则返回第一个匹配的候选
+        Some(matches[0].clone())
     })
 }
 
@@ -1550,7 +1569,7 @@ mod tests {
             ),
         ];
 
-        let selected = select_preferred_endpoint_candidate(&candidates).expect("应选择可达候选");
+        let selected = select_preferred_endpoint_candidate(&candidates, None).expect("应选择可达候选");
 
         assert_eq!(selected.scope, EndpointCandidateScope::UserUrl);
         assert_eq!(selected.status, EndpointCandidateStatus::Reachable);
@@ -1558,6 +1577,57 @@ mod tests {
             selected.guess.corrected_base_url,
             "https://a.com/xxx/yyy/v1"
         );
+    }
+
+    #[test]
+    fn select_prefers_user_selected_protocol_over_other_protocols() {
+        // 模拟：用户选了 anthropic，但 openai 和 anthropic 都在同一优先级 (BaseSite, Usable)
+        // 且 openai 排在前面（模拟默认返回 openai 的场景）
+        let candidates = vec![
+            candidate(
+                EndpointCandidateScope::BaseSite,
+                EndpointCandidateStatus::Usable,
+                "openai",
+                "https://a.com/v1",
+            ),
+            candidate(
+                EndpointCandidateScope::BaseSite,
+                EndpointCandidateStatus::Usable,
+                "anthropic",
+                "https://a.com/v1",
+            ),
+        ];
+
+        // 不指定偏好时，openai 排在前面被选中
+        let selected = select_preferred_endpoint_candidate(&candidates, None).expect("应选择候选");
+        assert_eq!(selected.guess.detected_type, "openai");
+
+        // 指定用户偏好 anthropic 后，应优先选择 anthropic
+        let selected = select_preferred_endpoint_candidate(&candidates, Some("anthropic")).expect("应选择候选");
+        assert_eq!(selected.guess.detected_type, "anthropic");
+    }
+
+    #[test]
+    fn select_same_scope_status_prefers_user_protocol() {
+        // 同一个 (BaseSite, Usable) 级别有两个协议候选
+        let candidates = vec![
+            candidate(
+                EndpointCandidateScope::BaseSite,
+                EndpointCandidateStatus::Usable,
+                "openai",
+                "https://a.com/v1",
+            ),
+            candidate(
+                EndpointCandidateScope::BaseSite,
+                EndpointCandidateStatus::Usable,
+                "anthropic",
+                "https://a.com/v1",
+            ),
+        ];
+
+        // 指定用户偏好 anthropic
+        let selected = select_preferred_endpoint_candidate(&candidates, Some("anthropic")).expect("应选择候选");
+        assert_eq!(selected.guess.detected_type, "anthropic");
     }
 
     #[test]

@@ -256,11 +256,12 @@ export const ChannelEditorDialog: React.FC<{
                 ? [result.detected_type]
                 : [];
             setAvailableProtocols(types);
-            if (result.detected_type || result.corrected_base_url) {
+            // 仅修正 base_url，不覆盖用户手动选择的协议
+          // detected_type 仅供参考（绿色标记），用户选择的协议优先
+          if (result.corrected_base_url) {
               setForm(prev => ({
                 ...prev,
-                api_type: result.detected_type || prev.api_type,
-                base_url: result.corrected_base_url || prev.base_url,
+                base_url: result.corrected_base_url ?? prev.base_url,
               }));
             }
           }

@@ -210,11 +210,27 @@ fn log_image_attempt(
     );
 }
 
+fn is_image_endpoint_contract_error(status: u16, message: &str) -> bool {
+    if status != 400 && status != 404 {
+        return false;
+    }
+    let lower = message.to_ascii_lowercase();
+    lower.contains("not found")
+        || lower.contains("unsupported")
+        || lower.contains("not supported")
+        || lower.contains("only supported on")
+        || lower.contains("invalid_request_error")
+}
+
 fn is_recoverable_image_failure(
     settings: &crate::database::AppSettings,
     status: u16,
     message: &str,
 ) -> bool {
+    if is_image_endpoint_contract_error(status, message) {
+        return false;
+    }
+
     status == 0
         || forwarder::should_disable_entry_for_status(&settings.circuit_disable_codes, status)
         || forwarder::status_matches_rules(&settings.circuit_retry_codes, status)
@@ -458,6 +474,16 @@ mod tests {
         ));
         assert!(is_recoverable_image_failure(&settings, 0, "transport"));
         assert!(!is_recoverable_image_failure(&settings, 400, "bad request"));
+        assert!(!is_recoverable_image_failure(
+            &settings,
+            404,
+            "OpenAIException - {\"detail\":\"Not Found\"}"
+        ));
+        assert!(!is_recoverable_image_failure(
+            &settings,
+            400,
+            "model gpt-image-2 is only supported on /v1/images/generations and /v1/images/edits"
+        ));
         assert!(!is_recoverable_image_failure(&settings, 404, "not found"));
     }
     #[test]

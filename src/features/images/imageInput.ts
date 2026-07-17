@@ -4,13 +4,27 @@ export function revokeImageReference(reference?: ImageReference) {
   if (reference?.objectUrl) URL.revokeObjectURL(reference.objectUrl);
 }
 
+function extensionForMime(type: string) {
+  if (type === "image/jpeg") return ".jpg";
+  if (type === "image/png") return ".png";
+  if (type === "image/webp") return ".webp";
+  return "";
+}
+
+function normalizeImageFilename(name: string | undefined, type: string) {
+  const fallback = `image${extensionForMime(type) || ".png"}`;
+  const trimmed = name?.trim() || fallback;
+  return /\.[a-z0-9]+$/i.test(trimmed) ? trimmed : `${trimmed}${extensionForMime(type)}`;
+}
+
 export function imageReferenceFromFile(file: File): ImageReference {
+  const type = file.type || "image/png";
   return {
     blob: file,
     objectUrl: URL.createObjectURL(file),
-    name: file.name || "image",
+    name: normalizeImageFilename(file.name, type),
     size: file.size,
-    type: file.type || "application/octet-stream",
+    type,
   };
 }
 
@@ -49,7 +63,9 @@ export async function blobFromResultSource(source: { b64Json?: string; objectUrl
   return response.blob();
 }
 
-export async function downloadImage(source: { b64Json?: string; objectUrl?: string; url?: string; mime?: string }, filename: string) {
+export type ImageDownloadResult = "downloaded" | "opened-original";
+
+export async function downloadImage(source: { b64Json?: string; objectUrl?: string; url?: string; mime?: string }, filename: string): Promise<ImageDownloadResult> {
   try {
     const blob = await blobFromResultSource(source);
     const objectUrl = URL.createObjectURL(blob);
@@ -60,10 +76,11 @@ export async function downloadImage(source: { b64Json?: string; objectUrl?: stri
     link.click();
     link.remove();
     URL.revokeObjectURL(objectUrl);
+    return "downloaded";
   } catch {
     if (source.url) {
-      window.open(source.url, "_blank", "noopener,noreferrer");
-      return;
+      const opened = window.open(source.url, "_blank", "noopener,noreferrer");
+      if (opened) return "opened-original";
     }
     throw new Error("download_failed");
   }

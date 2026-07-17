@@ -636,6 +636,8 @@
     "regenerate": "重新生成",
     "variation": "生成变体",
     "download": "下载",
+    "downloadFailed": "下载失败：无法读取图片或打开原图",
+    "downloadOpenedOriginal": "浏览器无法直接下载远程图片，已尝试打开原图",
     "statusPending": "生成中",
     "statusSucceeded": "成功",
     "statusFailed": "失败",

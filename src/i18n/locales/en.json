@@ -13,7 +13,8 @@
     "settings": "Settings",
     "guide": "Guide",
     "translator": "Translator",
-    "logout": "Logout"
+    "logout": "Logout",
+    "imageStudio": "AI Images"
   },
   "apiPool": {
     "title": "API Management",
@@ -615,6 +616,31 @@
     "step4": {
       "title": "Start Using",
       "desc": "Proxy is auto-started. Point your client to http://127.0.0.1:9090, set model to auto or any specific name, no API Key needed"
+    }
+  },
+  "imageStudio": {
+    "title": "AI Images",
+    "promptPlaceholder": "Enter prompt, Enter to generate, Shift+Enter for newline",
+    "addImage": "+ Image",
+    "selectModel": "Select model",
+    "generate": "Generate",
+    "generating": "Generating...",
+    "empty": "Enter a prompt, select a model, and click Generate.",
+    "noModels": "No enabled models with image-generation tag. Configure them in API Management first.",
+    "failed": "Image generation failed, please try again later",
+    "proxyUnavailable": "Proxy is not running or port is unavailable",
+    "remoteImageUnreadable": "Cannot read this remote image, variation unavailable",
+    "imageLoadFailed": "Image failed to load, try regenerating later",
+    "regenerate": "Regenerate",
+    "variation": "Variation",
+    "download": "Download",
+    "statusPending": "Pending",
+    "statusSucceeded": "Succeeded",
+    "statusFailed": "Failed",
+    "size": {
+      "square": "Square",
+      "landscape": "Landscape",
+      "portrait": "Portrait"
     }
   }
 }

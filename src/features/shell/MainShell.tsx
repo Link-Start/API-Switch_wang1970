@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BarChart3, BookOpen, ExternalLink, FileText, KeyRound, Layers, Link, LogOut, Menu, Power, Route, Settings, X } from 'lucide-react';
+import { BarChart3, BookOpen, ExternalLink, FileText, Image as ImageIcon, KeyRound, Layers, Link, LogOut, Menu, Power, Route, Settings, X } from 'lucide-react';
 
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import type { AdminStatus, AppSettings, PlatformCapabilities, ProxyStatus } from '@/types';
 
-export type MainPage = 'apiPool' | 'channels' | 'tokens' | 'link' | 'logs' | 'dashboard' | 'translator' | 'settings' | 'guide';
+export type MainPage = 'apiPool' | 'channels' | 'tokens' | 'link' | 'logs' | 'dashboard' | 'imageStudio' | 'translator' | 'settings' | 'guide';
 
 const NAV_ITEMS: { key: MainPage; icon: typeof Layers; labelKey: string; androidHidden?: boolean }[] = [
   { key: 'apiPool', icon: Layers, labelKey: 'nav.apiPool' },
@@ -17,6 +17,7 @@ const NAV_ITEMS: { key: MainPage; icon: typeof Layers; labelKey: string; android
   { key: 'link', icon: Link, labelKey: 'nav.link', androidHidden: true },
   { key: 'logs', icon: FileText, labelKey: 'nav.logs' },
   { key: 'dashboard', icon: BarChart3, labelKey: 'nav.dashboard' },
+  { key: 'imageStudio', icon: ImageIcon, labelKey: 'nav.imageStudio' },
   { key: 'settings', icon: Settings, labelKey: 'nav.settings' },
 ];
 

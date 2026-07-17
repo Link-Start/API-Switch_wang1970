@@ -17,6 +17,7 @@ const LinkPage = lazy(() => import("@/pages/LinkPage").then((m) => ({ default: m
 const LogPage = lazy(() => import("@/pages/LogPage").then((m) => ({ default: m.LogPage })));
 const DashboardPage = lazy(() => import("@/pages/DashboardPage").then((m) => ({ default: m.DashboardPage })));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const ImageStudioPage = lazy(() => import("@/pages/ImageStudioPage").then((m) => ({ default: m.ImageStudioPage })));
 type WebAuthViewState =
   | { state: "checking" }
   | { state: "authenticated" }
@@ -127,6 +128,7 @@ function MainApp({ onLogout }: { onLogout?: () => void }) {
         case "link": return <LinkPage />;
         case "logs": return <LogPage />;
         case "dashboard": return <DashboardPage />;
+        case "imageStudio": return <ImageStudioPage />;
         case "settings": return <SettingsPage />;
       }
     })();

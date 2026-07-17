@@ -13,7 +13,8 @@
     "settings": "系统设置",
     "guide": "使用指南",
     "translator": "翻译",
-    "logout": "退出登录"
+    "logout": "退出登录",
+    "imageStudio": "AI 生图"
   },
   "apiPool": {
     "title": "模型管理",
@@ -617,6 +618,31 @@
     "step4": {
       "title": "开始使用",
       "desc": "代理已自动启动，将客户端 API 地址指向 http://127.0.0.1:9090，模型填 auto 或指定模型名，无需 API Key"
+    }
+  },
+  "imageStudio": {
+    "title": "AI 生图",
+    "promptPlaceholder": "输入提示词，Enter 生成，Shift+Enter 换行",
+    "addImage": "＋图片",
+    "selectModel": "选择模型",
+    "generate": "生成",
+    "generating": "生成中...",
+    "empty": "输入提示词，选择模型，点击生成。",
+    "noModels": "暂无带生图标签的已启用模型，请先在模型管理中配置。",
+    "failed": "图片生成失败，请稍后重试",
+    "proxyUnavailable": "代理未运行或端口不可用",
+    "remoteImageUnreadable": "无法读取该远程图片，不能生成变体",
+    "imageLoadFailed": "图片加载失败，可稍后重新生成",
+    "regenerate": "重新生成",
+    "variation": "生成变体",
+    "download": "下载",
+    "statusPending": "生成中",
+    "statusSucceeded": "成功",
+    "statusFailed": "失败",
+    "size": {
+      "square": "正方形",
+      "landscape": "横向",
+      "portrait": "纵向"
     }
   }
 }

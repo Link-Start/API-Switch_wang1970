@@ -1050,57 +1050,73 @@ struct PassthroughConfig {
 
 ### 9.11 图像生成接口（Images API）
 
-P1 支持 OpenAI 兼容的图像生成端点：
+API Switch 提供三个 OpenAI 兼容 Images 端点，作为代理端口执行 Images 协议字段透明转发。AS 只负责路由、上游鉴权、日志记录和标准 HTTP 转发，不负责 Images 业务字段校验、模型能力判断、协议归一化或响应包装。
 
 ```http
 POST /v1/images/generations
+POST /v1/images/edits
+POST /v1/images/variations
 ```
 
-#### 支持模型
+#### 透明合同
 
-| 模型 | 协议类型 | 说明 |
-|------|---------|------|
-| `gpt-image-1` | OpenAI 兼容透传 | 标准 OpenAI Images API |
-| `gpt-image-2` | OpenAI 兼容透传 | 标准 OpenAI Images API |
-| `agnes-image-2.1-flash` | Agnes 专用转换 | `response_format` 移入 `extra_body`，设置 `return_base64` |
-| `dall-e-*` | OpenAI 兼容透传 | 兼容支持，非 P1 主要目标 |
+"透明"指 **Images 协议字段透明**，不是 TCP/HTTP 字节级透明。AS 执行的代理必要行为：
 
-#### 架构
+- 从请求中只读提取 `model` 等最小路由信息，不改写 multipart 中的 `model` 或其他业务字段。
+- 通过独立 Images 路由按请求 `model` 精确检索同名、entry 已启用且所属渠道已启用的 entry，按现有 sort index 排序形成候选列表。
+- 注入 entry 的上游 API Key，不把客户端鉴权信息泄漏给上游。
+- 过滤标准 HTTP hop-by-hop headers，长度相关 headers 按实际转发 body 处理。
+- 保持原始端点路径，由 `build_images_url(base_url, endpoint_kind)` 解析 generations/edits/variations，避免重复 `/v1/v1/`，不按模型名改写为厂商专有端点。
+- 记录本地日志和 usage log。
 
-图像生成复用公共认证、重试、熔断和日志，但不进入 Chat Completions 协议转换：
+AS 不校验 Images 业务字段、图片格式/MIME/大小/数量；不判断模型是否支持当前端点；不根据模型名/`models.json`/关键词/能力标签过滤生图模型；不转换成 Chat/Responses/其他协议；不删除、合并或重命名未知字段；不包装或重新解释上游响应；不把空 body、空 `data`、文本、HTML 或非标准 JSON 重新判定为本地失败。
 
-1. 入口 handler 识别 `/v1/images/generations`，完成 Access Key 和 `prompt` 校验
-2. 路由前同时过滤全量候选和 AUTO 候选，只保留 `is_image_gen_model()` 认可的图像模型
-3. 显式模型、别名或分组不存在时直接返回无可用渠道，不得回退普通 Chat AUTO 池
-4. `forward_with_retry()` 每次重试以实际 `entry.model` 识别 OpenAI 或 Agnes 协议
-5. `prepare_image_gen_request()` 注入实际模型并在发送前完成厂商字段转换
-6. 收到非流式 JSON 后，`normalize_image_gen_response()` 先规范化为 OpenAI Images 格式，再执行有效输出校验
+#### 独立转发通道
 
-图像入口不使用通用同协议直穿暂存字段，也不经过 Chat adapter 的 `transform_request()` / `transform_response()`；这样 AUTO、分组和别名路由不会导致协议误判，Agnes 转换也不会被原始请求恢复逻辑覆盖。
+Images 使用独立路由和转发通道，不进入 Chat AUTO、Chat adapter、Chat transform 或 Chat fallback：
 
-#### Agnes 字段转换规则
+- 不调用 Chat adapter 的 `transform_request()` / `transform_response()`。
+- 不执行 Chat transform，不应用 Chat 专属 `reasoning` / `max_tokens` 修正。
+- 不执行 SSE / `choices` / 内容有效性校验，不做 Chat 错误包装。
+- 复用 entry/channel 数据、sort index 排序、reqwest client、日志和 usage log。
+- 完整复用 Chat 既有状态码与错误关键词分类、短期冷却、连续失败计数、entry 禁用、渠道冻结、冷却恢复和每次 entry 尝试的 usage log/attempt path，但只在同名模型 entry 范围内继续尝试，绝不跨模型 fallback，也不复用 Chat 的 JSON/SSE/choices 解析或响应内容有效性判断。
 
-Agnes 要求 `response_format` 不能放在请求体顶层，必须放入 `extra_body`：
+#### 路由合同
 
-| 请求字段 | Agnes 转换后 |
-|---------|-------------|
-| `response_format: "b64_json"` | `return_base64: true` + `extra_body.response_format: "b64_json"`，移除顶层 `response_format` |
-| `response_format: "url"` | `extra_body.response_format: "url"`，移除顶层 `response_format` |
-| 无 `response_format` | 不处理 |
+- 标准端口不限定模型名称，也不判断图片能力；模型是否支持当前端点由上游决定。
+- 请求 `model` 不支持 display name 模糊匹配、group alias 或 `auto`，也不改写 multipart 中的 `model`。
+- 按请求 `model` 精确检索同名、entry 已启用且所属渠道已启用且未处于冷却/断路器状态的 entry，按 sort index 排序形成候选列表。
+- 当前 entry 失败且触发既有冷却判定时，只尝试候选列表中的下一个同名模型 entry。
+- 不触发既有冷却判定的上游失败原样返回当前响应，不继续尝试；同名候选耗尽后返回最后一次上游失败；纯传输失败且没有上游响应时才生成 AS 代理传输错误。
 
-#### 后期扩展
+#### Body 与响应处理
 
-- P2：`/v1/images/edits`（图像编辑 / 图生图）
-- P2+：`/v1/images/variations`（图像变体）
-- 更多图像模型只需在 `image_gen` 模块增加匹配规则
-- 模型能力字段配置化
+- JSON body 按原始 body 转发。
+- multipart body 作为 opaque body 转发，保留原始 `Content-Type`、boundary 和 body bytes；只读提取 `model` 用于路由。
+- 原始请求体只在当前请求生命周期内保存在内存中，用于同名 entry 重放和日志元数据提取，不使用临时文件 spool。
+- 上游 HTTP status、Content-Type、响应 body 和安全的 end-to-end headers 按透明合同返回，只过滤 hop-by-hop headers。
+- 不补默认 JSON，不把空 body、空 `data`、空 URL 或空 Base64 改判为失败，不把上游 HTML 错误包装成 Chat 错误。
+
+#### 工作端口、鉴权与日志
+
+- 工作端口沿用全局 Access Key 机制：默认关闭不校验，开启 `access_key_required` 时校验；客户端若提供 API Key，仅用于本地身份/usage log 记录。
+- AS 连接上游时始终使用 entry 的上游 API Key，不把客户端鉴权信息泄漏给上游。
+- 日志记录端点、entry、耗时、状态码、错误文本和必要摘要；调试日志可记录非图像文本字段和上游错误原文，但不得记录 multipart 图片字节、Base64、`b64_json`、data URL 图片正文或 Blob。
+- 日志策略不改变客户端实际收到的状态码、响应头和响应体。
+
+#### 历史决策
+
+- Agnes 专有请求/响应转换作废，不保留兼容分支；`proxy/protocol/image_gen.rs` 已删除。
+- 旧路由中的 `is_image_gen_model()` / `image_request_has_direct_match()` / `prepare_image_gen_request()` / `normalize_image_gen_response()` / `image_gen_response_has_valid_output()` / `build_image_gen_url()` 已移除。
+- `CallerKind::ImageGeneration` 已移除；Images 不再进入 `forwarder.rs` 的 Chat 转发链路。
 
 #### 实现位置
 
-- `proxy/protocol/image_gen.rs`：图像生成类型定义、模型识别、字段转换
-- `proxy/handlers.rs`：入口校验、图像能力候选过滤和路由隔离
-- `proxy/forwarder.rs`：按实际 entry 构建 URL、准备请求、规范化响应并校验输出
-- `proxy/server.rs`：路由注册
+- `proxy/image_router.rs`：`ImageEndpoint`、`resolve_images_entries()`、`build_images_url()`。
+- `proxy/image_forwarder.rs`：`forward_images()`、`extract_model()`、`sanitize_images_log()`、`response_from_upstream()` 以及对 Chat 冷却/禁用机制的复用。
+- `proxy/handlers.rs`：`handle_images_endpoint()` / `handle_image_generations()` / `handle_image_edits()` / `handle_image_variations()`。
+- `proxy/server.rs`：三个 Images POST 端点路由注册。
+- `proxy/forwarder.rs`：保留 Chat 转发通道，不再承载 Images 特殊分支；暴露 Images 需要复用的冷却、禁用、关键词和 usage log 边界。
 
 ---
 

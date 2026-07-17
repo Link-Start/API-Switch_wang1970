@@ -11,7 +11,6 @@ mod common;
 mod custom;
 mod gemini;
 /// 图像生成协议适配器（/v1/images/generations）
-pub mod image_gen;
 mod openai;
 pub mod responses;
 

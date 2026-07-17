@@ -142,10 +142,15 @@ impl ProxyServer {
                 "/v1/responses/:response_id/cancel",
                 post(responses_handler::cancel_response),
             )
-            // OpenAI 兼容图像生成端点
+            // Images 独立透明转发端点
             .route(
                 "/v1/images/generations",
                 post(handlers::handle_image_generations),
+            )
+            .route("/v1/images/edits", post(handlers::handle_image_edits))
+            .route(
+                "/v1/images/variations",
+                post(handlers::handle_image_variations),
             )
             .layer(cors)
             .with_state(self.state.clone());

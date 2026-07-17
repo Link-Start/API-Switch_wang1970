@@ -413,103 +413,81 @@ pub async fn handle_messages(
     }
 }
 
-fn filter_image_gen_entries(
-    entries: Vec<crate::database::ApiEntry>,
-) -> Vec<crate::database::ApiEntry> {
-    entries
-        .into_iter()
-        .filter(|entry| super::protocol::image_gen::is_image_gen_model(&entry.model))
-        .collect()
-}
-
-fn image_request_has_direct_match(
-    requested_model: &str,
-    entries: &[crate::database::ApiEntry],
-) -> bool {
-    let requested = requested_model.trim();
-    requested.is_empty()
-        || requested.eq_ignore_ascii_case("auto")
-        || entries.iter().any(|entry| {
-            entry.model.eq_ignore_ascii_case(requested)
-                || (!entry.display_name.trim().is_empty()
-                    && entry.display_name.eq_ignore_ascii_case(requested))
-                || entry
-                    .group_name
-                    .as_deref()
-                    .is_some_and(|group| group.eq_ignore_ascii_case(requested))
-        })
-}
-
-/// Handle /v1/images/generations — OpenAI 兼容图像生成端点。
-///
-/// Handler 只负责认证、基础校验和图像能力路由隔离。厂商字段转换必须在
-/// forwarder 中基于每次重试实际命中的 entry.model 执行，不能依赖请求别名。
-pub async fn handle_image_generations(
-    State(state): State<ProxyState>,
+async fn handle_images_endpoint(
+    state: ProxyState,
     request: axum::extract::Request,
+    endpoint: super::image_router::ImageEndpoint,
 ) -> Result<axum::response::Response, ProxyError> {
     let (parts, body) = request.into_parts();
-    let headers = &parts.headers;
+    let headers = parts.headers;
+    let access_key =
+        auth::extract_access_key(&headers, &state)
+            .await
+            .map_err(|error| match error {
+                crate::error::AppError::Validation(_) => ProxyError::Unauthorized,
+                other => ProxyError::from(other),
+            })?;
 
-    let access_key = auth::extract_access_key(headers, &state)
+    // Images 不设置业务体积上限；整个 body 只在当前请求生命周期内持有，
+    // 供同名 entry 重放，且不会被解析后重建。
+    let body = axum::body::to_bytes(body, usize::MAX)
         .await
-        .map_err(|err| match err {
-            crate::error::AppError::Validation(_) => ProxyError::Unauthorized,
-            other => ProxyError::from(other),
-        })?;
+        .map_err(|error| ProxyError::Internal(format!("Failed to read Images body: {error}")))?;
+    let requested_model = super::image_forwarder::extract_model(headers.get("content-type"), &body)
+        .ok_or_else(|| ProxyError::BadRequest("Missing or empty 'model' field".to_string()))?;
 
-    let body_bytes = axum::body::to_bytes(body, 32 * 1024 * 1024)
-        .await
-        .map_err(|e| ProxyError::Internal(format!("Failed to read body: {e}")))?;
-    let body: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|e| ProxyError::BadRequest(format!("Failed to parse JSON: {e}")))?;
-
-    let prompt = body
-        .get("prompt")
-        .and_then(Value::as_str)
-        .filter(|prompt| !prompt.trim().is_empty())
-        .ok_or_else(|| ProxyError::BadRequest("Missing or empty 'prompt' field".to_string()))?;
-    let requested_model = normalize_requested_model(body.get("model").and_then(Value::as_str));
-
-    log::info!(
-        "Image generation request: model={}, prompt_len={}",
-        requested_model,
-        prompt.len(),
-    );
-
-    let all_entries = filter_image_gen_entries(state.db.get_entries_for_routing()?);
-    if !image_request_has_direct_match(&requested_model, &all_entries) {
-        return Err(ProxyError::NoAvailableProvider(requested_model));
-    }
-    let auto_entries = filter_image_gen_entries(state.db.get_enabled_entries_for_auto()?);
-    let resolved = router::resolve(
-        &requested_model,
-        &all_entries,
-        &auto_entries,
-        &state.circuit_breakers,
-    )
-    .await;
+    let entries = state.db.get_enabled_entries_for_auto()?;
+    let breakers = state.circuit_breakers.read().await;
+    let resolved =
+        super::image_router::resolve_images_entries(&requested_model, &entries, &breakers);
+    drop(breakers);
 
     if resolved.is_empty() {
         return Err(ProxyError::NoAvailableProvider(requested_model));
     }
 
-    let middleware: Vec<Arc<dyn super::middleware::ForwarderMiddleware>> = vec![];
-    forwarder::forward_with_retry(
+    super::image_forwarder::forward_images(
         &state,
         &resolved,
-        &body,
-        headers,
+        endpoint,
+        body,
+        &headers,
         &requested_model,
         access_key.as_ref(),
-        false,
-        &middleware,
-        super::middleware::CallerKind::ImageGeneration,
     )
     .await
-    .map_err(Into::into)
 }
 
+pub async fn handle_image_generations(
+    State(state): State<ProxyState>,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ProxyError> {
+    handle_images_endpoint(
+        state,
+        request,
+        super::image_router::ImageEndpoint::Generations,
+    )
+    .await
+}
+
+pub async fn handle_image_edits(
+    State(state): State<ProxyState>,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ProxyError> {
+    handle_images_endpoint(state, request, super::image_router::ImageEndpoint::Edits).await
+}
+
+pub async fn handle_image_variations(
+    State(state): State<ProxyState>,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, ProxyError> {
+    handle_images_endpoint(
+        state,
+        request,
+        super::image_router::ImageEndpoint::Variations,
+    )
+    .await
+}
 /// Handle /v1/models - list ALL models from the pool (including disabled).
 /// disabled only means "skip in AUTO", the model is still usable when requested by name.
 pub async fn handle_list_models(
@@ -924,31 +902,6 @@ mod tests {
     }
 
     #[test]
-    fn image_entries_exclude_chat_models() {
-        let entries = vec![
-            sample_entry("image", "gpt-image-1", "Image", Some("auto")),
-            sample_entry("chat", "gpt-4o", "Chat", Some("auto")),
-        ];
-
-        let filtered = filter_image_gen_entries(entries);
-
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].model, "gpt-image-1");
-    }
-
-    #[test]
-    fn explicit_unknown_image_model_does_not_allow_auto_fallback() {
-        let entries = vec![sample_entry("image", "gpt-image-1", "Image", Some("auto"))];
-
-        assert!(!image_request_has_direct_match(
-            "missing-image-model",
-            &entries
-        ));
-        assert!(image_request_has_direct_match("auto", &entries));
-        assert!(image_request_has_direct_match("Image", &entries));
-    }
-
-    #[test]
     fn openai_model_item_includes_created_and_owned_by() {
         let entry = sample_entry("1", "gpt-4o", "GPT-4o", None);
         let value = openai_model_item(&entry);
@@ -1069,5 +1022,178 @@ impl IntoResponse for ProxyError {
 impl From<crate::error::AppError> for ProxyError {
     fn from(e: crate::error::AppError) -> Self {
         ProxyError::Internal(e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod endpoint_tests {
+    use super::*;
+    use crate::database::{AppSettings, Database};
+    use crate::proxy::circuit_breaker::CircuitBreaker;
+    use axum::body::Body;
+    use axum::extract::State;
+    use axum::http::{HeaderMap, Request, StatusCode};
+    use axum::response::IntoResponse;
+    use axum::routing::post;
+    use axum::Router;
+    use bytes::Bytes;
+    use rusqlite::Connection;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use tokio::sync::{oneshot, RwLock};
+    use tower::ServiceExt;
+
+    #[derive(Clone)]
+    struct CaptureState {
+        requests: Arc<Mutex<Vec<(String, HeaderMap, Bytes)>>>,
+    }
+
+    async fn capture_upstream(
+        State(state): State<CaptureState>,
+        request: Request<Body>,
+    ) -> impl IntoResponse {
+        let path = request.uri().path().to_string();
+        let headers = request.headers().clone();
+        let body = axum::body::to_bytes(request.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        state.requests.lock().unwrap().push((path, headers, body));
+        (
+            StatusCode::CREATED,
+            [
+                ("content-type", "application/octet-stream"),
+                ("x-upstream-id", "images-1"),
+            ],
+            Bytes::from_static(b"UPSTREAM_BINARY"),
+        )
+    }
+
+    async fn start_mock_upstream() -> (
+        String,
+        Arc<Mutex<Vec<(String, HeaderMap, Bytes)>>>,
+        oneshot::Sender<()>,
+    ) {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let app = Router::new()
+            .route("/v1/images/generations", post(capture_upstream))
+            .route("/v1/images/edits", post(capture_upstream))
+            .route("/v1/images/variations", post(capture_upstream))
+            .with_state(CaptureState {
+                requests: requests.clone(),
+            });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .unwrap();
+        });
+        (format!("http://{address}"), requests, shutdown_tx)
+    }
+
+    fn test_state(base_url: &str) -> ProxyState {
+        let db = Database {
+            conn: Mutex::new(Connection::open_in_memory().unwrap()),
+        };
+        db.create_tables().unwrap();
+        let seeded = db.list_channels().unwrap();
+        for channel in seeded {
+            db.delete_channel(&channel.id).unwrap();
+        }
+        let channel = db
+            .create_channel("images", "openai", base_url, "test-key", None, None)
+            .unwrap();
+        db.create_entry(&channel.id, "image-x", "Image X", 0, "", "", "", "", "")
+            .unwrap();
+        ProxyState {
+            db: Arc::new(db),
+            settings: Arc::new(RwLock::new(AppSettings::default())),
+            circuit_breakers: Arc::new(RwLock::new(HashMap::<String, CircuitBreaker>::new())),
+            failure_counts: Arc::new(RwLock::new(HashMap::new())),
+            app_handle: None,
+            http_client: reqwest::Client::new(),
+            response_store: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    fn images_app(state: ProxyState) -> Router {
+        Router::new()
+            .route("/v1/images/generations", post(handle_image_generations))
+            .route("/v1/images/edits", post(handle_image_edits))
+            .route("/v1/images/variations", post(handle_image_variations))
+            .with_state(state)
+    }
+
+    #[tokio::test]
+    async fn images_endpoints_forward_original_json_and_multipart_bodies() {
+        let (base_url, captures, shutdown) = start_mock_upstream().await;
+        let app = images_app(test_state(&base_url));
+        let json_body =
+            Bytes::from_static(br#"{ "prompt" : "cat", "model" : "image-x", "n" : 2 }"#);
+        let json_response = app
+            .clone()
+            .oneshot(
+                Request::post("/v1/images/generations")
+                    .header("content-type", "application/json")
+                    .body(Body::from(json_body.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(json_response.status(), StatusCode::CREATED);
+        assert_eq!(
+            json_response.headers()["content-type"],
+            "application/octet-stream"
+        );
+        assert_eq!(json_response.headers()["x-upstream-id"], "images-1");
+        assert_eq!(
+            axum::body::to_bytes(json_response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+            Bytes::from_static(b"UPSTREAM_BINARY")
+        );
+
+        let boundary = "----api-switch-e2e";
+        let multipart_body = Bytes::from(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nimage-x\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"cat.png\"\r\nContent-Type: image/png\r\n\r\nPNG_BYTES_123\0\x01\r\n--{boundary}--\r\n"
+            )
+            .into_bytes(),
+        );
+        for endpoint in ["edits", "variations"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post(format!("/v1/images/{endpoint}"))
+                        .header(
+                            "content-type",
+                            format!("multipart/form-data; boundary={boundary}"),
+                        )
+                        .body(Body::from(multipart_body.clone()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
+        }
+
+        let captured = captures.lock().unwrap();
+        assert_eq!(captured.len(), 3);
+        assert_eq!(captured[0].0, "/v1/images/generations");
+        assert_eq!(captured[0].2, json_body);
+        assert_eq!(captured[1].0, "/v1/images/edits");
+        assert_eq!(captured[1].2, multipart_body);
+        assert_eq!(captured[2].0, "/v1/images/variations");
+        assert_eq!(captured[2].2, multipart_body);
+        assert!(captured[1].1["content-type"]
+            .to_str()
+            .unwrap()
+            .contains(boundary));
+        drop(captured);
+        let _ = shutdown.send(());
     }
 }

@@ -226,7 +226,7 @@ struct SseDoneState {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum StreamEndReason {
+pub(super) enum StreamEndReason {
     Done,
     UpstreamError,
     Timeout,
@@ -446,49 +446,6 @@ fn sanitize_url_for_log(url: &str) -> String {
     sanitized
 }
 
-/// 为图像生成端点构建上游 URL
-///
-/// 与 `build_chat_url` 类似，但端点路径为 `/v1/images/generations`。
-/// 自定义 API 路径的渠道只替换末尾 endpoint 部分。
-fn build_image_gen_url(base_url: &str) -> String {
-    let base = base_url.trim_end_matches('/');
-    for suffix in [
-        "/v1/chat/completions",
-        "/chat/completions",
-        "/v1/responses",
-        "/responses",
-    ] {
-        if let Some(prefix) = base.strip_suffix(suffix) {
-            return format!("{prefix}/v1/images/generations");
-        }
-    }
-
-    let path = base
-        .split_once("://")
-        .map(|(_, rest)| rest.split_once('/').map(|(_, path)| path))
-        .flatten();
-    if path.is_some() {
-        format!("{base}/images/generations")
-    } else {
-        format!("{base}/v1/images/generations")
-    }
-}
-
-fn prepare_image_gen_request(body: &Value, actual_model: &str) -> Value {
-    let mut prepared = body.clone();
-    if let Some(object) = prepared.as_object_mut() {
-        object.insert("model".to_string(), Value::String(actual_model.to_string()));
-    }
-    let protocol = super::protocol::image_gen::detect_image_gen_protocol(actual_model);
-    super::protocol::image_gen::transform_image_gen_request(&mut prepared, protocol);
-    prepared
-}
-
-fn normalize_image_gen_response(body: &Value, actual_model: &str) -> Value {
-    let protocol = super::protocol::image_gen::detect_image_gen_protocol(actual_model);
-    super::protocol::image_gen::transform_image_gen_response(body, protocol)
-}
-
 fn caller_kind_label(caller_kind: &CallerKind) -> &'static str {
     match caller_kind {
         CallerKind::OpenAiChat => "openai_chat",
@@ -496,7 +453,6 @@ fn caller_kind_label(caller_kind: &CallerKind) -> &'static str {
         CallerKind::GeminiNative => "gemini_native",
         CallerKind::AzureChat => "azure_chat",
         CallerKind::Responses => "responses",
-        CallerKind::ImageGeneration => "image_generation",
     }
 }
 
@@ -1211,44 +1167,32 @@ async fn forward_single(
 
     let adapter = get_adapter(&channel.api_type);
 
-    // 图像生成端点需要不同的上游 URL 路径（/v1/images/generations 而非 /v1/chat/completions）
-    let url = if matches!(caller_kind, CallerKind::ImageGeneration) {
-        build_image_gen_url(&channel.base_url)
-    } else {
-        adapter.build_chat_url(&channel.base_url, &entry.model)
-    };
+    let url = adapter.build_chat_url(&channel.base_url, &entry.model);
 
     // 统一直穿判定（Phase 2: 替换现有实现）
     let passthrough_config = should_passthrough(caller_kind, &channel.api_type, body);
 
-    // 图像生成使用独立协议边界：按本次重试实际命中的 entry.model 准备请求，
-    // 不经过 Chat adapter，也不应用 disable_reasoning 等 Chat 专用业务逻辑。
-    let mut upstream_body = if matches!(caller_kind, CallerKind::ImageGeneration) {
-        prepare_image_gen_request(body, &entry.model)
+    // 设计说明：直穿场景下也应用 disable_reasoning，因为这是用户全局设置，
+    // 不应因协议直穿而绕过。直穿只是避免协议转换损耗，不是跳过业务逻辑。
+    let body_for_transform = if settings.disable_reasoning {
+        let mut modified = body.clone();
+        apply_disable_reasoning(&mut modified);
+        modified
     } else {
-        // 设计说明：直穿场景下也应用 disable_reasoning，因为这是用户全局设置，
-        // 不应因协议直穿而绕过。直穿只是避免协议转换损耗，不是跳过业务逻辑。
-        let body_for_transform = if settings.disable_reasoning {
-            let mut modified = body.clone();
-            apply_disable_reasoning(&mut modified);
-            modified
-        } else {
-            body.clone()
-        };
-
-        if let Some(config) = passthrough_config {
-            let mut restored = restore_raw_request(body, config, &entry.model);
-            if settings.disable_reasoning {
-                apply_disable_reasoning(&mut restored);
-            }
-            restored
-        } else {
-            let mut converted = body_for_transform;
-            adapter.transform_request(&mut converted, &entry.model);
-            converted
-        }
+        body.clone()
     };
 
+    let mut upstream_body = if let Some(config) = passthrough_config {
+        let mut restored = restore_raw_request(body, config, &entry.model);
+        if settings.disable_reasoning {
+            apply_disable_reasoning(&mut restored);
+        }
+        restored
+    } else {
+        let mut converted = body_for_transform;
+        adapter.transform_request(&mut converted, &entry.model);
+        converted
+    };
     // 统一清理所有暂存字段
     clean_all_raw_fields(&mut upstream_body);
 
@@ -1412,9 +1356,7 @@ async fn forward_single(
             ForwardError::new(message, 502, raw_protocol)
         })?;
 
-        if matches!(caller_kind, CallerKind::ImageGeneration) {
-            response_body = normalize_image_gen_response(&response_body, &entry.model);
-        } else if passthrough_config.is_none() {
+        if passthrough_config.is_none() {
             adapter.transform_response(&mut response_body);
 
             // Normalize reasoning fields in response messages (reasoning_content ↔ reasoning_text)
@@ -1437,9 +1379,7 @@ async fn forward_single(
             extract_usage_tokens(&response_body);
 
         // 验证输出有效性（根据入口协议类型）
-        let has_valid_output = if matches!(caller_kind, CallerKind::ImageGeneration) {
-            image_gen_response_has_valid_output(&response_body)
-        } else if let Some(config) = passthrough_config {
+        let has_valid_output = if let Some(config) = passthrough_config {
             match config.caller_kind {
                 CallerKind::Responses => responses_response_has_valid_output(&response_body),
                 CallerKind::ClaudeMessages => claude_response_has_valid_output(&response_body),
@@ -1513,18 +1453,6 @@ fn responses_response_has_valid_output(body: &Value) -> bool {
 ///
 /// OpenAI Images API 响应格式：`{ created, data: [...] }`
 /// 只要 `data` 数组非空，且至少一个元素包含 `url` 或 `b64_json`，就视为有效输出。
-fn image_gen_response_has_valid_output(body: &Value) -> bool {
-    body.get("data")
-        .and_then(Value::as_array)
-        .is_some_and(|data| {
-            !data.is_empty()
-                && data.iter().any(|item| {
-                    item.get("url").and_then(Value::as_str).is_some()
-                        || item.get("b64_json").and_then(Value::as_str).is_some()
-                })
-        })
-}
-
 fn nonstream_response_has_valid_output(body: &Value) -> bool {
     body.get("choices")
         .and_then(Value::as_array)
@@ -2342,8 +2270,16 @@ fn build_streaming_response(
                             } else {
                                 let settings = keyword_settings.read().await.clone();
                                 let status_for_log = if sc > 0 { sc as u16 } else { 0 };
-                                if should_record_keyword_candidate(status_for_log, &log_message, &settings) {
-                                    keyword_log::record_unknown_failure(status_for_log, &log_message).await;
+                                if should_record_keyword_candidate(
+                                    status_for_log,
+                                    &log_message,
+                                    &settings,
+                                ) {
+                                    keyword_log::record_unknown_failure(
+                                        status_for_log,
+                                        &log_message,
+                                    )
+                                    .await;
                                 }
                                 spawn_cool_down_entry(scb, sfc, sdb, db2.clone(), eah, eid);
                             }
@@ -2987,7 +2923,7 @@ fn append_and_parse_sse(
     Some(Bytes::from(output))
 }
 
-fn status_matches_rule(rule: &str, status: u16) -> bool {
+pub(super) fn status_matches_rule(rule: &str, status: u16) -> bool {
     let rule = rule.trim();
     if rule.is_empty() {
         return false;
@@ -3006,13 +2942,16 @@ fn status_matches_rule(rule: &str, status: u16) -> bool {
     rule.parse::<u16>() == Ok(status)
 }
 
-fn should_disable_entry_for_status(disable_codes: &str, status: u16) -> bool {
-    disable_codes
+pub(super) fn status_matches_rules(rules: &str, status: u16) -> bool {
+    rules
         .split(',')
         .any(|rule| status_matches_rule(rule, status))
 }
+pub(super) fn should_disable_entry_for_status(disable_codes: &str, status: u16) -> bool {
+    status_matches_rules(disable_codes, status)
+}
 
-fn effective_disable_keywords(settings: &AppSettings) -> &str {
+pub(super) fn effective_disable_keywords(settings: &AppSettings) -> &str {
     if settings.disable_keywords.trim().is_empty() {
         "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized\ninsufficient_quota\nquota_exceeded_error\ntoken plan limit exhausted\nUpstream rate limit exceeded\ninvalid api key\nUnauthorized - Invalid token"
     } else {
@@ -3020,9 +2959,13 @@ fn effective_disable_keywords(settings: &AppSettings) -> &str {
     }
 }
 
-fn should_record_keyword_candidate(status: u16, message: &str, settings: &AppSettings) -> bool {
-    let disable_by_status = status > 0
-        && should_disable_entry_for_status(&settings.circuit_disable_codes, status);
+pub(super) fn should_record_keyword_candidate(
+    status: u16,
+    message: &str,
+    settings: &AppSettings,
+) -> bool {
+    let disable_by_status =
+        status > 0 && should_disable_entry_for_status(&settings.circuit_disable_codes, status);
     let disable_by_keyword = status > 0
         && should_disable_entry_for_message(effective_disable_keywords(settings), message);
     !disable_by_status && !disable_by_keyword
@@ -3030,7 +2973,7 @@ fn should_record_keyword_candidate(status: u16, message: &str, settings: &AppSet
 
 /// Check if the upstream error message contains any disable keyword.
 /// Keywords are separated by newlines and matched case-insensitively.
-fn should_disable_entry_for_message(disable_keywords: &str, message: &str) -> bool {
+pub(super) fn should_disable_entry_for_message(disable_keywords: &str, message: &str) -> bool {
     if disable_keywords.is_empty() || message.is_empty() {
         return false;
     }
@@ -3042,7 +2985,7 @@ fn should_disable_entry_for_message(disable_keywords: &str, message: &str) -> bo
         .any(|keyword| lower_msg.contains(&keyword.to_lowercase()))
 }
 
-async fn disable_entry(state: &ProxyState, entry: &ApiEntry) {
+pub(super) async fn disable_entry(state: &ProxyState, entry: &ApiEntry) {
     let recovery_secs = state.settings.read().await.circuit_recovery_secs.max(1);
     let cooldown_until = chrono::Utc::now().timestamp() + recovery_secs;
 
@@ -3057,7 +3000,7 @@ async fn disable_entry(state: &ProxyState, entry: &ApiEntry) {
     breakers.remove(&entry.id);
 }
 
-async fn freeze_channel_entries(state: &ProxyState, entry: &ApiEntry) {
+pub(super) async fn freeze_channel_entries(state: &ProxyState, entry: &ApiEntry) {
     // 限定词通常代表账号、额度、密钥或上游通道级故障；只冷冻同渠道 6 小时，不永久禁用用户开关。
     let cooldown_until = chrono::Utc::now().timestamp() + 21600;
     match state
@@ -3093,7 +3036,7 @@ async fn freeze_channel_entries(state: &ProxyState, entry: &ApiEntry) {
     }
 }
 
-async fn record_circuit_success(state: &ProxyState, entry_id: &str) {
+pub(super) async fn record_circuit_success(state: &ProxyState, entry_id: &str) {
     let _ = state.db.set_entry_cooldown(entry_id, None);
     if let Some(h) = &state.app_handle {
         crate::event::emit(h, "entries-changed");
@@ -3112,7 +3055,7 @@ async fn record_circuit_success(state: &ProxyState, entry_id: &str) {
     cb.record_success();
 }
 
-async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
+pub(super) async fn cool_down_entry(state: &ProxyState, entry: &ApiEntry) {
     let settings = state.settings.read().await.clone();
     let threshold = (settings.circuit_failure_threshold as u32).max(1);
     let recovery_secs = settings.circuit_recovery_secs.max(1);
@@ -3341,7 +3284,7 @@ fn enrich_usage_log_in(
     }
 }
 
-fn log_usage(
+pub(super) fn log_usage(
     db: &Database,
     app_handle: &Option<crate::AppEventHandle>,
     access_key: Option<&AccessKey>,
@@ -3469,50 +3412,6 @@ mod tests {
             http_client: reqwest::Client::new(),
             response_store: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         }
-    }
-
-    #[test]
-    fn image_generation_prepares_agnes_request_from_actual_entry_model() {
-        let body = serde_json::json!({
-            "model": "auto",
-            "prompt": "a cat",
-            "response_format": "b64_json"
-        });
-
-        let prepared = prepare_image_gen_request(&body, "agnes-image-2.1-flash");
-
-        assert_eq!(prepared["model"], "agnes-image-2.1-flash");
-        assert_eq!(prepared["return_base64"], true);
-        assert_eq!(prepared["extra_body"]["response_format"], "b64_json");
-        assert!(prepared.get("response_format").is_none());
-    }
-
-    #[test]
-    fn image_generation_normalizes_agnes_response_before_validation() {
-        let upstream = serde_json::json!({
-            "images": [{"base64": "abc123"}]
-        });
-
-        let normalized = normalize_image_gen_response(&upstream, "agnes-image-2.1-flash");
-
-        assert_eq!(normalized["data"][0]["b64_json"], "abc123");
-        assert!(image_gen_response_has_valid_output(&normalized));
-    }
-
-    #[test]
-    fn image_generation_url_handles_roots_versioned_paths_and_full_chat_endpoint() {
-        assert_eq!(
-            build_image_gen_url("https://api.openai.com"),
-            "https://api.openai.com/v1/images/generations"
-        );
-        assert_eq!(
-            build_image_gen_url("https://example.com/api/v1"),
-            "https://example.com/api/v1/images/generations"
-        );
-        assert_eq!(
-            build_image_gen_url("https://example.com/v1/chat/completions"),
-            "https://example.com/v1/images/generations"
-        );
     }
 
     #[test]

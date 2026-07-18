@@ -49,14 +49,14 @@ export function getImageFileFromDrop(event: React.DragEvent): File | null {
   return getFirstImageFile(event.dataTransfer?.files || null);
 }
 
-export async function blobFromResultSource(source: { b64Json?: string; objectUrl?: string; url?: string; mime?: string }): Promise<Blob> {
+export async function blobFromResultSource(source: { b64Json?: string; objectUrl?: string; url?: string; proxiedUrl?: string; mime?: string }): Promise<Blob> {
   if (source.b64Json) {
     const binary = atob(source.b64Json);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
     return new Blob([bytes], { type: source.mime || "image/png" });
   }
-  const url = source.objectUrl || source.url;
+  const url = source.objectUrl || source.proxiedUrl || source.url;
   if (!url) throw new Error("No readable image source");
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Image fetch failed: ${response.status}`);
@@ -65,7 +65,7 @@ export async function blobFromResultSource(source: { b64Json?: string; objectUrl
 
 export type ImageDownloadResult = "downloaded" | "opened-original";
 
-export async function downloadImage(source: { b64Json?: string; objectUrl?: string; url?: string; mime?: string }, filename: string): Promise<ImageDownloadResult> {
+export async function downloadImage(source: { b64Json?: string; objectUrl?: string; url?: string; proxiedUrl?: string; mime?: string }, filename: string): Promise<ImageDownloadResult> {
   try {
     const blob = await blobFromResultSource(source);
     const objectUrl = URL.createObjectURL(blob);

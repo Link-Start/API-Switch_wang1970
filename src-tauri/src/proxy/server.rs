@@ -148,6 +148,7 @@ impl ProxyServer {
                 post(handlers::handle_image_generations),
             )
             .route("/v1/images/edits", post(handlers::handle_image_edits))
+            .route("/v1/images/proxy", get(handlers::handle_image_proxy))
             .route(
                 "/v1/images/variations",
                 post(handlers::handle_image_variations),

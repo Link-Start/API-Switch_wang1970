@@ -16,6 +16,7 @@ export interface ImageResult {
   recordId: string;
   index: number;
   url?: string;
+  proxiedUrl?: string;
   b64Json?: string;
   objectUrl?: string;
   mime?: string;

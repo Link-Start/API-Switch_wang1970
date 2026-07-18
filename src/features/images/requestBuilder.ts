@@ -72,10 +72,10 @@ export async function callImagesEndpoint(proxyBaseUrl: string, payload: ImageReq
   }
   const data = (json as { data?: unknown }).data;
   if (!Array.isArray(data) || data.length === 0) throw new Error("上游未返回可显示的图片");
-  return data.map((item, index) => normalizeImageResult(item, index, contentType));
+  return data.map((item, index) => normalizeImageResult(item, index, contentType, proxyBaseUrl));
 }
 
-function normalizeImageResult(item: unknown, index: number, contentType: string): Omit<ImageResult, "id" | "recordId" | "index"> {
+function normalizeImageResult(item: unknown, index: number, contentType: string, proxyBaseUrl: string): Omit<ImageResult, "id" | "recordId" | "index"> {
   const object = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
   const b64Json = typeof object.b64_json === "string" ? object.b64_json : undefined;
   const url = typeof object.url === "string" ? object.url : undefined;
@@ -86,6 +86,6 @@ function normalizeImageResult(item: unknown, index: number, contentType: string)
     for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
     return { b64Json, objectUrl: URL.createObjectURL(new Blob([bytes], { type: mime })), mime };
   }
-  if (url) return { url };
+  if (url) return { url, proxiedUrl: `${proxyBaseUrl}/v1/images/proxy?url=${encodeURIComponent(url)}` };
   throw new Error(`第 ${index + 1} 张图片缺少 url 或 b64_json`);
 }

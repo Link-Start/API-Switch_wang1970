@@ -12,10 +12,9 @@ interface ImageResultCardProps {
   onRegenerate: (record: ImageRecord) => void;
   onVariation: (record: ImageRecord, result: ImageResult) => void;
   selectedSize: string;
-  selectedCount: number;
 }
 
-export function ImageResultCard({ record, result, onRegenerate, onVariation, selectedSize, selectedCount }: ImageResultCardProps) {
+export function ImageResultCard({ record, result, onRegenerate, onVariation, selectedSize }: ImageResultCardProps) {
   const { t } = useTranslation();
   const [loadError, setLoadError] = useState(false);
   const src = result.objectUrl || result.url;
@@ -51,7 +50,7 @@ export function ImageResultCard({ record, result, onRegenerate, onVariation, sel
           <Download className="h-4 w-4" />
         </Button>
       </div>
-      {record.count > 1 && <span className="text-right text-xs text-muted-foreground">{selectedCount}</span>}
+      {record.count > 1 && <span className="text-right text-xs text-muted-foreground">{result.index + 1}/{record.count}</span>}
     </div>
   );
 }

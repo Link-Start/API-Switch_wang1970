@@ -11,6 +11,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -222,6 +223,64 @@ fn parse_context_limit(entry: &crate::database::ApiEntry) -> i64 {
     8192
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ImagesProxyQuery {
+    url: String,
+}
+
+fn proxied_image_content_type(headers: &reqwest::header::HeaderMap) -> &'static str {
+    let Some(value) = headers.get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok()) else {
+        return "application/octet-stream";
+    };
+    let lower = value.to_ascii_lowercase();
+    if lower.starts_with("image/png") {
+        "image/png"
+    } else if lower.starts_with("image/jpeg") || lower.starts_with("image/jpg") {
+        "image/jpeg"
+    } else if lower.starts_with("image/webp") {
+        "image/webp"
+    } else if lower.starts_with("image/gif") {
+        "image/gif"
+    } else {
+        "application/octet-stream"
+    }
+}
+
+pub async fn handle_image_proxy(
+    State(state): State<ProxyState>,
+    Query(query): Query<ImagesProxyQuery>,
+) -> Result<axum::response::Response, ProxyError> {
+    let parsed = url::Url::parse(&query.url)
+        .map_err(|_| ProxyError::BadRequest("Invalid image URL".to_string()))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(ProxyError::BadRequest("Unsupported image URL scheme".to_string()));
+    }
+
+    let response = state
+        .http_client
+        .get(parsed)
+        .send()
+        .await
+        .map_err(|error| ProxyError::Internal(format!("Image proxy fetch failed: {error}")))?;
+    let status = response.status();
+    let content_type = proxied_image_content_type(response.headers());
+    let body = response
+        .bytes()
+        .await
+        .map_err(|error| ProxyError::Internal(format!("Image proxy read failed: {error}")))?;
+
+    let mut builder = axum::response::Response::builder()
+        .status(status)
+        .header("content-type", content_type)
+        .header("cache-control", "no-store")
+        .header("access-control-allow-origin", "*");
+    if status.is_success() {
+        builder = builder.header("content-disposition", "attachment");
+    }
+    builder
+        .body(axum::body::Body::from(body))
+        .map_err(|error| ProxyError::Internal(format!("Failed to build image proxy response: {error}")))
+}
 /// Health check endpoint
 pub async fn health_check() -> (StatusCode, Json<Value>) {
     (
@@ -1034,7 +1093,7 @@ mod endpoint_tests {
     use axum::extract::State;
     use axum::http::{HeaderMap, Request, StatusCode};
     use axum::response::IntoResponse;
-    use axum::routing::post;
+    use axum::routing::{get, post};
     use axum::Router;
     use bytes::Bytes;
     use rusqlite::Connection;
@@ -1078,6 +1137,10 @@ mod endpoint_tests {
             .route("/v1/images/generations", post(capture_upstream))
             .route("/v1/images/edits", post(capture_upstream))
             .route("/v1/images/variations", post(capture_upstream))
+            .route(
+                "/remote/cat.png",
+                get(|| async { ([ ("content-type", "image/png") ], Bytes::from_static(b"PNG_BYTES")) }),
+            )
             .with_state(CaptureState {
                 requests: requests.clone(),
             });
@@ -1125,9 +1188,33 @@ mod endpoint_tests {
             .route("/v1/images/generations", post(handle_image_generations))
             .route("/v1/images/edits", post(handle_image_edits))
             .route("/v1/images/variations", post(handle_image_variations))
+            .route("/v1/images/proxy", get(handle_image_proxy))
             .with_state(state)
     }
 
+
+    #[tokio::test]
+    async fn image_proxy_fetches_remote_image() {
+        let (base_url, _captures, shutdown) = start_mock_upstream().await;
+        let app = images_app(test_state(&base_url));
+        let remote = url::form_urlencoded::byte_serialize(format!("{base_url}/remote/cat.png").as_bytes()).collect::<String>();
+        let response = app
+            .oneshot(
+                Request::get(format!("/v1/images/proxy?url={remote}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "image/png");
+        assert_eq!(response.headers()["access-control-allow-origin"], "*");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(body, Bytes::from_static(b"PNG_BYTES"));
+        let _ = shutdown.send(());
+    }
     #[tokio::test]
     async fn images_endpoints_forward_original_json_and_multipart_bodies() {
         let (base_url, captures, shutdown) = start_mock_upstream().await;

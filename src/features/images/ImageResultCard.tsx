@@ -9,10 +9,15 @@ interface ImageResultCardProps {
   result: ImageResult;
   onRegenerate: (record: ImageRecord) => void;
   onVariation: (record: ImageRecord, result: ImageResult) => void;
-  selectedSize: string;
 }
 
-export function ImageResultCard({ record, result, onRegenerate, onVariation, selectedSize }: ImageResultCardProps) {
+function aspectRatioForSize(size: string) {
+  if (size === "1536x1024") return "3 / 2";
+  if (size === "1024x1536") return "2 / 3";
+  return "1 / 1";
+}
+
+export function ImageResultCard({ record, result, onRegenerate, onVariation }: ImageResultCardProps) {
   const { t } = useTranslation();
   const [loadError, setLoadError] = useState(false);
   const src = result.objectUrl || result.url;
@@ -20,7 +25,7 @@ export function ImageResultCard({ record, result, onRegenerate, onVariation, sel
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="overflow-hidden rounded-xl border bg-muted" style={{ aspectRatio: selectedSize === "1024x1024" ? "1 / 1" : selectedSize === "1536x1024" ? "3 / 2" : "2 / 3" }}>
+      <div className="overflow-hidden rounded-xl border bg-muted" style={{ aspectRatio: aspectRatioForSize(record.size) }}>
         {usable ? (
           <img src={src} alt={record.prompt} className="h-full w-full object-cover" onError={() => setLoadError(true)} />
         ) : (

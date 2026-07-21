@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { ImageComposerState, ImageCount, ImageRecord, ImageReference, ImageResult, ImageSize, ImageStudioSnapshot } from "./types";
-import { revokeImageReference } from "./imageInput";
+import { cloneImageReference, revokeImageReference } from "./imageInput";
 
 const initialComposer: ImageComposerState = {
   prompt: "",
@@ -74,7 +74,7 @@ export function restoreComposerFromRecord(record: ImageRecord) {
       selectedModel: record.model,
       selectedSize: record.size,
       selectedCount: record.count,
-      referenceImage: record.referenceImage,
+      referenceImage: cloneImageReference(record.referenceImage),
     },
   }));
 }

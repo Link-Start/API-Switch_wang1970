@@ -4,8 +4,6 @@ import { ImageResultCard } from "./ImageResultCard";
 
 interface ImageConversationProps {
   records: ImageRecord[];
-  selectedSize: string;
-  selectedCount: number;
   onRegenerate: (record: ImageRecord) => void;
   onVariation: (record: ImageRecord, result: ImageResult) => void;
 }
@@ -16,7 +14,7 @@ function StatusPill({ status }: { status: ImageRecord["status"] }) {
   return <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{label}</span>;
 }
 
-export function ImageConversation({ records, selectedSize, onRegenerate, onVariation }: ImageConversationProps) {
+export function ImageConversation({ records, onRegenerate, onVariation }: ImageConversationProps) {
   const { t } = useTranslation();
   if (records.length === 0) {
     return <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">{t("imageStudio.empty")}</div>;
@@ -37,12 +35,15 @@ export function ImageConversation({ records, selectedSize, onRegenerate, onVaria
           {record.errorSummary && <div className="mb-2 rounded-lg bg-destructive/10 p-2 text-xs text-destructive">{record.errorSummary}</div>}
           <div className="grid grid-cols-2 gap-3">
             {record.resultImages.map((result) => (
-              <ImageResultCard key={result.id} record={record} result={result} onRegenerate={onRegenerate} onVariation={onVariation} selectedSize={selectedSize} />
+              <ImageResultCard key={result.id} record={record} result={result} onRegenerate={onRegenerate} onVariation={onVariation} />
             ))}
             {record.status === "pending" &&
-              Array.from({ length: record.count }).map((_, index) => (
-                <div key={`pending-${record.id}-${index}`} className="overflow-hidden rounded-xl border bg-muted" style={{ aspectRatio: selectedSize === "1024x1024" ? "1 / 1" : selectedSize === "1536x1024" ? "3 / 2" : "2 / 3" }} />
-              ))}
+              Array.from({ length: record.count }).map((_, index) => {
+                const aspect = record.size === "1536x1024" ? "3 / 2" : record.size === "1024x1536" ? "2 / 3" : "1 / 1";
+                return (
+                  <div key={`pending-${record.id}-${index}`} className="overflow-hidden rounded-xl border bg-muted" style={{ aspectRatio: aspect }} />
+                );
+              })}
           </div>
         </div>
       ))}

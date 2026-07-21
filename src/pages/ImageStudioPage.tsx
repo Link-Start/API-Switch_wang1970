@@ -4,26 +4,43 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ImageComposer } from "@/features/images/ImageComposer";
 import { ImageConversation } from "@/features/images/ImageConversation";
-import { blobFromResultSource, imageReferenceFromFile } from "@/features/images/imageInput";
+import { blobFromResultSource, cloneImageReference, imageReferenceFromFile } from "@/features/images/imageInput";
+import { getCatalogModel } from "@/lib/modelsCatalog";
 import { buildImageRequest, buildProxyBaseUrl, callImagesEndpoint } from "@/features/images/requestBuilder";
 import { addRecord, makeRecord, makeResult, restoreComposerFromRecord, setSelectedModel, setSubmitting, updateRecord, useImageStudioStore } from "@/features/images/imageStore";
 import type { ImageEndpoint, ImageRecord, ImageResult } from "@/features/images/types";
 import { useApiAdapter } from "@/lib/useApiAdapter";
 
-function isImageEntry(text: string) {
-  const lower = text.toLowerCase();
-  return lower.includes("生图") || lower.includes("image gen") || lower.includes("image generation");
+type ImageEntryLike = {
+  model: string;
+  model_meta_zh?: string | null;
+  model_meta_en?: string | null;
+  display_name?: string;
+};
+
+// 生图模型判定：三路并集，任一命中即认为可生图
+// 1) 模型名称含 "image"（如 gpt-image-1）
+// 2) 目录结构化标签：models.json 的 modalities.output 含 "image"
+// 3) 英文描述/标签（model_meta_en，目录 models.json 的原始规范标签；中文为翻译派生，不扫）
+function isImageModel(entry: ImageEntryLike): boolean {
+  const model = entry.model.trim().toLowerCase();
+  if (!model) return false;
+  if (model.includes("image")) return true;
+  if (getCatalogModel(entry.model)?.modalities?.output?.includes("image")) return true;
+  // ③ 以英文描述/标签为标准信号（CH/EN 两套中 EN 是规范标签，与目录 canonical 对齐；
+  //    中文"生图"是翻译派生，不作独立判定词，避免中英文翻译差异导致的漏判/误判）
+  const en = (entry.model_meta_en || "").toLowerCase();
+  return /image gen|image generation|text[- ]?to[- ]?image|imagen/.test(en);
 }
 
-function entryModelsImageTag(entries: { enabled: boolean; channel_id: string; model: string; model_meta_zh?: string | null; model_meta_en?: string | null; display_name?: string }[], enabledChannelIds: Set<string>) {
+function entryModelsImageTag(entries: (ImageEntryLike & { enabled: boolean; channel_id: string })[], enabledChannelIds: Set<string>) {
   const seen = new Set<string>();
   const models: string[] = [];
   for (const entry of entries) {
     if (!entry.enabled || !enabledChannelIds.has(entry.channel_id)) continue;
-    const haystack = `${entry.model} ${entry.display_name || ""} ${entry.model_meta_zh || ""} ${entry.model_meta_en || ""}`;
-    if (!isImageEntry(haystack)) continue;
     const model = entry.model.trim();
     if (!model || seen.has(model)) continue;
+    if (!isImageModel(entry)) continue;
     seen.add(model);
     models.push(model);
   }
@@ -91,7 +108,7 @@ export function ImageStudioPage() {
       prompt: composer.prompt,
       size: composer.selectedSize,
       count: composer.selectedCount,
-      referenceImage: composer.referenceImage,
+      referenceImage: cloneImageReference(composer.referenceImage),
     });
     addRecord(record);
     void submitRecord(record, endpoint, composer.referenceImage);
@@ -106,7 +123,7 @@ export function ImageStudioPage() {
       prompt: record.prompt,
       size: record.size,
       count: record.count,
-      referenceImage: record.referenceImage,
+      referenceImage: cloneImageReference(record.referenceImage),
       sourceRecordId: record.id,
     });
     addRecord(next);
@@ -145,8 +162,6 @@ export function ImageStudioPage() {
       <div className="flex-1 overflow-auto">
         <ImageConversation
           records={records}
-          selectedSize={composer.selectedSize}
-          selectedCount={composer.selectedCount}
           onRegenerate={handleRegenerate}
           onVariation={handleVariation}
         />

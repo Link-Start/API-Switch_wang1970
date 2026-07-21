@@ -4,6 +4,13 @@ export function revokeImageReference(reference?: ImageReference) {
   if (reference?.objectUrl) URL.revokeObjectURL(reference.objectUrl);
 }
 
+// Create an independent Object URL so a record owns its own display resource
+// and composer reference replacement/removal cannot revoke a historical record's image.
+export function cloneImageReference(reference?: ImageReference): ImageReference | undefined {
+  if (!reference) return undefined;
+  return { ...reference, objectUrl: URL.createObjectURL(reference.blob) };
+}
+
 function extensionForMime(type: string) {
   if (type === "image/jpeg") return ".jpg";
   if (type === "image/png") return ".png";
@@ -61,27 +68,4 @@ export async function blobFromResultSource(source: { b64Json?: string; objectUrl
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Image fetch failed: ${response.status}`);
   return response.blob();
-}
-
-export type ImageDownloadResult = "downloaded" | "opened-original";
-
-export async function downloadImage(source: { b64Json?: string; objectUrl?: string; url?: string; proxiedUrl?: string; mime?: string }, filename: string): Promise<ImageDownloadResult> {
-  try {
-    const blob = await blobFromResultSource(source);
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = objectUrl;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(objectUrl);
-    return "downloaded";
-  } catch {
-    if (source.url) {
-      const opened = window.open(source.url, "_blank", "noopener,noreferrer");
-      if (opened) return "opened-original";
-    }
-    throw new Error("download_failed");
-  }
 }

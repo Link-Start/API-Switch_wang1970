@@ -2953,7 +2953,7 @@ pub(super) fn should_disable_entry_for_status(disable_codes: &str, status: u16) 
 
 pub(super) fn effective_disable_keywords(settings: &AppSettings) -> &str {
     if settings.disable_keywords.trim().is_empty() {
-        "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized\ninsufficient_quota\nquota_exceeded_error\ntoken plan limit exhausted\nUpstream rate limit exceeded\ninvalid api key\nUnauthorized - Invalid token"
+        "Your credit balance is too low\nThis organization has been disabled.\nYou exceeded your current quota\nPermission denied\nThe security token included in the request is invalid\nOperation not allowed\nYour account is not authorized\ninsufficient_quota\nquota_exceeded_error\ntoken plan limit exhausted\nUpstream rate limit exceeded\ninvalid api key\nUnauthorized - Invalid token\nmodel_not_found\nservice temporarily unavailable\naccess_denied"
     } else {
         &settings.disable_keywords
     }
